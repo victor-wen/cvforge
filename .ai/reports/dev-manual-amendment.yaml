@@ -1,0 +1,213 @@
+schema_version: 1
+change_id: dev-manual-amendment
+phase: AMENDMENT
+amendment: developer manual (docs/development.md) and docs/README.md link
+recorded_at: 2026-09-15
+author: developer
+baseline:
+  path: .ai/project-contract.yaml
+  contract_version: 1.0.0
+  status: APPROVED
+
+scope:
+  files_written:
+    - path: docs/development.md
+      state: new
+      purpose: >-
+        Contributor/integrator manual: module map and dependency direction, repository
+        layout, prerequisites, every preset and quality gate, test suites and ownership
+        policy, algorithm/backend extension guides, config/recipe strictness, error-code
+        and warning conventions, diagnostics/artifact behaviour, packaging/CI, guardrails,
+        troubleshooting.
+    - path: docs/README.md
+      state: updated
+      purpose: Added the development.md row to the documentation table (line 13).
+  untouched:
+    - src/**, include/**, tests/**, CMakeLists.txt, CMakePresets.json, cmake/**, .github/**
+  pre_existing_dirty_state:
+    - .ai/workflow-state.yaml was already modified before this session and was not touched.
+
+preset_evidence:
+  commands:
+    - command: cmake --list-presets
+      exit_code: 0
+      summary: 3 configure presets (wsl-gcc-debug, wsl-gcc-asan, wsl-clang-analysis)
+    - command: cmake --list-presets=build
+      exit_code: 0
+      summary: 16 build presets (wsl and windows families)
+    - command: cmake --list-presets=test
+      exit_code: 0
+      summary: 4 test presets (wsl-gcc-debug, wsl-gcc-asan, windows-msvc-release, windows-msvc-tests)
+    - command: cmake --list-presets=workflow
+      exit_code: 0
+      summary: 3 workflow presets (wsl-quality, windows-ci, windows-tests-quality)
+  citation_audit:
+    method: >-
+      Extracted every "--preset <name>" occurrence from docs/development.md and compared
+      with the union of the four live preset lists (comm).
+    result: >-
+      0 cited-but-nonexistent presets; all 19 unique preset names are cited with an
+      explicit command. Exit code 0.
+
+path_evidence:
+  command: shell existence loop over every file/directory cited in the manual
+  result: 43/43 present, 0 missing (core/camera/recipes/inspection/algorithms/diagnostics/
+    artifacts/runtime/c_api sources, cmake helpers, tests suites, fixtures, config
+    examples, .ai/test-ownership.yaml, .github/workflows/windows.yml)
+  markdown_relative_links: docs/usage.md, docs/build.md, docs/packaging.md all resolve from docs/
+
+test_subset_evidence:
+  commands:
+    - command: ctest --test-dir build/wsl-gcc-debug -N
+      exit_code: 0
+      summary: 263 registered tests listed
+    - command: ctest --preset wsl-gcc-debug -R "cvf\.abi\." --output-on-failure
+      exit_code: 0
+      summary: 4/4 ABI tests passed; the documented subset example works
+    - command: ctest --preset wsl-gcc-debug -N -R "CVF-006"
+      exit_code: 0
+      summary: 19 matching tests; documented subset example matches
+    - command: ctest --preset wsl-gcc-debug -N -R "example\.threshold"
+      exit_code: 0
+      summary: 7 matching tests; documented subset example matches
+
+environment_evidence:
+  - command: gcc --version
+    summary: gcc (Ubuntu 13.3.0) 13.3.0
+  - command: cmake --version
+    summary: cmake version 3.28.3
+  - command: ninja --version
+    summary: 1.11.1
+  - command: clang-format --version
+    summary: Ubuntu clang-format version 18.1.3
+  - command: clang-tidy --version
+    summary: Ubuntu LLVM version 18.1.3
+  - command: git -C "$HOME/vcpkg" rev-parse HEAD
+    exit_code: 0
+    summary: a1cae005c39be7b18ba319fced856b68d7276271 == vcpkg.json builtin-baseline
+      and vcpkg-configuration.json default-registry.baseline (manual documents this check)
+  - command: sha256sum tests/abi/test_c11_surface.c
+    summary: >-
+      466ad1c059bc2dfa7efea77867de6e2f321c0ecee1b72736ba35df546c46aa7f matches the
+      .ai/test-ownership.yaml record; the manual's pinned-file check example is valid
+  - command: git log --oneline -3
+    summary: >-
+      Confirms the MSVC-diagnostic history cited in troubleshooting: commit 78f8542
+      (C2397/C4310/C4996), commit c8e0155 (C3668 override on COM destructor).
+
+content_verification_notes:
+  - Every command cited in the manual was executed or observed in this session; no invented
+    options or scripts.
+  - Test-owner files under tests/abi, tests/camera, tests/unit/cvf00*, tests/fixtures/runtime,
+    tests/package, and tests/hardware were read only; none were modified.
+  - docs/ is copied wholesale into the package by cmake/CvfPackage.cmake.in, so
+    development.md will be staged automatically by future package builds; no package or
+    CMake file was changed.
+  - Two build-preset spellings of static analysis are documented (wsl-clang-analysis
+    --target static-analysis and the dedicated wsl-clang-analysis-static-analysis), matching
+    cmake/CvfAnalysis.cmake and CMakePresets.json.
+  - Manual is in English, Markdown with fenced code blocks, no emojis.
+
+hidden_process_note: >-
+  This is a documentation-only change; no production behavior, tests, CMake, or CI were
+  altered. Verification was performed against the existing build tree and live preset
+  lists; the full test suite was not re-run because no executable artifact changed.
+
+review_response:
+  source: >-
+    Independent review of docs/development.md returned REQUEST_CHANGES; the two
+    blocking findings below were fixed in this round.
+  fixes:
+    - id: F1
+      severity: major
+      finding: >-
+        The "Running a subset" direct-binary example selected no tests: the Catch2
+        pattern "example.threshold*" matches no cvf003_tests case (all are named
+        "CVF-003 ..."), and the example.threshold cases live in
+        tests/unit/test_inspection_contract.cpp on the cvf_unit_tests target.
+      edit: >-
+        Replaced the single broken example with two verified commands
+        (build/wsl-gcc-debug/cvf_unit_tests "example.threshold*" and
+        build/wsl-gcc-debug/cvf003_tests "CVF-003*") and documented which target
+        owns which case names.
+      evidence:
+        - command: build/wsl-gcc-debug/cvf003_tests "example.threshold*"
+          exit_code: 2
+          observed: >-
+            No test cases matched, "No tests ran"; pre-fix reproduction of the
+            reported defect.
+        - command: build/wsl-gcc-debug/cvf_unit_tests "example.threshold*"
+          exit_code: 0
+          observed: All tests passed (32 assertions in 5 test cases).
+        - command: build/wsl-gcc-debug/cvf003_tests "CVF-003*"
+          exit_code: 0
+          observed: All tests passed (295 assertions in 37 test cases).
+    - id: F2
+      severity: minor
+      finding: >-
+        Sections 11 and 13 claimed the package-symbols target exists on portable
+        hosts and refuses with a designed non-zero exit. cmake/CvfPackage.cmake
+        creates refusal targets only for package and package-verify on non-Windows
+        and returns before package-symbols is defined.
+      edit: >-
+        Section 11 now states that package and package-verify are refusal targets
+        while package-symbols is not defined on portable hosts; section 13 splits
+        the old row into two rows matching the real behaviour.
+      evidence:
+        - command: cmake --build build/wsl-gcc-debug --target package
+          exit_code: 1
+          observed: >-
+            Designed refusal: "package is Windows-only - run the
+            windows-msvc-release preset on windows-2022 CI" followed by cmake -E false.
+        - command: cmake --build build/wsl-gcc-debug --target package-verify
+          exit_code: 1
+          observed: >-
+            Designed refusal: "package-verify is Windows-only - run the
+            windows-msvc-release preset on windows-2022 CI" followed by cmake -E false.
+        - command: cmake --build build/wsl-gcc-debug --target package-symbols
+          exit_code: 1
+          observed: >-
+            "ninja: error: unknown target 'package-symbols'"; the target is not
+            defined in the portable build tree.
+  full_command_recheck:
+    description: >-
+      Every other filter/command example in the manual was re-run or re-audited
+      after the edits.
+    evidence:
+      - command: ctest --preset wsl-gcc-debug -N
+        exit_code: 0
+        observed: 263 registered tests.
+      - command: ctest --preset wsl-gcc-debug -R "cvf\.abi\." --output-on-failure
+        exit_code: 0
+        observed: 100% tests passed, 0 failed out of 4.
+      - command: ctest --preset wsl-gcc-debug -R "CVF-006" --output-on-failure
+        exit_code: 0
+        observed: 100% tests passed, 0 failed out of 19.
+      - command: ctest --preset wsl-gcc-debug -R "example\.threshold" --output-on-failure
+        exit_code: 0
+        observed: 100% tests passed, 0 failed out of 7.
+      - command: cmake --build --preset wsl-gcc-debug-format-check
+        exit_code: 0
+        observed: format-check passed, 83 files conform to .clang-format.
+      - command: cmake --build --preset wsl-gcc-debug-abi-check
+        exit_code: 0
+        observed: abi-check passed, exactly 5 exports.
+      - command: cmake --build --preset wsl-clang-analysis --target static-analysis --parallel
+        exit_code: 0
+        observed: static-analysis passed, 21 files clean under .clang-tidy.
+      - command: preset citation audit (comm of doc --preset names against the four live lists)
+        exit_code: 0
+        observed: >-
+          0 cited-but-nonexistent presets; all 19 unique preset names appear with
+          an explicit command.
+      - command: grep -c '^```' docs/development.md
+        observed: 18 (9 balanced fenced code blocks).
+      - command: grep for the removed broken example
+        exit_code: 1
+        observed: no match; the old cvf003_tests "example.threshold*" example is gone.
+  additional_findings: >-
+    None beyond F1/F2; the other ctest -R filter examples and gate commands were
+    correct as written.
+  files_changed_this_round:
+    - docs/development.md
+    - .ai/reports/dev-manual-amendment.yaml

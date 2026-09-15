@@ -10,6 +10,7 @@ image persistence.
 | [usage.md](usage.md) | C API lifecycle, configuration and recipe schema summary, example host |
 | [build.md](build.md) | Prerequisites, presets, WSL vs Windows, test backends |
 | [packaging.md](packaging.md) | Package layout, verification, CI release flow, symbols |
+| [development.md](development.md) | Contributor manual: module map, gates, test policy, extension guides, error codes, guardrails |
 
 The public contract is `include/cvforwin/cvf_api.h`. Examples live under
 `examples/c_host/` (template host) and `config/examples/` (deployment template

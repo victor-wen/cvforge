@@ -1,0 +1,137 @@
+change: dev-manual
+change_id: dev-manual
+reviewed_at: 2026-09-15
+verdict: APPROVE
+blocking_count: 0
+reviewed_artifacts:
+  - docs/development.md (amended developer manual, 601 lines)
+  - docs/README.md (index row)
+  - docs/usage.md, docs/build.md, docs/packaging.md (cross-referenced)
+  - .ai/reports/dev-manual-amendment.yaml (incl. review_response)
+  - CMakePresets.json, CMakeLists.txt
+  - cmake/CvfOptions.cmake, cmake/CvfFormat.cmake, cmake/CvfAbiCheck.cmake, cmake/CvfAnalysis.cmake,
+    cmake/CvfPackage.cmake, cmake/CvfPackage.cmake.in, cmake/CvfPackageVerify.cmake.in
+  - .github/workflows/windows.yml
+  - src/inspection/algorithm.h, src/inspection/registry.h, src/inspection/registry.cpp
+  - src/algorithms/compiled_algorithms.h/.cpp, src/algorithms/example_threshold.cpp
+  - src/camera/camera_backend.h, src/camera/camera_backend.cpp, src/camera/test_backends/test_backend_support.h
+  - src/core/error.h, src/core/error.cpp, src/core/warnings.h
+  - src/runtime/context.cpp, src/diagnostics/diagnostics.cpp, src/artifacts/capture_store.cpp
+  - include/cvforwin/cvf_api.h, src/c_api/cvforwin.def
+  - tests/** (names/registration), .ai/test-ownership.yaml, .ai/project-contract.yaml
+summary: >-
+  Re-review of the amended developer manual after the REQUEST_CHANGES round.
+  Both blocking findings are fixed and verified. F1: the broken
+  `cvf003_tests "example.threshold*"` example is gone; the manual now documents
+  two commands whose targets actually own the named cases
+  (`build/wsl-gcc-debug/cvf_unit_tests "example.threshold*"` for the five
+  "example.threshold ..." cases in tests/unit/test_inspection_contract.cpp, and
+  `build/wsl-gcc-debug/cvf003_tests "CVF-003*"` for the 37 "CVF-003 ..." cases),
+  with an explicit sentence explaining where each set lives. Static verification
+  against CMakeLists.txt and the test sources confirms both selections, and the
+  recorded runs (exit 0, 5 cases / 32 assertions; exit 0, 37 cases / 295
+  assertions; pre-fix repro exit 2 "No test cases matched") are internally
+  consistent and match the earlier independent CVF-003 verify record. F2:
+  section 11 now separates the portable refusal targets (`package`,
+  `package-verify`) from `package-symbols`, which is documented as Windows-only
+  and undefined on portable hosts, and the old troubleshooting row was split into
+  two accurate rows; this matches cmake/CvfPackage.cmake (non-Windows branch
+  creates only the two refusal targets and returns before package-symbols) and
+  docs/packaging.md. No new inaccuracies were introduced in the edited regions
+  (line count 588 -> 601, consistent with the insertions); the rest of the
+  manual, already verified against contract 1.0.0, the presets, the source
+  headers, the error/warning model, the CMake package scripts, and the CI
+  workflow, is unchanged. The two optional non-blocking notes (F3 input_json
+  validation wording, F4 "default deployment template" parenthetical) remain
+  editorially open and do not block approval.
+resolutions:
+  - id: F1
+    status: resolved
+    verified: >-
+      docs/development.md lines 305-316. The replacement commands match the
+      targets that own those names: tests/unit/test_inspection_contract.cpp
+      (5 TEST_CASEs named "example.threshold ...") is registered on cvf_unit_tests
+      (CMakeLists.txt lines 564-575); cvf003_tests is built from the three
+      tests/unit/cvf003_*.cpp files whose 37 TEST_CASEs are all named
+      "CVF-003 ..." (CMakeLists.txt lines 643-647). The documented pre-fix
+      failure mode (no test spec match -> non-zero exit) matches Catch2
+      semantics, and the 37-case/295-assertion count matches the recorded
+      independent CVF-003 verification.
+  - id: F2
+    status: resolved
+    verified: >-
+      docs/development.md lines 517-522 and 597-598; cmake/CvfPackage.cmake
+      lines 37-41 (refusal targets package and package-verify, then return
+      before package-symbols is defined) and line 111 (WIN32-only
+      add_custom_target(package-symbols ...)); docs/packaging.md lines 4-6.
+      The recorded probes (package/package-verify exit 1 with the designed
+      refusal message; package-symbols exit 1 "unknown target") are consistent
+      with the CMake definitions.
+blocking_findings: []
+non_blocking_findings:
+  - id: F3
+    severity: low
+    area: extension guide / accuracy of validation guidance
+    status: open (editorial, optional)
+    finding: >-
+      Step 2 places "reject unknown input_json keys with algorithm_input_invalid"
+      under the instruction to validate strictly in validate_parameters, but
+      validate_parameters receives only the recipe parameters; request input_json
+      is reachable only in inspect(). Read literally, the step asks for something
+      impossible in validate_parameters. Not addressed in this round, as agreed
+      in the review response.
+    evidence: >-
+      docs/development.md lines 334-337; src/inspection/algorithm.h lines 29-34
+      (AlgorithmRequest carries input_json) and line 51 (validate_parameters
+      takes only parameters); src/algorithms/example_threshold.cpp lines 77-100
+      (input_json keys are rejected inside inspect() via parse_invert).
+    required_action: >-
+      Optional clarification at a later edit: state that input_json keys are
+      validated in inspect() (as the example algorithm does) and that
+      validate_parameters covers recipe parameters only.
+  - id: F4
+    severity: low
+    area: diagnostics and artifact behaviour / example accuracy
+    status: open (editorial, optional)
+    finding: >-
+      "fail_or_error ... (the default deployment template uses it)" overstates
+      the shipped templates: config/examples/ ships example.pass.json with
+      save_policy "always"; only example.strict.json uses "fail_or_error", and
+      the C host example recipe also uses "always". Not addressed in this round.
+    evidence: >-
+      docs/development.md line 505; config/examples/recipes/example.pass.json
+      line 13; config/examples/recipes/example.strict.json line 17;
+      examples/c_host/config/recipes/example.pass.json line 13; docs/usage.md
+      line 71 documents the default behaviour as save on FAIL or technical error.
+    required_action: >-
+      Optional rewording at a later edit (e.g. "the strict template recipe uses
+      it" or "the documented default behaviour is save on FAIL or technical
+      error") so the sentence cannot be read as claiming the packaged templates
+      default to fail_or_error.
+notes: >-
+  Previously verified and unchanged in this round: the module
+  map/dependency direction (public_c_api -> runtime_orchestrator -> modules ->
+  core_model) matches the contract and the real targets and paths, including the
+  WIN32 and test-backends build gating; all 19 cited preset names across the
+  configure/build/test/workflow families exist with the documented spelling and
+  the build/test command lines match CMakePresets.json; every referenced file path
+  exists and the Markdown links resolve; the algorithm/backend extension guides
+  match IInspectionAlgorithm, AlgorithmRegistry/dispatch, ICameraBackend,
+  resolve_identity, capture_with_one_retry, and build_backend(); the
+  error-code ranges, individual status mappings, and warning bits match
+  src/core/error.h, src/core/error.cpp, and src/core/warnings.h; the CI/package
+  statements match .github/workflows/windows.yml and cmake/CvfPackage*.cmake
+  (two windows-2022 jobs, two uploaded artifacts, job-level
+  VCPKG_DEFAULT_BINARY_CACHE plus one hashed actions/cache@v4 step per job,
+  uvc-only release package, test-enabled variant consumed only by the
+  clean-consumer kit, PDB only in the symbols ZIP); the troubleshooting
+  Microsoft diagnostics (C2397, C4310, C4996/fopen, C3668 override) remain
+  evidence-backed; and no contract-forbidden capability (Daheng, multi-camera,
+  multiple live contexts, runtime plug-ins) is claimed. Scope remains docs-only
+  (docs/development.md plus the docs/README.md row plus the amendment report);
+  no test-owner file, hash, CMake, CI, or production source was touched by this
+  change, so there is no independence concern. The re-verified manual is
+  approved; no re-run of the test suite is required for a documentation-only
+  amendment, and the developer's command-level recheck (263 registered tests;
+  ctest filters 4/4, 19/19, 7/7; format-check, abi-check, static-analysis all
+  exit 0) is consistent with the previously recorded quality evidence.

@@ -68,7 +68,20 @@ ci:
     RelWithDebInfo link with /debug; Release links with /INCREMENTAL:NO only, while
     CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=ProgramDatabase affects the compiler (/Zi) only.
     Fix: link /debug for Release on the shared target + pin PDB_OUTPUT_DIRECTORY so the genex
-    and the linker agree; add a clear missing-PDB error. vcpkg cache steps ran successfully.attempts:
+    and the linker agree; add a clear missing-PDB error. vcpkg cache steps ran successfully.
+  run_5: >-
+    34968127270 SUCCESS (windows-ci, 3m16s - vcpkg cache effective): both jobs green; package
+    + symbols uploaded. Controller artifact verification (downloaded from the run): package ZIP
+    cvforwin-1.0.0.zip contains bin/cvforwin.dll (PE32+ x64), lib/cvforwin.lib,
+    include/cvforwin/cvf_api.h, config/examples, docs, LICENSES; DLL export table has exactly
+    the five cvf_* symbols and imports only system DLLs (MFPlat/MF/MFReadWrite/ole32/KERNEL32);
+    symbols ZIP contains cvforwin.pdb (14.5MB). Portable cert + Windows CI evidence complete;
+    remaining external item: designated-station UVC hardware run.
+  run_5_manual: >-
+    Developer manual docs/development.md (588 lines, 13 sections) written by developer and
+    verified (19 presets, 43 paths, test-subset commands re-run); reviewer initial
+    REQUEST_CHANGES (F1 broken Catch2 filter example, F2 package-symbols portable wording),
+    fixed and re-approved (.ai/reviews/dev-manual-review.yaml). Staged for the user to push.attempts:
   CVF-001: 1
 completed_gates:
   - change: CVF-001
