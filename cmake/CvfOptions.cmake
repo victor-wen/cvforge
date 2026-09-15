@@ -132,6 +132,32 @@ function(cvforwin_apply_test_compile_options target)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# Helper: place the shared library next to a consumer executable (Windows)
+# ---------------------------------------------------------------------------
+
+# The public DLL is emitted into the project's per-configuration bin directory
+# (RUNTIME_OUTPUT_DIRECTORY in the root CMakeLists) while executables default to
+# the generator's per-configuration directory. Windows resolves a DLL from the
+# directory of the loading executable first, so without this copy every test
+# executable and example that links the shared library fails to start with
+# STATUS_DLL_NOT_FOUND (0xc0000135). Copy the DLL next to the consumer after
+# linking. The DLL's published location is deliberately unchanged: the abi-check
+# and package/package-verify targets consume it there. On non-Windows builds the
+# loader finds the shared object through the build rpath, so this is a no-op.
+function(cvforwin_place_shared_library target)
+    if(NOT WIN32)
+        return()
+    endif()
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "$<TARGET_FILE:cvforwin>"
+                "$<TARGET_FILE_DIR:${target}>"
+        COMMENT "Copying cvforwin.dll next to ${target}"
+        VERBATIM
+    )
+endfunction()
+
+# ---------------------------------------------------------------------------
 # Helper: apply the canonical sanitizer configuration
 # ---------------------------------------------------------------------------
 

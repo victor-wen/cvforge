@@ -1279,6 +1279,8 @@ static void case_b13_request_validation(void)
     char invalid_utf8_two[3];
     char invalid_utf8_one[2];
     char big_input[65537 + 1];
+    const unsigned char invalid_utf8_two_lead = 0xC3u;
+    const unsigned char invalid_utf8_one_lead = 0xFFu;
     cvf_context* context = NULL;
 
     make_case_dir(config_root, sizeof config_root, "b13_config");
@@ -1296,10 +1298,12 @@ static void case_b13_request_validation(void)
     embedded_nul[1] = '\0';
     embedded_nul[2] = 'b';
     embedded_nul[3] = '\0';
-    invalid_utf8_two[0] = (char)0xC3;
+    /* MSVC C4310 rejects casting a constant above CHAR_MAX to char; route each
+     * raw invalid-UTF-8 lead byte through a non-constant unsigned char. */
+    invalid_utf8_two[0] = (char)invalid_utf8_two_lead;
     invalid_utf8_two[1] = 0x28;
     invalid_utf8_two[2] = '\0';
-    invalid_utf8_one[0] = (char)0xFF;
+    invalid_utf8_one[0] = (char)invalid_utf8_one_lead;
     invalid_utf8_one[1] = '\0';
 
     /* Identifier length boundary: 129 bytes is invalid, 128 bytes is legal. */

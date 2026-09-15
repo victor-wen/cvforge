@@ -1,0 +1,144 @@
+change_id: CVF-006
+phase: AUTHOR
+amendment: CI-2A / CI-2C
+recorded_at: 2026-09-15
+author: test-engineer
+ci_evidence:
+  workflow_run: windows-2022 CI run 34956274438 (round 2)
+  diagnostics:
+    - id: CI-2A
+      file: tests/unit/cvf006_test_support.h
+      locations:
+        - "line 124, column 22"
+        - "line 125, column 23"
+      compiler_diagnostic: >-
+        MSVC error C2397: conversion from 'int' to 'uint32_t' requires a
+        narrowing conversion (with /W4 /WX)
+      cause: >-
+        make_synthetic_backend(int width = kFrameWidth, int height = kFrameHeight)
+        initialized the uint32_t width/height fields of SyntheticCameraConfig
+        with int parameters inside a braced initializer.
+      masking_note: >-
+        The header error masked later diagnostics in every tests/unit/cvf006_*
+        translation unit, so the whole set was scanned after the fix.
+    - id: CI-2C
+      file: tests/abi/cvf006_lifecycle.c
+      locations:
+        - "line 1299, column 33"
+        - "line 1302, column 33"
+      compiler_diagnostic: >-
+        MSVC warning C4310: cast truncates constant value (with /W4 /WX) at
+        (char)0xC3 and (char)0xFF; char is signed on MSVC and the constants are
+        above 127.
+      cause: >-
+        The invalid-UTF-8 probe bytes were produced by constant-to-char casts.
+fixes:
+  - file: tests/unit/cvf006_test_support.h
+    change: >-
+      The two braced initializers now use explicit
+      static_cast<std::uint32_t>(width) and
+      static_cast<std::uint32_t>(height), which is a non-narrowing conversion
+      for MSVC /W4 /WX while the int parameters (and their call sites) are
+      unchanged. make_synthetic_backend is only ever called with its defaults.
+    intent_preserved: true
+    values_changed: false
+  - file: tests/abi/cvf006_lifecycle.c
+    change: >-
+      The two invalid-UTF-8 lead bytes are now held in non-constant
+      unsigned char locals (invalid_utf8_two_lead = 0xC3u,
+      invalid_utf8_one_lead = 0xFFu) and the char casts take those variables;
+      the CI-2C locations become `(char)invalid_utf8_two_lead` and
+      `(char)invalid_utf8_one_lead`. The second byte (0x28) and both NUL
+      terminators are untouched.
+    intent_preserved: true
+    bytes_changed: false
+scan:
+  scope: >-
+    All owned cvf006 test files: tests/abi/cvf006_lifecycle.c and
+    tests/unit/cvf006_{test_support.h,deadline,reconnect,save_policy,
+    degraded_log,rollback,serialization}; the two checked-in runtime fixtures
+    contain no code.
+  narrowing_instances_found: 2 (the CI-2A lines; both fixed)
+  constant_cast_truncation_instances_found: 2 (the CI-2C lines; both fixed)
+  other_observations:
+    - No other `.width`/`.height` braced initializer exists in the cvf006 files.
+    - No other (char)/(signed char)/(unsigned char) cast exists in the cvf006 files.
+    - >-
+      The remaining high constants (memset reserved fills, 0x28, 0x255-style
+      literals) are not constant-to-char casts and do not trigger C4310.
+    - >-
+      GCC confirms the CI-2A class is a real narrowing conversion: a probe with
+      the original designated-initializer form fails under
+      g++ -std=c++20 -Wall -Wextra -Werror with -Werror=narrowing, while the
+      static_cast form compiles clean. The WSL build did not surface it because
+      CMake applies -Wno-narrowing to the cvf006_tests target; MSVC has no
+      equivalent waiver for C2397.
+hash_update:
+  - file: tests/unit/cvf006_test_support.h
+    previous_sha256: 7d139b47eefbb26171fb68bf92c86458d8e1bd9fe04a12a92ccdcbf45d52b32c
+    new_sha256: ca80eaa12de113d757eb8a8d2b277ac38f7c5c90eb224477352efe8990b64560
+  - file: tests/abi/cvf006_lifecycle.c
+    previous_sha256: ebecb06e9412fb1558f4cfd0a50c6ff20be6e7ff7d19f485203e4609b181b442
+    new_sha256: 8d0c3819bbd5c322a38b7c3a9fd54f67de03ad36edf2ae2d88e2260630ebb194
+  unchanged_cvf006_files_verified: 8
+commands:
+  - command: "clang-format -i tests/unit/cvf006_test_support.h tests/abi/cvf006_lifecycle.c"
+    exit_code: 0
+  - command: "clang-format --dry-run --Werror tests/unit/cvf006_test_support.h tests/abi/cvf006_lifecycle.c"
+    exit_code: 0
+  - command: >-
+      gcc -std=c11 -Wall -Wextra -Werror -I include
+      -DCVF_TEST_FIXTURES_DIR='"tests/fixtures/runtime"'
+      -DCVF_TEST_TMP_DIR='"/tmp/cvf006"' -fsyntax-only tests/abi/cvf006_lifecycle.c
+    exit_code: 0
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "passed=263, failed=0, skipped=0"
+  - command: "ctest --preset wsl-gcc-debug -R 'cvf006|CVF-006' --output-on-failure"
+    exit_code: 0
+    counts: "passed=20, failed=0, skipped=0"
+  - command: "build/wsl-gcc-debug/cvf006_lifecycle"
+    exit_code: 0
+    counts: "checks=186, failures=0"
+checks:
+  - name: b13_request_id_invalid_utf8
+    expected: "CVF_STATUS_INVALID_ARGUMENT for the 2-byte sequence 0xC3 0x28; bytes unchanged"
+    changed: false
+  - name: b13_recipe_id_invalid_utf8
+    expected: "CVF_STATUS_INVALID_ARGUMENT for the 1-byte sequence 0xFF; byte unchanged"
+    changed: false
+  - name: cvf006 narrowing sites
+    expected: "width=16/height=12 unchanged for every default construction"
+    changed: false
+no_weakening:
+  assertions_removed: 0
+  assertions_skipped: 0
+  assertions_disabled: 0
+  assertions_weakened: 0
+  check_count_before: 186
+  check_count_after: 186
+  test_count_before: 20
+  test_count_after: 20
+msvc_validation:
+  status: deferred
+  statement: >-
+    No MSVC evidence is claimed in this session. The C2397/C4310 fixes are
+    reasoned for MSVC /W4 /WX and locally checked with GCC/Clang only; the
+    authoritative MSVC validation happens in the next windows-2022 CI run.
+ownership:
+  manifest: .ai/test-ownership.yaml
+  section_updated: CVF-006
+  files_checked: 10
+  mismatches: []
+  note: >-
+    Only the CVF-006 section changed (two hashes plus the Amendment 2 note);
+    every other change section is byte-exact. The fix harness scripts under
+    .ai/validation/ are author tooling, not hash-pinned test files.
+blockers: []
+notes: >-
+  Both defects were MSVC-only and in test-owner files; no production code,
+  CMake file, or other role's file was modified. Full WSL evidence is green
+  (263/263 overall, 20/20 CVF-006 selection, lifecycle 186/186 checks). The
+  remaining acceptance gate is the next windows-2022 CI compile/run.

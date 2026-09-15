@@ -1,0 +1,216 @@
+schema_version: 1
+change_id: CVF-007
+phase: AMENDMENT
+amendment: windows-ci round 2 build configuration (CI-2B, CI-2D)
+recorded_at: 2026-09-15
+author: developer
+baseline:
+  path: .ai/project-contract.yaml
+  contract_version: 1.0.0
+  status: APPROVED
+
+ci_evidence:
+  workflow_run: windows-2022 CI run 34956274438 (round 2, both jobs, 11m57s)
+  diagnostics:
+    - id: CI-2B
+      file: tests/abi/cvf006_lifecycle.c
+      locations:
+        - "line 312, column 12"
+        - "line 339, column 12"
+      compiler_diagnostic: >-
+        MSVC warning C4996: 'fopen': This function or variable may be unsafe.
+        Consider using fopen_s instead. To disable deprecation, use
+        _CRT_SECURE_NO_WARNINGS; with /W4 /WX the warning is promoted to error
+        C2220.
+      cause: >-
+        The independent lifecycle test intentionally uses the portable C11 file
+        API. The test owner's file is read-only for this role, so the fix
+        belongs on the build side.
+    - id: CI-2D
+      file: build/windows-msvc-release (Visual Studio 17 2022, multi-config)
+      observed: >-
+        Catch2 test discovery for cvf_unit_tests failed with exit code
+        0xc0000135 (STATUS_DLL_NOT_FOUND). cvforwin.dll is emitted to
+        build/windows-msvc-release/bin/Release/ (custom RUNTIME_OUTPUT_DIRECTORY
+        plus the multi-config per-config subdirectory) while the test
+        executables default to build/windows-msvc-release/Release/. The same
+        mismatch would break ctest execution of every executable that links the
+        shared library.
+
+scan:
+  crt_file_api_apis_scope: >-
+    All five files under tests/abi (cvf006_lifecycle.c, test_abi_runtime.c,
+    test_c11_surface.c, test_cpp20_include.cpp, test_header_isolation.c)
+    grepped for the MSVC C4996 deprecated-CRT set (fopen, freopen, tmpfile,
+    tmpnam, strcpy/strcat/sprintf/vsprintf, scanf/sscanf, gets, strtok,
+    strncpy/strncat, asctime/ctime/gmtime/localtime, strerror, mktemp,
+    _open/_read/_write/_close, popen, system, getenv/putenv).
+  crt_file_api_hits: >-
+    Only tests/abi/cvf006_lifecycle.c: fopen at lines 263, 312 and 339 (the two
+    CI-reported sites plus the helper at line 263). fwrite/fprintf/remove are
+    not C4996 APIs and no other test file uses a deprecated CRT API, so
+    cvf006_lifecycle is the only target that needs the opt-out.
+  shared_library_consumers: >-
+    Every CMakeLists.txt scanned for links of the shared `cvforwin` target.
+    In-tree consumers: cvf_abi_c11_surface, cvf_abi_runtime,
+    cvf_abi_cpp20_include, cvf_unit_tests, cvf006_lifecycle (all in the root
+    CMakeLists.txt) plus cvf_c_host_example (examples/c_host/CMakeLists.txt).
+    Tests linking only static libraries (cvf003/cvf004/cvf005/cvf006 developer
+    and camera suites, cvf007_developer_tests, cvf_hw_uvc_smoke) do not need
+    the DLL. The installed-package consumer (tests/package/consumer) links the
+    installed .lib and is launched with the package bin/ prepended to PATH by
+    the independent kit, so it is unaffected.
+
+changes:
+  - file: cmake/CvfOptions.cmake
+    symbol: cvforwin_place_shared_library
+    defect: CI-2D
+    change: >-
+      New helper. On WIN32 only, it appends a POST_BUILD custom command to the
+      given target that runs `cmake -E copy_if_different
+      "$<TARGET_FILE:cvforwin>" "$<TARGET_FILE_DIR:<target>>"` with VERBATIM.
+      On non-Windows it returns immediately, so portable build graphs are
+      unchanged. The DLL's own RUNTIME_OUTPUT_DIRECTORY is not touched:
+      abi-check, package and package-verify keep consuming bin/<config>/.
+    rationale: >-
+      Windows resolves a DLL from the directory of the loading executable
+      first; the copy makes both build-time Catch2 discovery (a POST_BUILD step
+      of the same target) and ctest execution independent of PATH.
+  - file: CMakeLists.txt
+    defect: CI-2D
+    change: >-
+      cvforwin_place_shared_library() applied to cvf_abi_c11_surface,
+      cvf_abi_runtime, cvf_abi_cpp20_include and cvf006_lifecycle right after
+      their sanitizer option helper, and to cvf_unit_tests immediately BEFORE
+      catch_discover_tests so the copy's POST_BUILD step is registered ahead of
+      the discovery step that already runs the executable. Command ordering on
+      one target is definition order; this ordering is what the /tmp probe
+      below verifies.
+  - file: CMakeLists.txt
+    defect: CI-2B
+    change: >-
+      Under `if(MSVC)`, cvf006_lifecycle now receives
+      target_compile_definitions(... PRIVATE _CRT_SECURE_NO_WARNINGS) next to
+      its existing fixture/tmp compile definitions. GCC/Clang compile commands
+      are unchanged; the opt-out is scoped to this one C ABI test target.
+  - file: CMakeLists.txt
+    defect: optional cleanup (CI-2A follow-up)
+    change: >-
+      Removed the `if(NOT MSVC) target_compile_options(cvf006_tests PRIVATE
+      -Wno-narrowing)` waiver. The test owner's CI-2A fix in
+      tests/unit/cvf006_test_support.h now uses explicit static_cast<uint32_t>
+      conversions, so the waiver is no longer needed. The WSL GCC build
+      recompiled all six cvf006_tests translation units with -Werror and no
+      -Wno-narrowing flag and stayed green (see commands), restoring local
+      detection of that warning class.
+    not_changed: >-
+      No test-owner file, src/**, .github/**, .ai/test-ownership.yaml or
+      .ai/workflow-state.yaml was touched by this role.
+
+deferred_observation:
+  target: cvf_c_host_example
+  detail: >-
+    The C host example also links the shared library. It is built by
+    examples/c_host/CMakeLists.txt, which is outside this task's allowed scope
+    (root CMakeLists.txt and cmake/**). From the root CMakeLists a
+    target-level add_custom_command is rejected by CMake for a target created
+    in another directory ("TARGET 'subexe' was not created in this directory",
+    reproduced with a scratch project). The example is not registered with
+    CTest and is not executed by either windows-2022 workflow, so CI is
+    unaffected; if the example is ever run from a Windows build tree it would
+    need the same helper call added in its own CMakeLists.
+
+commands:
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    summary: >-
+      Configure complete; compiler GNU 13.3.0; build files written to
+      build/wsl-gcc-debug. Log: .ai/validation/ci-round-2-configure.log
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    summary: >-
+      Relinked with the CMake change; all six cvf006_tests TUs rebuilt without
+      -Wno-narrowing under -Werror and linked clean. Log:
+      .ai/validation/ci-round-2-build.log
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "passed=263, failed=0, skipped=0"
+    summary: >-
+      100% tests passed, 263/263 (includes cvf.abi.* and cvf006.lifecycle).
+      Log: .ai/validation/ci-round-2-ctest.log
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    summary: "format-check passed: 83 file(s) conform to .clang-format"
+  - command: "cmake --preset wsl-clang-analysis && cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+    exit_code: 0
+    summary: "static-analysis passed: 21 file(s) clean under .clang-tidy"
+  - command: >-
+      python3 -c "import json,sys; db=json.load(open('build/wsl-gcc-debug/compile_commands.json')); life=[e['command'] for e in db if e['file'].endswith('tests/abi/cvf006_lifecycle.c')]; t6=[e['command'] for e in db if 'tests/unit/cvf006_' in e['file']]; ninja=open('build/wsl-gcc-debug/build.ninja').read(); c={'no_crt_define_on_gcc':all('_CRT_SECURE_NO_WARNINGS' not in x for x in life),'no_Wno_narrowing':all('-Wno-narrowing' not in x for x in t6),'zero_dll_copy_rules_on_linux':ninja.count('Copying cvforwin.dll')==0}; print(c); sys.exit(0 if all(c.values()) else 1)"
+    exit_code: 0
+    summary: >-
+      {'no_crt_define_on_gcc': True, 'no_Wno_narrowing': True,
+      'zero_dll_copy_rules_on_linux': True}. cvf006_lifecycle has no
+      _CRT_SECURE_NO_WARNINGS on GCC (MSVC-only branch); none of the six
+      cvf006_tests commands contains -Wno-narrowing; build.ninja contains 0
+      DLL-copy rules on Linux (helper is a no-op off WIN32).
+
+final_rerun:
+  purpose: >-
+    Consolidated fresh re-run of all five canonical commands after every edit
+    (and after this report was written): configure exit 0, build exit 0, ctest
+    exit 0 (100% tests passed, 0 failed out of 263), format-check exit 0 (83
+    files), clang configure + static-analysis exit 0 (21 files clean).
+  logs: "/tmp/opencode/final-{cfg,build,ctest,fmt,clang-cfg,sa}.log"
+
+win32_semantics_probe:
+  kind: >-
+    Auxiliary, explicitly NOT MSVC evidence. A scratch CMake project under
+    /tmp/opencode/cmake-dll-probe reproduces the helper command and the
+    catch_discover_tests ordering with a multi-config generator
+    (Ninja Multi-Config), pinning the shared object to bin/<config> and
+    emulating the Windows loader rule with install RPATH $ORIGIN so the
+    discovery-like run step can only succeed when the library was copied next
+    to the executable.
+  commands:
+    - command: "cmake -S /tmp/opencode/cmake-dll-probe -B build-with -G 'Ninja Multi-Config' && cmake --build build-with --config Debug && cmake --build build-with --config Release"
+      exit_code: 0
+      summary: >-
+        Debug and Release: libmylib.so ends up in both build-with/<config>/ next
+        to myexe; the discovery-like POST_BUILD run after link prints
+        probe_value=42 in both configurations. Logs:
+        .ai/validation/ci-round-2-dll-probe-with-{debug,release}.log
+    - command: "negative control: same project with -DPROBE_NO_COPY=ON"
+      exit_code: 1
+      summary: >-
+        Fails exactly in the discovery-like step: "error while loading shared
+        libraries: libmylib.so: cannot open shared object file" - the Linux
+        analogue of STATUS_DLL_NOT_FOUND. Proves the probe is meaningful and
+        the helper removes the failure. Log:
+        .ai/validation/ci-round-2-dll-probe-negative-control.log
+  conclusion: >-
+    The generator expressions, copy_if_different semantics and POST_BUILD
+    ordering used by cvforwin_place_shared_library behave as intended for both
+    configurations of a multi-config build.
+
+msvc_validation:
+  status: deferred
+  statement: >-
+    No MSVC or Windows result is claimed in this session; there is no local
+    Windows host. Both fixes are reasoned for MSVC /W4 /WX (a target-scoped
+    _CRT_SECURE_NO_WARNINGS definition removes C4996 -> C2220, and the
+    POST_BUILD copy resolves the 0xc0000135 loader failure) and were checked
+    only with WSL GCC/Clang, the compile-database inspection, and the
+    multi-config probe above. The authoritative validation is the next
+    windows-2022 CI run (both jobs), which must show the build finishing and
+    ctest running the shared-library consumers with no 0xc0000135.
+  expected_ci_assertions:
+    - "windows-msvc-release: build completes; cvf_unit_tests Catch discovery exits 0; ctest runs."
+    - "windows-msvc-tests: cvf006_lifecycle compiles with no C4996/C2220; ctest runs the full test-enabled suite."
+
+blockers: []
+notes: >-
+  Both defects were fixed entirely on the build side (cmake/CvfOptions.cmake
+  plus the root CMakeLists.txt); no hash-pinned test file, src/**, workflow,
+  or other role's artifact was modified. WSL canonical chain is fully green
+  (263/263, format 83, static-analysis 21). The only acceptance gate left is
+  the next windows-2022 CI run.

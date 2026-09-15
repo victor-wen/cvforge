@@ -231,9 +231,9 @@ changes:
     algorithm: sha256
     files:
       - path: tests/abi/cvf006_lifecycle.c
-        sha256: ebecb06e9412fb1558f4cfd0a50c6ff20be6e7ff7d19f485203e4609b181b442
+        sha256: 8d0c3819bbd5c322a38b7c3a9fd54f67de03ad36edf2ae2d88e2260630ebb194
       - path: tests/unit/cvf006_test_support.h
-        sha256: 7d139b47eefbb26171fb68bf92c86458d8e1bd9fe04a12a92ccdcbf45d52b32c
+        sha256: ca80eaa12de113d757eb8a8d2b277ac38f7c5c90eb224477352efe8990b64560
       - path: tests/unit/cvf006_deadline_test.cpp
         sha256: c6d979666b710ab87aa1a19bd52d7209a81d91137f64c1fd99d45c86c54728ca
       - path: tests/unit/cvf006_reconnect_test.cpp
@@ -293,6 +293,28 @@ changes:
       binary 186 checks, 0 failures (exit 0); wsl-gcc-asan build exit 0,
       ctest -R 'cvf006|CVF-006' 20/20 passed (exit 0). Verify evidence:
       .ai/reports/CVF-006-test-verify.yaml.
+      Amendment 2 (2026-09-15, owner: test-engineer): CI-2A/CI-2C from the
+      windows-2022 run 34956274438. CI-2A: make_synthetic_backend() initialized
+      the uint32_t width/height fields of SyntheticCameraConfig from int
+      parameters inside a braced initializer, which MSVC /W4 /WX rejects with
+      C2397; both initializers now use explicit static_cast<std::uint32_t>.
+      CI-2C: the (char)0xC3 and (char)0xFF constant casts of the invalid-UTF-8
+      probe bytes in tests/abi/cvf006_lifecycle.c triggered MSVC C4310; the two
+      lead bytes now live in non-constant unsigned char locals and are cast from
+      those, with the same byte values (0xC3 and 0x28 for the two-byte sequence,
+      0xFF for the one-byte sequence). A full scan of the cvf006_* files found no
+      other narrowing or constant-cast-truncation instance. Previous sha256
+      values: cvf006_lifecycle.c
+      ebecb06e9412fb1558f4cfd0a50c6ff20be6e7ff7d19f485203e4609b181b442 and
+      cvf006_test_support.h 7d139b47eefbb26171fb68bf92c86458d8e1bd9fe04a12a92ccdcbf45d52b32c;
+      the new values are recorded above. No assertion, coverage, byte value, or
+      check count was changed (direct lifecycle: 186 checks, 0 failures). Fresh
+      WSL evidence: clang-format -i and --dry-run --Werror exit 0 on both files;
+      gcc -std=c11 -Wall -Wextra -Werror -fsyntax-only exit 0; wsl-gcc-debug
+      build exit 0; full ctest 263/263 passed (exit 0); focused ctest
+      -R 'cvf006|CVF-006' 20/20 passed (exit 0). MSVC /W4 /WX validation is
+      deferred to the next windows-2022 CI run. Amendment evidence:
+      .ai/reports/CVF-006-test-red-amendment-2.yaml.
   CVF-007:
     change_id: CVF-007
     owner: test-engineer

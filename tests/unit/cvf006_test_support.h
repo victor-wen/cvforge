@@ -118,11 +118,13 @@ inline cam::CameraDescriptor synthetic_descriptor()
 inline std::shared_ptr<cam::SyntheticCameraBackend> make_synthetic_backend(
     int width = kFrameWidth, int height = kFrameHeight)
 {
+    // The config fields are uint32_t; the explicit casts keep the braced
+    // initializer a non-narrowing conversion for MSVC /W4 /WX (C2397).
     return std::make_shared<cam::SyntheticCameraBackend>(
         cam::SyntheticCameraConfig{
             .descriptor = synthetic_descriptor(),
-            .width = width,
-            .height = height,
+            .width = static_cast<std::uint32_t>(width),
+            .height = static_cast<std::uint32_t>(height),
         });
 }
 

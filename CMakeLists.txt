@@ -488,6 +488,7 @@ if(CVFORWIN_BUILD_TESTS)
     )
     cvforwin_apply_test_compile_options(cvf_abi_c11_surface)
     cvforwin_apply_sanitizers(cvf_abi_c11_surface)
+    cvforwin_place_shared_library(cvf_abi_c11_surface)
     add_test(NAME cvf.abi.c11_surface COMMAND cvf_abi_c11_surface)
 
     add_executable(cvf_abi_runtime tests/abi/test_abi_runtime.c)
@@ -499,6 +500,7 @@ if(CVFORWIN_BUILD_TESTS)
     )
     cvforwin_apply_test_compile_options(cvf_abi_runtime)
     cvforwin_apply_sanitizers(cvf_abi_runtime)
+    cvforwin_place_shared_library(cvf_abi_runtime)
     add_test(NAME cvf.abi.runtime COMMAND cvf_abi_runtime)
 
     add_executable(cvf_abi_cpp20_include tests/abi/test_cpp20_include.cpp)
@@ -510,6 +512,7 @@ if(CVFORWIN_BUILD_TESTS)
     )
     cvforwin_apply_test_compile_options(cvf_abi_cpp20_include)
     cvforwin_apply_sanitizers(cvf_abi_cpp20_include)
+    cvforwin_place_shared_library(cvf_abi_cpp20_include)
     add_test(NAME cvf.abi.cpp20_include COMMAND cvf_abi_cpp20_include)
 
     if(MSVC)
@@ -565,6 +568,9 @@ if(CVFORWIN_BUILD_TESTS)
     )
     cvforwin_apply_project_compile_options(cvf_unit_tests)
     cvforwin_apply_sanitizers(cvf_unit_tests)
+    # Must precede catch_discover_tests below: its POST_BUILD discovery step
+    # already runs the executable and therefore needs the DLL next to it.
+    cvforwin_place_shared_library(cvf_unit_tests)
 
     include(Catch OPTIONAL RESULT_VARIABLE cvforwin_catch_module)
     if(cvforwin_catch_module STREQUAL "NOTFOUND")
@@ -730,6 +736,12 @@ if(CVFORWIN_BUILD_TESTS)
             CVF_TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/runtime"
             CVF_TEST_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}/cvf006_tmp"
         )
+        if(MSVC)
+            # The lifecycle test intentionally uses portable C file APIs such
+            # as fopen; MSVC flags those with C4996 and /WX promotes it to
+            # C2220. The opt-out is scoped to this C ABI test target only.
+            target_compile_definitions(cvf006_lifecycle PRIVATE _CRT_SECURE_NO_WARNINGS)
+        endif()
         set_target_properties(cvf006_lifecycle PROPERTIES
             C_STANDARD 11
             C_STANDARD_REQUIRED ON
@@ -737,6 +749,7 @@ if(CVFORWIN_BUILD_TESTS)
         )
         cvforwin_apply_test_compile_options(cvf006_lifecycle)
         cvforwin_apply_sanitizers(cvf006_lifecycle)
+        cvforwin_place_shared_library(cvf006_lifecycle)
         add_test(NAME cvf006.lifecycle COMMAND cvf006_lifecycle)
 
         add_executable(cvf006_tests
@@ -765,13 +778,6 @@ if(CVFORWIN_BUILD_TESTS)
             CXX_EXTENSIONS OFF
         )
         cvforwin_apply_test_compile_options(cvf006_tests)
-        if(NOT MSVC)
-            # tests/unit/cvf006_test_support.h passes int frame dimensions into
-            # the uint32_t SyntheticCameraConfig fields. That test-owner file is
-            # read-only and narrowing is a warning (not an error) under the
-            # owner's documented syntax check, so tolerate it for this target.
-            target_compile_options(cvf006_tests PRIVATE -Wno-narrowing)
-        endif()
         cvforwin_apply_sanitizers(cvf006_tests)
         catch_discover_tests(cvf006_tests)
 
