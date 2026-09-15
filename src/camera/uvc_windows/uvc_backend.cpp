@@ -726,7 +726,11 @@ private:
 class ReadCallback final : public IMFSourceReaderCallback {
 public:
     ReadCallback() = default;
-    ~ReadCallback() override = default;
+    /*
+     * IMFSourceReaderCallback is a COM interface: IUnknown has no virtual
+     * destructor, so an override specifier here is invalid (MSVC C3668).
+     */
+    ~ReadCallback() = default;
 
     ReadCallback(const ReadCallback&) = delete;
     ReadCallback& operator=(const ReadCallback&) = delete;
@@ -1346,7 +1350,7 @@ private:
                 }
             }
             if (sample) {
-                const core::Result<cv::Mat> converted = convert_sample(sample.get());
+                core::Result<cv::Mat> converted = convert_sample(sample.get());
                 if (!converted.has_value()) {
                     return converted.failure();
                 }

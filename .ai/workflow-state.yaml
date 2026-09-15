@@ -10,9 +10,17 @@ risk_justification: >-
   Greenfield multi-module implementation inside approved boundaries. No public ABI,
   dependency family, schema, module boundary, or invariant change is authorized; any
   such need stops the pipeline for R3 escalation. Release review is required at the end.
-current_change: PROGRAM
+current_change: CVF-007
 stage: BLOCKED
-stage_note: "All eight changes complete with full local gate evidence; release certification BLOCKED-pending-external-evidence (windows-2022 CI + designated-station UVC run, both user-side). No local rework requested."attempts:
+stage_note: "CI run 1 failed on MSVC C3668; fix applied + staged locally (WSL 263/263, probe negative controls added); awaiting user push to run CI round 2."
+ci:
+  repo: "github.com/victor-wen/cvforge"
+  run_1: >-
+    34950421705 failure (windows-ci, both jobs): MSVC error C3668 at
+    src/camera/uvc_windows/uvc_backend.cpp ReadCallback::~ReadCallback - override on a
+    non-overriding destructor. Local stub probe missed it (stub interface had a virtual
+    destructor); probe fidelity fixed with permanent negative controls. Developer fix
+    applied (cycle 1).attempts:
   CVF-001: 1
 completed_gates:
   - change: CVF-001
@@ -436,11 +444,15 @@ queue:
     state: planned
     title: "Packaging, LICENSES/notices, schema docs, package-consumer tests, CI workflow (F3/F4 + quoting fix)"
 next_action: >-
-  User-side closing steps: (1) git init + remote, push, run the windows-2022 workflow
-  (.github/workflows/windows.yml: windows-ci release job + windows-tests-quality + clean
-  package consumer); (2) run the opt-in UVC hardware suite on a designated Windows 10/11
-  station (tests/hardware/uvc_smoke.cpp; see docs/packaging.md). After both record PASS,
-  request a short release re-review to certify production release.
+  User-side closing steps: (1) commit + push to GitHub (repo cvforge, public; 211 files staged,
+  branch main; push triggers windows-ci); (2) run the opt-in UVC hardware suite on a designated
+  Windows 10/11 station (tests/hardware/uvc_smoke.cpp; see docs/packaging.md). After both record
+  PASS, request a short release re-review to certify production release.
+repo_handoff:
+  local_repo: "initialized (git init -b main), 211 files staged, 2.1MB, no commits yet"
+  excluded_locally: ".ai/validation/** (37MB harness logs + 31MB probe binary) via .git/info/exclude"
+  target: "github.com/victor-wen/cvforge (public); push performed by the user - git commit/push are denied to build by role boundary and harness config"
+  ci_trigger: "push event -> windows-ci (two jobs); first run 30-90 min (Windows OpenCV build)"
 blockers: []
 carry_over:
   - "CVF-007/008: resolved F3/F4/QE-1/F1 in CVF-008."

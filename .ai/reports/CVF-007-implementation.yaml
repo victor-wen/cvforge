@@ -330,3 +330,92 @@ review_amendment:
     locally only by the forced -D_WIN32 syntax probes; the windows-2022 MSVC build must re-verify
     compilation and linking, `uvc_smoke --list` must confirm clean identity strings (F1), and a
     planar-YUV-capable station device is required to hardware-verify the F2 conversion path.
+
+ci_amendment:
+  recorded_at: 2026-09-15
+  author: developer
+  trigger: >-
+    windows-2022 CI run 34950421705 failed in both jobs with MSVC error C3668 at
+    src/camera/uvc_windows/uvc_backend.cpp(729,6):
+    'cvforwin::camera::`anonymous-namespace'::ReadCallback::~ReadCallback': method with override
+    specifier 'override' did not override any base class methods.
+  root_cause: >-
+    IMFSourceReaderCallback is a COM interface and IUnknown declares no virtual destructor, so
+    "~ReadCallback() override = default;" is invalid. GCC and the WSL-only build accepted it
+    silently because the local probe stub declared a virtual destructor on IUnknown, which made
+    the probe blind to exactly this defect class.
+  fix:
+    file: src/camera/uvc_windows/uvc_backend.cpp
+    change: >-
+      Removed the override specifier from ReadCallback's destructor: it is now
+      "~ReadCallback() = default;" with a comment stating that the COM base has no virtual
+      destructor (MSVC C3668). No behavior changed.
+    hardening: >-
+      core::Result<cv::Mat> converted in capture_or_failure() is no longer const so that
+      std::move(converted).value() binds the rvalue overload and moves the frame instead of
+      silently copying it. Quality only; no observable behavior change.
+  msvc_risk_scan:
+    destructors: >-
+      ReadCallback's destructor was the only destructor carrying an override specifier in the
+      translation unit. UvcCameraBackend::~UvcCameraBackend() has no override specifier in the
+      .cpp, and the header's "~UvcCameraBackend() override;" is valid because ICameraBackend
+      declares a virtual destructor.
+    com_method_signatures: >-
+      QueryInterface(REFIID, void**), AddRef(), Release(),
+      OnReadSample(HRESULT, DWORD, DWORD, LONGLONG, IMFSample*), OnFlush(DWORD) and
+      OnEvent(DWORD, IMFMediaEvent*) all carry STDMETHODCALLTYPE and match the SDK declarations
+      (IMFSourceReaderCallback has no OnStreamError method; the source reader reports stream
+      errors through OnReadSample status/flags and OnEvent). CI reported no error for them.
+    w4_warnings_as_errors_candidates:
+      - "C4265 and C5204 (class with virtual functions but non-virtual destructor) are off by default in MSVC per the official docs, so the correct non-virtual COM destructor is not a /W4 /WX risk."
+      - "C4127 (constant conditional) has exempted while(true) since VS2015 update 3; the single capture loop is unaffected."
+      - "Unused members/parameters: ReadCallback::read_timestamp_ was removed in the F2 round; OnReadSample's timestamp and the stream/event parameters are intentionally unnamed; the strict probe runs -Wunused, -Wconversion, -Wsign-conversion, -Wold-style-cast and -Wnon-virtual-dtor with zero diagnostics."
+      - "Narrowing/casts and wide-string handling were re-checked by the strict probe; wide_to_utf8 already clamps at the first NUL (F1 amendment)."
+  probe_fidelity_fix:
+    stub_change: >-
+      .ai/validation/cvf007-developer/stub_win/mfobjects.h no longer declares a virtual destructor
+      on IUnknown; it now models the SDK exactly (COM interfaces declare none), so an
+      override-on-destructor on a COM-derived class is rejected by the probe.
+    probe_change: >-
+      The stub directory is passed as -isystem in win-syntax-probe.sh (the real SDK is an external
+      header and must not be judged by the project warning policy), and two negative controls were
+      added: win-probe-override-negative (harness TU override_negative.cpp that must be rejected)
+      and win-probe-override-regression (generated copy of the real uvc_backend.cpp with the
+      historic override re-injected, which must also be rejected). A negative control that
+      compiles cleanly now fails the harness loudly.
+    results: >-
+      win-syntax-probe.sh: 6/6 probes pass - four positive probes (developer test and hardware
+      suite against the real uvc_backend.h; backend under stub Windows/MF headers with basic and
+      project warning sets) and two expected-failure controls, both rejected with a "marked
+      'override'" diagnostic (logs/win-syntax-probe.tsv). The regression copy and its log are
+      under logs/readcallback_override_regression.cpp and logs/win-probe-override-regression.log.
+  fresh_wsl_commands:
+    - command: "cmake --preset wsl-gcc-debug"
+      exit_code: 0
+      counts: "configure OK; log .ai/validation/cvf007-developer/logs/configure-wsl-gcc-debug.log"
+    - command: "cmake --build --preset wsl-gcc-debug --parallel"
+      exit_code: 0
+      counts: "all targets built, 0 compiler warnings; log .../logs/build-wsl-gcc-debug.log"
+    - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+      exit_code: 0
+      counts: "263/263 passed, 0 failed (test #258 is the CVF-007 developer case); log .../logs/ctest-wsl-gcc-debug.log"
+    - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+      exit_code: 0
+      counts: "format-check passed: 83 file(s) conform; log .../logs/format-check.log"
+    - command: "cmake --preset wsl-clang-analysis && cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+      exit_code: 0
+      counts: "static-analysis passed: 21 file(s); log .../logs/static-analysis.log"
+    - command: "cmake --preset wsl-gcc-asan && cmake --build --preset wsl-gcc-asan --parallel && ctest --preset wsl-gcc-asan --output-on-failure"
+      exit_code: 0
+      counts: "263/263 passed under ASan/UBSan, 0 sanitizer findings; logs configure-wsl-gcc-asan.log, build-wsl-gcc-asan.log, ctest-wsl-gcc-asan.log"
+  format_check_note: >-
+    format-check now reports 83 files instead of 82 because examples/c_host/main.c (added to the
+    tree by a separate change outside this scope and already globbed by cmake/CvfFormat.cmake) is
+    included. No file owned by CVF-007 caused the delta; the UVC sources themselves are unchanged
+    in formatting and pass clang-format --dry-run --Werror.
+  msvc_validation: >-
+    The fix and all hardening are Windows-only and cannot be compiled in this environment. MSVC
+    validation happens in the next windows-2022 CI run: both jobs must compile
+    src/camera/uvc_windows/uvc_backend.cpp under /W4 /permissive- /utf-8 /WX without C3668 or other
+    diagnostics, link the Media Foundation system libraries, and run cvf007_developer_tests under
+    ctest. No Windows compile/link/ABI claim is made by this amendment.
