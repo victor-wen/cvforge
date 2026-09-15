@@ -1,0 +1,281 @@
+schema_version: 1
+change_id: CVF-008
+role: quality-engineer
+recorded_at: "2026-09-15T08:31:00Z"
+status: PASS
+verdict: PASS
+scope: >-
+  WSL portable verification scope only (the contract canonical commands that are
+  executable on this Linux host). Windows MSVC delivery evidence
+  (windows-msvc-release/-tests build+test+abi-check+package+package-verify, real
+  dumpbin export/dependency checks, clean package-consumer kit, symbols archive,
+  and the windows-ci / windows-tests-quality workflows) is explicitly DEFERRED
+  and NOT PASS; it executes only on the windows-2022 runner.
+blocked_reason: ""
+
+session:
+  started_utc: "2026-09-15T08:07:30Z"
+  ended_utc: "2026-09-15T08:30:42Z"
+  state: >-
+    Full canonical re-run on the frozen CVF-008 post-review state through the
+    quality-engineer's own harness; no production, test, fixture, packaging, or
+    build-configuration file was modified. The frozen digest is byte-identical
+    before and after every command. Every exit code, count, and excerpt below
+    comes from real output captured in this session.
+  runner: >-
+    .ai/validation/.ai/reports/cvf-008-quality.yaml (invokes the canonical preset
+    commands verbatim; --clean-first added to the two build steps only)
+  logs: ".ai/validation/cvf-008-quality-out/"
+
+environment:
+  host: "WSL2 Linux 6.18.33.2-microsoft-standard-WSL2 x86_64; euid=1000 user=administrator (non-root)"
+  VCPKG_ROOT: "/home/administrator/vcpkg"
+  cmake: "3.28.3"
+  ctest: "3.28.3"
+  ninja: "1.11.1"
+  gcc_gxx: "13.3.0"
+  clang_tidy: "18.1.3"
+  clang_format: "18.1.3"
+  nm: "GNU nm (binutils) 2.42"
+  log: ".ai/validation/cvf-008-quality-out/env.log"
+
+frozen_state:
+  snapshot_files: 145
+  pre_digest: "8727719ad949bd6912915113a2a7da80515b2eee8dd985eb7766ccebd2ec3997"
+  post_digest: "8727719ad949bd6912915113a2a7da80515b2eee8dd985eb7766ccebd2ec3997"
+  unchanged_during_quality_session: YES
+  scope: "sha256 over src tests include cmake examples config/examples docs LICENSES .github plus CMakeLists.txt, CMakePresets.json, vcpkg.json, vcpkg-configuration.json, .clang-format, .clang-tidy"
+  evidence: [freeze-pre.log, freeze-post.log, freeze-diff.log]
+  confirmation: >-
+    All commands in this report executed against the same digest
+    (8727719ad949bd6912915113a2a7da80515b2eee8dd985eb7766ccebd2ec3997); the
+    post-command snapshot is identical, so every result certifies this frozen state.
+
+commands:
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    summary: "Configuring done (20.2 s); GNU 13.3.0; warnings-as-errors ON; vcpkg x64-linux deps current"
+    log: wsl-configure.log
+  - command: "cmake --build --preset wsl-gcc-debug --clean-first --parallel"
+    exit_code: 0
+    summary: "Non-incremental clean build of the complete tree (155 s); 0 warnings; examples/c_host/cvf_c_host_example built"
+    log: wsl-build-clean-first.log
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "registered=263, executed=263, passed=263, failed=0, skipped=0"
+    summary: "'100% tests passed, 0 tests failed out of 263'; 263 executed 'Test #N' lines; Total Test time (real) = 3.24 s (workflow re-run) / 3.5 s (direct run)"
+    log: wsl-ctest.log
+  - command: "ctest --preset wsl-gcc-debug -N"
+    exit_code: 0
+    counts: "registered=263"
+    summary: "'Total Tests: 263'; 263 registered entries; 0 package-kit/dumpbin names registered on WSL"
+    log: wsl-ctest-list.log
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    summary: "format-check passed: 83 file(s) conform to .clang-format (tests/abi and tests/camera excluded as test-owner files)"
+    log: wsl-format-check.log
+  - command: "cmake --build --preset wsl-gcc-debug --target abi-check"
+    exit_code: 0
+    summary: "abi-check passed: exactly 5 export(s): cvf_get_abi_version;cvf_initialize;cvf_inspect;cvf_reload_recipes;cvf_shutdown"
+    log: wsl-abi-check.log
+  - command: "cmake --preset wsl-clang-analysis && cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+    exit_code: 0
+    summary: "Configure OK (Clang 18.1.3); static-analysis passed: 21 file(s) clean under .clang-tidy (439 s); Windows-only TU coverage gap recorded in anomalies"
+    log: [wsl-clang-analysis-configure.log, wsl-static-analysis.log, compile-db.log]
+  - command: "cmake --preset wsl-gcc-asan && cmake --build --preset wsl-gcc-asan --clean-first --parallel && ctest --preset wsl-gcc-asan --output-on-failure"
+    exit_code: 0
+    counts: "registered=263, executed=263, passed=263, failed=0, skipped=0"
+    summary: "ASan/UBSan clean build (170 s) and '100% tests passed, 0 tests failed out of 263' (19 s); 0 sanitizer findings"
+    log: [wsl-asan-configure.log, wsl-asan-build-clean-first.log, wsl-asan-ctest.log]
+  - command: "bash examples/c_host/run_example.sh"
+    exit_code: 0
+    counts: "cycles=1, failures=0, verdict=PASS"
+    summary: "Native C11 host end-to-end against the synthetic backend: ABI=1, initialize OK, status=0/CVF_STATUS_OK, verdict=PASS, output_json + saved image path, reload OK, shutdown OK"
+    log: cvf008-example.log
+  - command: "bash examples/c_host/run_example.sh build/wsl-gcc-debug 3"
+    exit_code: 0
+    counts: "cycles=3, failures=0, verdict=PASS x3"
+    summary: "Three consecutive normal inspect cycles, all status=0/verdict=PASS"
+    log: cvf008-example-cycles3.log
+  - command: "bash examples/c_host/run_example.sh build/wsl-gcc-asan"
+    exit_code: 0
+    counts: "cycles=1, failures=0, verdict=PASS"
+    summary: "Same lifecycle clean under ASan/UBSan, no sanitizer report"
+    log: cvf008-example-asan.log
+  - command: "cmake --build --preset wsl-gcc-debug --target package"
+    exit_code: 1
+    counts: "command_exit=1 (expected guard), archive_count=0, shell_syntax_error=0"
+    summary: "EXPECTED portable refusal: 'package is Windows-only - run the windows-msvc-release preset on windows-2022 CI'; QE-1 clean, no /bin/sh syntax error"
+    log: package-refusal.log
+  - command: "sha256sum recomputation of every file under changes: in .ai/test-ownership.yaml"
+    exit_code: 0
+    counts: "files_checked=47, matches=47, mismatches=0, missing=0"
+    summary: "47/47 MATCH (CVF-001 6/6, CVF-002 8/8, CVF-003 4/4, CVF-004 6/6, CVF-005 7/7, CVF-006 10/10, CVF-007 1/1, CVF-008 5/5); manifest_sha256=eb541739089290910e2a785dd1d880293e569cbc07e76a9978bbe7dec77714d5"
+    log: hashes.log
+  - command: "nm -D --defined-only build/wsl-gcc-debug/libcvforwin.so"
+    exit_code: 0
+    counts: "cvf_exports=5, non_cvf_exports=0"
+    summary: "exactly the five cvf_* dynamic symbols; cvf_exports_match_def=YES against src/c_api/cvforwin.def (allowlist=5)"
+    log: exports.log
+  - command: "cmake --workflow --preset wsl-quality"
+    exit_code: 0
+    summary: "6/6 workflow steps green in 501 s: configure, build (no work), test 263/263 (3.24 s), format-check 83 files, abi-check 5 exports, static-analysis 21 files"
+    log: wsl-full-quality-workflow.log
+
+example_run_evidence:
+  command: "bash examples/c_host/run_example.sh  (build/wsl-gcc-debug/examples/c_host/cvf_c_host_example examples/c_host/config <tmp-output-root>; cycles=1)"
+  exit_code: 0
+  excerpt:
+    - "cvforwin native C host example (template; not a production inspection)"
+    - "cvf_get_abi_version()=1 (expected 1)"
+    - "cvf_initialize: OK"
+    - "cycle 1: recipe=\"example.pass\" request=\"example-cycle-1\""
+    - "  status=0 (CVF_STATUS_OK) verdict=PASS elapsed_ms=1 error_code=0 warning_flags=0x00000000"
+    - "  output_json: {\"pass_ratio\":0.06803385416666667,\"total_pixels\":3072,\"white_pixels\":209}"
+    - "  image_path: /tmp/cvf-c-host-example.eWckv9/captures/20260915T081038-560_example.pass_example-cycle-1_0.png"
+    - "cvf_reload_recipes: OK"
+    - "cvf_shutdown: OK"
+    - "cvforwin C host example: PASS (failures=0)"
+  note: >-
+    Real end-to-end acceptance evidence for the CVF-008 C consumer (contract
+    acceptance_check 3): exit 0, PASS lifecycle, caller-owned buffers, saved
+    capture path. The ASan variant repeated the same lifecycle with exit 0.
+
+ownership_verification:
+  manifest: .ai/test-ownership.yaml
+  manifest_sha256: "eb541739089290910e2a785dd1d880293e569cbc07e76a9978bbe7dec77714d5"
+  algorithm: sha256
+  files_checked: 47
+  matches: 47
+  mismatches: []
+  missing: 0
+  per_change: {CVF-001: "6/6", CVF-002: "8/8", CVF-003: "4/4", CVF-004: "6/6", CVF-005: "7/7", CVF-006: "10/10", CVF-007: "1/1", CVF-008: "5/5"}
+  cvf008_files_recomputed:
+    - "tests/package/package_checks.cmake 3f23084482a3098d6be35d31673db61cd9ab2784d6a0077fb977788f713f4f78"
+    - "tests/package/consumer/CMakeLists.txt 0f48932b501f3913f68460bbe92dec5c6210437f56d501a8c5846d7cb6e0eace"
+    - "tests/package/consumer/main.c 7dba7464da5d88f460cef2c0cfd78f1e8f75186c192b809dbf0e21e5c36dce12"
+    - "tests/package/consumer/config/cvforwin.json 42aa7e9b1580ffc5d6c8f1f261d037aba86f35b0052141c072b10d5fdb3a2eb0"
+    - "tests/package/consumer/config/recipes/example.pass.json 161061dfea745a30675447acb62effe6fc95bd1140caa318b42ebdae9e042a09"
+  skipped_or_weakened_tests: []
+  notes: >-
+    47/47 recorded digests recomputed byte-exact in this session (hashes.log). The
+    manifest itself was not modified by this role. Source scan of the five
+    CVF-008 kit files found no test-disable/weaken markers; the
+    CVF_SKIP_NEGATIVE_PROBES tokens in package_checks.cmake only suppress the
+    script's own negative self-probes after an earlier check already failed (the
+    script still exits nonzero), and no assertion was weakened or commented out.
+
+skip_check:
+  registered: 263
+  executed_debug: 263
+  executed_asan: 263
+  passed_debug: 263
+  passed_asan: 263
+  failed: 0
+  skipped: 0
+  disabled: 0
+  skip_marker_matches: 0
+  not_run_matches: 0
+  cvf_abi_tests_registered: 4
+  cvf_abi_tests_executed: 4
+  lifecycle_test: "cvf006.lifecycle (#263) Passed"
+  package_kit_registered_on_wsl: 0
+  direct_evidence: "debug and ASan logs each contain 263 executed 'Test #N: ... Passed' lines and '100% tests passed, 0 tests failed out of 263'; no ***Skipped/***Disabled/***Not Run markers and no 'did not run' section"
+  notes: >-
+    Registered list (ctest -N, Total Tests: 263) equals the executed count in both
+    presets. The tests/package kit is not part of the main build on WSL (0
+    registered package-kit tests); the one case-insensitive 'windows' match in the
+    registered list is the unrelated unit case 'is_absolute_path accepts POSIX and
+    Windows absolute paths'.
+
+export_check:
+  library: "build/wsl-gcc-debug/libcvforwin.so"
+  artifact_identity: "ELF 64-bit LSB shared object, x86-64, dynamically linked, BuildID[sha1]=af62cff407c3d7e100ee6e6b0016b91a68892eac, with debug_info, not stripped; sha256=f653969bb613dbc908c8c0e45b4208ef1d265a3966a061ce51fa65f40004b114"
+  cvf_dynamic_exports: 5
+  non_cvf_dynamic_exports: 0
+  symbols: [cvf_get_abi_version, cvf_initialize, cvf_inspect, cvf_reload_recipes, cvf_shutdown]
+  matches_def_allowlist: YES
+  abi_check_target: "exactly 5 export(s) per the debug abi-check target"
+
+lint_static_analysis:
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    summary: "83 files conform to .clang-format"
+  - command: "cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+    exit_code: 0
+    summary: "21 project TUs reported clean under .clang-tidy; documented Windows-TU coverage gap (see anomalies)"
+  - command: "cmake --workflow --preset wsl-quality (steps 4-6)"
+    exit_code: 0
+    summary: "format-check 83, abi-check 5 exports, static-analysis 21 - all green in the aggregate workflow"
+
+windows_deferrals:
+  executed_here: NO
+  workflow_present: "YES (.github/workflows/windows.yml, 3718 bytes; windows-2022; immutable action references only - unpinned_action_found=NO; no secrets in log scan)"
+  windows_build_tree_on_wsl: "absent (build/windows-msvc-release missing; PE artifact count under build/ = 0)"
+  deferred_to_windows_2022_ci:
+    - "windows-msvc-release configure/build/test/abi-check and windows-msvc-tests test-enabled suite (camera/ABI/lifecycle on MSVC v143)"
+    - "package and package-verify with real dumpbin /exports (exactly five cvf_* symbols) and /dependents runtime dependency allowlist"
+    - "clean package-consumer kit (tests/package/package_checks.cmake with CVF_PACKAGE_ROOT against the installed test-enabled package)"
+    - "package-symbols PDB archive and the verified package/symbols uploads"
+    - "windows-ci and windows-tests-quality workflow executions themselves"
+  portable_refusal_rerun:
+    command: "cmake --build --preset wsl-gcc-debug --target package"
+    command_exit_code: 1
+    summary: >-
+      Clean nonzero refusal confirmed in this session: 'package is Windows-only -
+      run the windows-msvc-release preset on windows-2022 CI' executed via
+      cmake -E echo ... && cmake -E false; shell_syntax_error_present=NO (QE-1
+      fixed), archive_count=0. Nonzero exit is the expected guard behavior, not a
+      failure.
+  note: >-
+    WSL remains portable compilation/unit evidence only and is never Windows ABI,
+    dependency, or package evidence (contract NFR-008/NFR-009 and the WSL-vs-
+    Windows invariant).
+
+anomalies:
+  - id: QE-1
+    severity: resolved
+    area: portable package-refusal target
+    detail: >-
+      Resolved by CVF-008. The refusal path now exits 1 through the intended
+      metacharacter-free message and cmake -E false: no '/bin/sh: 1: Syntax
+      error: "(" unexpected', no parentheses in the message, and no archive
+      produced. The prior CVF-004..CVF-007 carry-over defect no longer reproduces.
+    evidence: package-refusal.log
+  - id: static-analysis-windows-tu-gap
+    severity: informational / coverage gap (carried from CVF-007)
+    area: static-analysis coverage claim
+    detail: >-
+      static-analysis reports '21 file(s) clean', but the Windows-only TU
+      src/camera/uvc_windows/uvc_backend.cpp (and tests/hardware/uvc_smoke.cpp) is
+      absent from build/wsl-clang-analysis/compile_commands.json
+      (entry_count=64, src_cpp_files=21, uvc_backend_cpp_in_db=0,
+      uvc_smoke_cpp_in_db=0), so clang-tidy cannot analyze it on this host. The
+      21-file count therefore overstates analyzed coverage by the Windows TU.
+      Recorded as a gap, not as a pass; real analysis of that file requires the
+      deferred Windows toolchain.
+    evidence: compile-db.log
+  - id: harness-note
+    severity: informational
+    detail: >-
+      The runner adds --clean-first to the two build commands (same preset flags
+      plus a non-incremental rebuild) and adds focused confirmation commands
+      (ctest -N, example cycle runs, hash/skip/export/refusal/deferral checks)
+      around the canonical set; no canonical command was substituted, softened,
+      or skipped. The package target exit 1 is the expected guard behavior.
+
+deferrals:
+  - item: "Windows MSVC x64 configure/build/test/abi-check/package/package-verify and the windows-ci workflows (windows-2022, VS2022 v143)"
+    status: DEFERRED (explicitly NOT PASS)
+    reason: "Not executable on this Linux host; no Windows toolchain. Contract NFR-009 makes windows-2022 CI authoritative for DLL, exports, dependencies, and package evidence."
+  - item: "Clean package-consumer kit execution and real dumpbin export/dependency checks (tests/package/**)"
+    status: DEFERRED (explicitly NOT PASS)
+    reason: "Requires an installed Windows package produced by the windows-2022 jobs; the kit is deliberately not registered as a WSL test."
+  - item: "Opt-in UVC hardware smoke suite (tests/hardware/uvc_smoke.cpp) on a designated Windows 10/11 x64 station"
+    status: DEFERRED (explicitly NOT PASS)
+    reason: "Entire TU behind #if defined(_WIN32); shipped default-OFF and never a CI gate."
+
+final_response:
+  commands_run: 15
+  failures: 0
+  next_action: "Controller: CVF-008 quality gate PASS on the frozen WSL scope (debug and ASan 263/263 with 0 skipped, format 83, abi 5 exports, static-analysis 21 with the recorded Windows-TU gap, C host example exit 0 PASS on debug and ASan, ownership 47/47, exports 5/5, package refusal exit 1 with QE-1 clean, wsl-quality workflow 6/6); Windows MSVC/package/consumer/symbols evidence remains DEFERRED to windows-2022 CI (NOT PASS)."

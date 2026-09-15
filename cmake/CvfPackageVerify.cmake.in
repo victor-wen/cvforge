@@ -1,0 +1,266 @@
+# Scripted body of the package-verify target (Windows only).
+#
+# Runs in `cmake -P` script mode. Checks, each collected and reported together:
+#   1. the staged package contains the DLL, import library, public header,
+#      example configuration and recipes, documentation, and license notices;
+#   2. bin/ contains exactly one runtime DLL and it is cvforwin.dll;
+#   3. the packaged DLL and import library are byte-identical to the built ones;
+#   4. cvforwin.dll exports exactly the five names listed in cvforwin.def;
+#   5. every direct import of cvforwin.dll is a Windows system DLL;
+#   6. the upload ZIP exists.
+#
+# dumpbin is required for checks 4 and 5. The caller passes CVF_DUMPBIN when it
+# resolved dumpbin at configure time; otherwise this script falls back to PATH
+# and then to the newest VS 2022 x64 toolset through vswhere. When dumpbin
+# cannot be found the checks fail instead of silently passing.
+
+set(cvf_package_root "${CVF_PACKAGE_DIR}/cvforwin-@PROJECT_VERSION@")
+set(cvf_archive "${CVF_PACKAGE_DIR}/cvforwin-@PROJECT_VERSION@.zip")
+
+set(cvf_failures "")
+macro(cvf_fail text)
+    list(APPEND cvf_failures "${text}")
+    message(STATUS "package-verify: FAILED - ${text}")
+endmacro()
+
+message(STATUS "package-verify: checking ${cvf_package_root}")
+
+# --- 1. required contents ---------------------------------------------------
+
+foreach(cvf_relative IN ITEMS
+        "bin/cvforwin.dll"
+        "lib/cvforwin.lib"
+        "include/cvforwin/cvf_api.h"
+        "config/examples/cvforwin.json")
+    if(NOT EXISTS "${cvf_package_root}/${cvf_relative}")
+        cvf_fail("missing required package file: ${cvf_relative}")
+    endif()
+endforeach()
+
+file(GLOB_RECURSE cvf_recipes LIST_DIRECTORIES FALSE
+     "${cvf_package_root}/config/examples/recipes/*.json")
+if(cvf_recipes STREQUAL "")
+    cvf_fail("missing example recipes below config/examples/recipes/")
+endif()
+
+file(GLOB_RECURSE cvf_docs LIST_DIRECTORIES FALSE "${cvf_package_root}/docs/*")
+if(cvf_docs STREQUAL "")
+    cvf_fail("missing package documentation below docs/")
+endif()
+
+# --- 2. notices -------------------------------------------------------------
+
+file(GLOB_RECURSE cvf_notices LIST_DIRECTORIES FALSE "${cvf_package_root}/LICENSES/*")
+if(cvf_notices STREQUAL "")
+    cvf_fail("missing license notices below LICENSES/")
+else()
+    set(cvf_has_named_notice FALSE)
+    foreach(cvf_notice IN LISTS cvf_notices)
+        get_filename_component(cvf_notice_name "${cvf_notice}" NAME)
+        string(TOLOWER "${cvf_notice_name}" cvf_notice_lower)
+        if(cvf_notice_lower MATCHES "license|notice|copying")
+            set(cvf_has_named_notice TRUE)
+            file(SIZE "${cvf_notice}" cvf_notice_size)
+            if(cvf_notice_size EQUAL 0)
+                cvf_fail("empty notice file in LICENSES/: ${cvf_notice_name}")
+            endif()
+        endif()
+    endforeach()
+    if(NOT cvf_has_named_notice)
+        cvf_fail("LICENSES/ has no LICENSE/NOTICE/COPYING-named notice file")
+    endif()
+endif()
+
+# --- 3. exactly one project runtime DLL -------------------------------------
+
+file(GLOB cvf_bin_dlls LIST_DIRECTORIES FALSE "${cvf_package_root}/bin/*.[dD][lL][lL]")
+list(LENGTH cvf_bin_dlls cvf_bin_dll_count)
+if(NOT cvf_bin_dll_count EQUAL 1)
+    cvf_fail("bin/ must contain exactly one runtime DLL, found ${cvf_bin_dll_count}: ${cvf_bin_dlls}")
+else()
+    get_filename_component(cvf_bin_dll_name "${cvf_bin_dlls}" NAME)
+    string(TOLOWER "${cvf_bin_dll_name}" cvf_bin_dll_lower)
+    if(NOT cvf_bin_dll_lower STREQUAL "cvforwin.dll")
+        cvf_fail("unexpected runtime DLL in bin/: ${cvf_bin_dll_name}")
+    endif()
+endif()
+
+# --- 4. packaged binaries match the build outputs ---------------------------
+#
+# This is a macro, not a function: cvf_fail appends to the file-scope failure
+# list, and a function's local scope would silently discard that append.
+
+macro(cvf_verify_hash label built_path packaged_path)
+    if("${built_path}" STREQUAL "")
+        cvf_fail("built ${label} path was not provided; cannot compare it with the package")
+    elseif(NOT EXISTS "${built_path}")
+        cvf_fail("built ${label} is missing; cannot compare it with the package")
+    elseif(EXISTS "${packaged_path}")
+        file(SHA256 "${built_path}" cvf_built_hash)
+        file(SHA256 "${packaged_path}" cvf_packaged_hash)
+        if(NOT cvf_built_hash STREQUAL cvf_packaged_hash)
+            cvf_fail("packaged ${label} does not match the built output for configuration '${CVF_CONFIG}'")
+        endif()
+    endif()
+endmacro()
+
+cvf_verify_hash("cvforwin.dll" "${CVF_DLL}" "${cvf_package_root}/bin/cvforwin.dll")
+cvf_verify_hash("cvforwin.lib" "${CVF_IMPORT_LIB}" "${cvf_package_root}/lib/cvforwin.lib")
+
+# --- 5. resolve dumpbin -----------------------------------------------------
+
+set(cvf_dumpbin "${CVF_DUMPBIN}")
+if(cvf_dumpbin STREQUAL "" OR NOT EXISTS "${cvf_dumpbin}")
+    unset(cvf_dumpbin)
+    find_program(cvf_dumpbin_found NAMES dumpbin dumpbin.exe)
+    if(cvf_dumpbin_found)
+        set(cvf_dumpbin "${cvf_dumpbin_found}")
+    endif()
+endif()
+if(cvf_dumpbin STREQUAL "" AND WIN32)
+    set(cvf_vswhere "C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe")
+    if(EXISTS "${cvf_vswhere}")
+        execute_process(
+            COMMAND "${cvf_vswhere}" -latest -products "*"
+                    -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64
+                    -property installationPath
+            OUTPUT_VARIABLE cvf_vs_path
+            ERROR_QUIET
+            OUTPUT_STRIP_TRAILING_WHITESPACE)
+        if(EXISTS "${cvf_vs_path}")
+            file(GLOB cvf_dumpbin_candidates
+                 "${cvf_vs_path}/VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe")
+            if(NOT cvf_dumpbin_candidates STREQUAL "")
+                list(SORT cvf_dumpbin_candidates)
+                list(REVERSE cvf_dumpbin_candidates)
+                list(GET cvf_dumpbin_candidates 0 cvf_dumpbin)
+            endif()
+        endif()
+    endif()
+endif()
+if(cvf_dumpbin STREQUAL "" OR NOT EXISTS "${cvf_dumpbin}")
+    cvf_fail("dumpbin was not found on PATH or through vswhere; the export set and runtime "
+             "dependencies cannot be verified (pass -DCVF_DUMPBIN=<path> to override)")
+endif()
+
+# --- 6. exact export set ----------------------------------------------------
+
+set(cvf_expected_exports "")
+set(cvf_def_file "${CVF_SOURCE_DIR}/src/c_api/cvforwin.def")
+if(NOT EXISTS "${cvf_def_file}")
+    cvf_fail("export allowlist source is missing: ${cvf_def_file}")
+else()
+    file(STRINGS "${cvf_def_file}" cvf_def_lines)
+    foreach(cvf_line IN LISTS cvf_def_lines)
+        string(STRIP "${cvf_line}" cvf_stripped)
+        if(cvf_stripped STREQUAL "" OR cvf_stripped MATCHES "^;" OR cvf_stripped MATCHES "^EXPORTS")
+            continue()
+        endif()
+        string(REGEX REPLACE "[ \t@].*$" "" cvf_export_name "${cvf_stripped}")
+        if(NOT cvf_export_name STREQUAL "")
+            list(APPEND cvf_expected_exports "${cvf_export_name}")
+        endif()
+    endforeach()
+    list(SORT cvf_expected_exports)
+    list(LENGTH cvf_expected_exports cvf_expected_count)
+    if(NOT cvf_expected_count EQUAL 5)
+        cvf_fail("src/c_api/cvforwin.def must list exactly five exports, found ${cvf_expected_count}")
+    endif()
+endif()
+
+if(NOT cvf_dumpbin STREQUAL "" AND EXISTS "${cvf_dumpbin}" AND
+   EXISTS "${cvf_package_root}/bin/cvforwin.dll")
+    execute_process(
+        COMMAND "${cvf_dumpbin}" /nologo /exports "${cvf_package_root}/bin/cvforwin.dll"
+        RESULT_VARIABLE cvf_exports_result
+        OUTPUT_VARIABLE cvf_exports_output
+        ERROR_VARIABLE cvf_exports_error)
+    if(NOT cvf_exports_result EQUAL 0)
+        cvf_fail("dumpbin /exports failed with exit ${cvf_exports_result}: ${cvf_exports_error}")
+    else()
+        string(REGEX MATCHALL "[ \t]+[0-9]+[ \t]+[0-9]+[ \t]+[0-9A-Fa-f]+[ \t]+[A-Za-z_][A-Za-z0-9_]*"
+               cvf_export_rows "${cvf_exports_output}")
+        set(cvf_actual_exports "")
+        foreach(cvf_row IN LISTS cvf_export_rows)
+            string(REGEX REPLACE ".*[ \t]" "" cvf_row_name "${cvf_row}")
+            list(APPEND cvf_actual_exports "${cvf_row_name}")
+        endforeach()
+        list(REMOVE_DUPLICATES cvf_actual_exports)
+        list(SORT cvf_actual_exports)
+        if(NOT "${cvf_actual_exports}" STREQUAL "${cvf_expected_exports}")
+            cvf_fail("export set mismatch: expected [${cvf_expected_exports}], "
+                     "observed [${cvf_actual_exports}]")
+        else()
+            message(STATUS "package-verify: export set verified: [${cvf_actual_exports}]")
+        endif()
+    endif()
+endif()
+
+# --- 7. runtime dependency allowlist ----------------------------------------
+
+set(cvf_allowed_system_dll_prefixes
+    advapi32 api-ms-win- bcrypt cfgmgr32 comdlg32 combase crypt32 d3d11 dbghelp dwmapi
+    ext-ms-win- gdi32 gdiplus kernel32 mf mfplat mfreadwrite mfuuid ncrypt ntdll ole32
+    oleaut32 opengl32 powrprof propsys rpcrt4 secur32 setupapi shell32 shlwapi user32
+    version winmm ws2_32)
+
+if(NOT cvf_dumpbin STREQUAL "" AND EXISTS "${cvf_dumpbin}" AND
+   EXISTS "${cvf_package_root}/bin/cvforwin.dll")
+    execute_process(
+        COMMAND "${cvf_dumpbin}" /nologo /dependents "${cvf_package_root}/bin/cvforwin.dll"
+        RESULT_VARIABLE cvf_dependents_result
+        OUTPUT_VARIABLE cvf_dependents_output
+        ERROR_VARIABLE cvf_dependents_error)
+    if(NOT cvf_dependents_result EQUAL 0)
+        cvf_fail("dumpbin /dependents failed with exit ${cvf_dependents_result}: ${cvf_dependents_error}")
+    else()
+        string(FIND "${cvf_dependents_output}" "dependencies:" cvf_dependencies_at)
+        if(cvf_dependencies_at LESS 0)
+            cvf_fail("dumpbin /dependents output has no dependencies section")
+        else()
+            string(SUBSTRING "${cvf_dependents_output}" ${cvf_dependencies_at} -1
+                   cvf_dependencies_text)
+            string(REGEX MATCHALL "[A-Za-z0-9_.-]+\\.[dD][lL][lL]"
+                   cvf_dependent_tokens "${cvf_dependencies_text}")
+            foreach(cvf_token IN LISTS cvf_dependent_tokens)
+                string(TOLOWER "${cvf_token}" cvf_dependent_lower)
+                if(cvf_dependent_lower STREQUAL "cvforwin.dll")
+                    continue()
+                endif()
+                set(cvf_dependent_ok FALSE)
+                foreach(cvf_prefix IN LISTS cvf_allowed_system_dll_prefixes)
+                    string(FIND "${cvf_dependent_lower}" "${cvf_prefix}" cvf_prefix_at)
+                    if(cvf_prefix_at EQUAL 0)
+                        set(cvf_dependent_ok TRUE)
+                        break()
+                    endif()
+                endforeach()
+                if(NOT cvf_dependent_ok)
+                    cvf_fail("non-system runtime dependency in cvforwin.dll imports: "
+                             "${cvf_token} (not in the Windows system allowlist)")
+                endif()
+            endforeach()
+            if(NOT cvf_dependent_tokens STREQUAL "")
+                message(STATUS "package-verify: runtime dependencies checked: [${cvf_dependent_tokens}]")
+            else()
+                cvf_fail("dumpbin /dependents reported no dependent DLLs")
+            endif()
+        endif()
+    endif()
+endif()
+
+# --- 8. upload archive ------------------------------------------------------
+
+if(NOT EXISTS "${cvf_archive}")
+    cvf_fail("upload archive is missing: ${cvf_archive}")
+endif()
+
+# --- summary ----------------------------------------------------------------
+
+if(cvf_failures)
+    list(LENGTH cvf_failures cvf_failure_count)
+    list(JOIN cvf_failures "\n  - " cvf_failure_text)
+    message(FATAL_ERROR
+        "package-verify: ${cvf_failure_count} check(s) failed for ${cvf_package_root}:\n  - ${cvf_failure_text}")
+endif()
+message(STATUS "package-verify: all checks passed for ${cvf_package_root}")

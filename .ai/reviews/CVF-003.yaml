@@ -1,0 +1,177 @@
+schema_version: 1
+change_id: CVF-003
+role: reviewer
+recorded_at: 2026-09-15
+verdict: APPROVE
+
+reviewed_artifacts:
+  - .ai/project-contract.yaml
+  - .ai/changes/CVF-003.yaml
+  - .ai/reports/CVF-003-implementation.yaml
+  - .ai/reports/CVF-003-test-red.yaml
+  - .ai/reports/CVF-003-test-verify.yaml
+  - .ai/test-ownership.yaml
+  - .ai/test-briefs/CVF-003.yaml
+  - src/inspection/algorithm.h, src/inspection/registry.h, src/inspection/registry.cpp
+  - src/algorithms/example_threshold.h, src/algorithms/example_threshold.cpp
+  - src/algorithms/compiled_algorithms.h, src/algorithms/compiled_algorithms.cpp
+  - src/core/error.h, src/core/error.cpp, CMakeLists.txt
+  - tests/unit/cvf003_test_support.h, tests/unit/cvf003_registry_test.cpp,
+    tests/unit/cvf003_dispatch_test.cpp, tests/unit/cvf003_example_threshold_test.cpp
+  - tests/unit/test_inspection_error_codes.cpp, tests/unit/test_inspection_contract.cpp
+  - .ai/validation/cvf003-developer/*.log, .ai/validation/logs/cvf003-*.log, .ai/validation/cvf003-verify.sh
+
+summary: >-
+  The change satisfies the frozen interface_v1 and the change contract. Error codes
+  1500-1508 exist with the frozen names and broad-status mapping; AlgorithmRequest,
+  AlgorithmResult, IInspectionAlgorithm, AlgorithmRegistry, dispatch, the JSON bound,
+  and register_compiled_algorithms match the frozen spellings exactly. Registry rules
+  (nullptr/empty/character/64-char key handling, duplicate retention, unknown find,
+  registration order) and dispatch rules (deadline before invoke, empty-frame
+  rejection, exception containment, bound check, failure passthrough) are implemented
+  as specified and covered by independent behavior-derived tests (B1-B10, 37 cases,
+  295 assertions). No ABI, camera, recipe, persistence, callback, or global mutable
+  state is touched by src/inspection/** or src/algorithms/**. Evidence is internally
+  consistent: baseline 86, final 135 = 86 + 37 independent + 12 developer, ASan
+  135/135, format 43 files, static analysis 14 TUs; the recorded logs corroborate the
+  reports. The documented deviations (const bridge in dispatch, defensive
+  re-validation, nlohmann-json published by the inspection target) are necessary or
+  fail-closed and do not violate the frozen contract or the module invariants. No
+  blocking findings; the observations below are improvements, not conditions.
+
+blocking_findings: []
+
+non_blocking_findings:
+  - id: NF-1
+    severity: minor
+    area: dispatch const bridge (review point 5a)
+    finding: >-
+      dispatch() takes const IInspectionAlgorithm& but the frozen inspect() is
+      non-const, so registry.cpp const_casts the reference. This is well-defined for
+      every current caller (the registry owns non-const objects and the shipped
+      inspect implementations do not mutate state), but the precondition "the
+      algorithm object must not be genuinely const-qualified" is stated only inside
+      registry.cpp, not in registry.h where callers see the signature.
+    evidence: src/inspection/registry.cpp:105-112; src/inspection/registry.h:50-54
+    required_action: >-
+      Acceptable for this frozen change; recommend documenting the non-const-object
+      precondition in registry.h and making inspect() const (or dispatch() take a
+      non-const reference) at the next interface revision opportunity. No change
+      required now.
+  - id: NF-2
+    severity: minor
+    area: module dependency table (deviation a)
+    finding: >-
+      cvforwin_inspection publishes nlohmann_json::nlohmann_json PUBLIC while the
+      project contract module table lists core_model, camera_contract, and OpenCV
+      core only. The edge is required because interface_v1 exposes nlohmann::json by
+      reference; nlohmann-json is an already approved dependency family, so no new
+      family or direction change is introduced, but the contract table is now stale
+      relative to the approved internal interface.
+    evidence: CMakeLists.txt:91-107; .ai/changes/CVF-003.yaml:72-84; project contract lines 255-269
+    required_action: >-
+      Architect: add nlohmann-json to the inspection_contract_and_registry
+      dependency list in .ai/project-contract.yaml at the next permitted contract
+      touch. No code change.
+  - id: NF-3
+    severity: minor
+    area: example pixel-type tolerance (deviation c)
+    finding: >-
+      The frozen inspect_rules describe BGR8 conversion, while the example also
+      accepts CV_8UC1 mono8 frames and rejects every other type with
+      algorithm_frame_invalid. The extra tolerance is tested by a developer test but
+      is not part of the frozen text; it is fail-closed and cannot change BGR8
+      behavior.
+    evidence: src/algorithms/example_threshold.cpp:141-148; tests/unit/test_inspection_contract.cpp:198-227
+    required_action: >-
+      Optional: either drop the mono8 branch or have the interface text record it in
+      a future revision. Non-blocking.
+  - id: NF-4
+    severity: minor
+    area: JSON output-bound metric
+    finding: >-
+      The bound is enforced as measurements.dump().size() + defects.dump().size()
+      (two separate dumps), an interpretation of the frozen "serialized
+      measurements+defects" wording. Both test suites pin the metric with guard
+      bands, and a dump() failure (e.g. invalid UTF-8) inside the try-block surfaces
+      as algorithm_exception rather than algorithm_output_too_large - safe, but the
+      exact metric and this corner are worth pinning in the interface text.
+    evidence: src/inspection/registry.cpp:117-131; tests/unit/cvf003_dispatch_test.cpp:62-110
+    required_action: None required; clarify wording at the next interface revision.
+  - id: NF-5
+    severity: minor
+    area: verification evidence completeness
+    finding: >-
+      The verify-phase clang-format dry run was reported from the terminal without a
+      persisted log (unlike the configure/build/test/list phases, whose logs exist).
+      Format evidence is otherwise present from the developer's canonical
+      format-check target run.
+    evidence: .ai/reports/CVF-003-test-verify.yaml:35-38; .ai/validation/logs/ (no format log); .ai/validation/cvf003-developer/cvf003-format-check2.log
+    required_action: >-
+      quality_owner: rerun the canonical format-check target directly during the
+      quality gate; no rework by the test owner required.
+  - id: NF-6
+    severity: minor
+    area: canonical-command execution path
+    finding: >-
+      The verify session ran the canonical cmake/ctest commands through the
+      test-owner harness (direct cmake was sandbox-denied). The harness invokes the
+      exact commands, logs raw output, and propagates the test exit code, but it is
+      still an intermediary rather than a direct canonical invocation.
+    evidence: .ai/validation/cvf003-verify.sh:62-77; .ai/validation/logs/cvf003-verify-*.log
+    required_action: >-
+      quality_owner: execute the canonical command set unmodified for the quality
+      evidence. Non-blocking for this review.
+  - id: NF-7
+    severity: observation
+    area: independent-test hash integrity
+    finding: >-
+      The developer report and the independent verify report both record the same
+      four sha256 values, all equal to .ai/test-ownership.yaml, and no assertion,
+      skip, or tag weakening was found on re-reading the owned files. The reviewer
+      (read-only, no shell) could not recompute the digests.
+    evidence: .ai/test-ownership.yaml:67-88; .ai/reports/CVF-003-implementation.yaml:141-155; .ai/reports/CVF-003-test-verify.yaml:47-68
+    required_action: >-
+      quality_owner: recompute the four sha256 digests independently as part of the
+      quality gate.
+
+independence_notes: >-
+  The four tests/unit/cvf003_* files are behavior-derived from the test brief
+  (B1-B10 plus every boundary/negative case), include only frozen interface
+  headers, never include production .cpp files, and contain no SKIP/mayfail/hidden
+  tags or conditional bypasses; they compile-failed RED for exactly the missing
+  interface headers before implementation. The developer added only
+  tests/unit/test_inspection_*.cpp (allowed developer_test scope) and CMake
+  registration of the owned sources; no owned test file was edited, and both the
+  developer and the verify session record manifest-matching hashes (verify
+  recomputed them after the canonical run). Developer tests are complementary, not
+  duplicative: they pin the exact-bound metric, extra key-alphabet characters, the
+  strict gray > threshold boundary on a mono8 frame, non-object parameters,
+  direct-inspect empty-frame rejection, and diagnostics bounds, while the
+  independent suite proves non-invocation via stub counters, duplicate retention by
+  pointer identity, and the end-to-end PASS/FAIL outcomes.
+
+evidence_consistency:
+  test_count: "135 = 86 baseline + 37 independent (ctest #95-#131) + 12 developer; confirmed in ctest-final and ctest-asan logs"
+  assertions: "295 assertions in 37 cases; confirmed in cvf003-tag-run-cvf003_tests.log"
+  format: "43 file(s) conform; confirmed in cvf003-format-check2.log"
+  static_analysis: "14 file(s) clean; confirmed in cvf003-static-analysis2.log"
+  sanitizers: "ASan/UBSan run 135/135 passed; confirmed in cvf003-ctest-asan.log"
+  hashes: "4/4 recorded identical in dev, verify, and manifest; recomputation deferred to quality_owner (NF-7)"
+
+notes:
+  - >-
+    dispatch() does not call validate_parameters(); the frozen dispatch rules do
+    not require it and the recipe store owns pre-dispatch validation. The example
+    compensates by re-validating the same object through one shared parse helper,
+    so no behavior divergence exists between validate_parameters() and inspect().
+  - >-
+    Scope compliance: only allowed_files were touched (src/inspection/**,
+    src/algorithms/**, src/core/error.*, CMakeLists.txt, tests/unit developer
+    tests); no change to include/**, src/c_api/**, src/camera/**, CMakePresets.json,
+    or cmake/**. No public ABI impact: the new error codes are internal and the
+    public header is untouched.
+  - >-
+    Dependency direction holds: registry depends on core + camera_contract; the
+    example depends on inspection + OpenCV core/imgproc only; no dependency flows
+    back toward the C ABI or runtime.

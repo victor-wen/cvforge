@@ -1,0 +1,38 @@
+# cvforwin clang-tidy policy.
+#
+# The static-analysis target runs clang-tidy with --warnings-as-errors=*, so
+# every enabled check must stay clean on the project sources. The list is
+# deliberately focused on correctness and portability; purely stylistic checks
+# that duplicate clang-format are disabled.
+
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-macro-parentheses,
+  clang-analyzer-*,
+  performance-*,
+  -performance-enum-size,
+  portability-*,
+  modernize-use-nullptr,
+  modernize-use-override,
+  readability-braces-around-statements,
+  readability-const-return-type,
+  readability-container-size-empty,
+  readability-duplicate-include,
+  readability-misleading-indentation,
+  readability-redundant-*,
+  readability-simplify-boolean-expr,
+  -readability-magic-numbers,
+  -readability-function-cognitive-complexity,
+  -readability-identifier-length,
+  -readability-use-anyofallof,
+  -readability-avoid-nested-conditional-operator
+
+WarningsAsErrors: '*'
+HeaderFilterRegex: '(include/cvforwin|src)/.*'
+FormatStyle: file
+
+CheckOptions:
+  readability-uppercase-literal-suffix.NewSuffixes: ''

@@ -1,0 +1,332 @@
+schema_version: 1
+change_id: CVF-007
+phase: IMPLEMENT
+recorded_at: 2026-09-15
+author: developer
+baseline:
+  path: .ai/project-contract.yaml
+  contract_version: 1.0.0
+  status: APPROVED
+change_file: .ai/changes/CVF-007.yaml
+harness: .ai/validation/cvf007-developer/
+
+summary: >-
+  Implemented the Windows Media Foundation UVC backend (src/camera/uvc_windows/uvc_backend.h/.cpp),
+  wired the runtime backend factory ("uvc" selects UvcCameraBackend on Windows builds and fails
+  with camera_not_found on portable builds), added the WIN32-only CMake target with Media
+  Foundation system libraries only, added option CVFORWIN_BUILD_HARDWARE_TESTS (default OFF) and
+  the WIN32-only, never-CI-registered cvf_hw_uvc_smoke target for tests/hardware/uvc_smoke.cpp,
+  and added a developer regression test registered with CTest. Portable WSL evidence: debug
+  263/263 tests (262 pre-existing + 1 developer case), ASan 263/263 with zero sanitizer findings,
+  format-check 82 files, static-analysis exit 0, and no compiler warnings in either build. The
+  Windows-only sources are excluded from the WSL build (zero compile rules and no compile-command
+  entry) and were additionally checked with best-effort forced -D_WIN32 syntax probes, which are
+  explicitly NOT Windows compile/link/ABI evidence. Windows MSVC build, DLL linking, ABI/export
+  checks, and the opt-in hardware smoke suite remain deferred to windows-2022 CI and a designated
+  Windows 10/11 station with UVC hardware.
+
+files:
+  created:
+    - path: src/camera/uvc_windows/uvc_backend.h
+      role: >-
+        Windows-only declaration of UvcCameraBackend (final, default-constructible,
+        implements cvforwin::camera::ICameraBackend, backend_key "uvc"); the whole declaration
+        is inside #if defined(_WIN32) and no Media Foundation type is exposed.
+    - path: src/camera/uvc_windows/uvc_backend.cpp
+      role: >-
+        Media Foundation implementation: enumeration/identity, exactly-one resolution, open and
+        format selection, deadline-bounded asynchronous capture with BGR8 normalization,
+        reconnect, idempotent close, RAII COM, no escaping exceptions.
+    - path: tests/unit/test_uvc_runtime_factory.cpp
+      role: >-
+        Developer-owned regression: portable builds assert that a valid "uvc" config fails
+        Context::create with camera_not_found/camera_not_found; Windows builds statically pin
+        the UvcCameraBackend interface, backend_key, idempotent close, and capture-before-open
+        camera_io.
+  modified:
+    - path: src/runtime/context.cpp
+      role: >-
+        build_backend(): under _WIN32 includes camera/uvc_windows/uvc_backend.h and constructs
+        UvcCameraBackend for camera.backend "uvc"; elsewhere the same config fails with
+        camera_not_found/camera_not_found (backend unavailable). Comment updated.
+    - path: CMakeLists.txt
+      role: >-
+        Added the WIN32-only cvforwin_uvc_windows static library (links mfplat, mf, mfreadwrite,
+        mfuuid, ole32, opencv_imgproc), linked it privately into cvforwin_runtime under WIN32,
+        registered cvf007_developer_tests via catch_discover_tests, and added the
+        CVFORWIN_BUILD_HARDWARE_TESTS/WIN32-only cvf_hw_uvc_smoke target that is never added to
+        CTest or a workflow.
+    - path: cmake/CvfOptions.cmake
+      role: >-
+        Added option CVFORWIN_BUILD_HARDWARE_TESTS (BOOL, default OFF) documenting that the UVC
+        hardware suite is opt-in, Windows-only, and never a mandatory CI gate.
+
+implementation:
+  descriptor_mapping:
+    - "device_path: MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK converted from UTF-16 to UTF-8; devices without a symbolic link are not enumerated (they have no stable identity) rather than being given a guessed path."
+    - "vendor_id/product_id: first four-hex-digit value after the identity boundaries 'vid_'/'pid_' inside the device instance ID contained in the symbolic link, lowercased; malformed or absent values stay empty (the descriptor contract allows empty)."
+    - "friendly_name: MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME converted to UTF-8."
+    - "backend_key is always the literal \"uvc\"."
+  behavior:
+    - "enumerate: MFStartup/MFCreateAttributes/MFEnumDeviceSources; one descriptor per video-capture device; zero devices is a successful empty list, never a failure or fallback."
+    - "open: re-enumerates, resolves exactly one descriptor through camera::resolve_identity (zero or multiple matches fail as camera_not_found, no first-device fallback), activates IMFMediaSource, creates the async source reader, and selects the closest supported format."
+    - "format selection: first requests RGB32 at the configured width/height and frame rate (rational milli-fps) with MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING so Media Foundation inserts decoders/converters; falls back to the closest convertible native media type scored by size distance, frame-rate distance, and pixel-format preference; last resort is an unconstrained RGB32 request."
+    - "capture: fails camera_io/camera_not_open when closed, fails timeout/capture_timed_out for an already-expired deadline, issues an asynchronous ReadSample, waits on the callback condition variable, and on deadline expiry cancels the pending read with IMFSourceReader::Flush (bounded OnFlush wait; a stream that cannot be flushed is marked for reconnect instead of being reused)."
+    - "frame normalization: ConvertToContiguousBuffer plus IMF2DBuffer (stride-aware, bottom-up handled) or IMFMediaBuffer fallback; converts RGB32/ARGB32 (BGRA), RGB24, YUY2, UYVY, L8, NV12, I420, and YV12 to an owned continuous BGR8 cv::Mat, resizes to the configured dimensions when needed, and increments a monotonic sequence."
+    - "reconnect: retains the last opened identity, releases the reader/source, re-enumerates and re-activates; a device that has not reappeared fails camera_io/camera_disconnected so capture_with_one_retry (at most one reconnect plus one recapture) stays bounded."
+    - "close: idempotent, deterministic COM release plus MFShutdown; safe on a never-opened backend and after failed opens."
+    - "no exception escapes: every Result-returning operation contains catch-all conversion to internal_error/internal_exception; COM objects are RAII (local ComPtr, per-operation COM apartment, reference-counted MF session) and no vendor SDK is used."
+  runtime_integration:
+    - "src/runtime/context.cpp: camera.backend \"uvc\" -> std::make_shared<camera::UvcCameraBackend>() on _WIN32."
+    - "Portable builds: camera.backend \"uvc\" -> camera_not_found/camera_not_found with the message 'the uvc camera backend is only available in Windows Media Foundation builds'."
+  cmake:
+    - "cvforwin_uvc_windows compiles src/camera/uvc_windows/uvc_backend.cpp only under if(WIN32) and links the Media Foundation system libraries mfplat/mf/mfreadwrite/mfuuid plus ole32 (COM) and opencv_imgproc; no vendor SDK, no Windows header outside the module."
+    - "cvforwin_runtime links cvforwin_uvc_windows privately under WIN32, which propagates the system libraries to the DLL."
+    - "CVFORWIN_BUILD_HARDWARE_TESTS=ON on WIN32 builds cvf_hw_uvc_smoke from the hash-pinned tests/hardware/uvc_smoke.cpp and links cvforwin_uvc_windows plus opencv_core; the target is deliberately absent from CTest and all presets/workflows."
+  developer_test:
+    - "Registered as cvf007_developer_tests via catch_discover_tests; contributes exactly one CTest case (#258)."
+
+commands:
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure (pre-change baseline)"
+    exit_code: 0
+    counts: "262/262 passed (log: .ai/validation/cvf007-developer/logs/baseline-ctest.log)"
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    counts: "configure OK; log: .ai/validation/cvf007-developer/logs/configure-wsl-gcc-debug.log"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    counts: "all targets built; 0 compiler warnings; log: .ai/validation/cvf007-developer/logs/build-wsl-gcc-debug.log"
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "263/263 passed, 0 failed (262 pre-existing + test #258 'CVF-007 developer: a uvc config fails with camera_not_found on portable builds'); log: .ai/validation/cvf007-developer/logs/ctest-wsl-gcc-debug.log"
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    counts: "format-check passed: 82 file(s) conform to .clang-format; log: .ai/validation/cvf007-developer/logs/format-check.log"
+  - command: "cmake --preset wsl-clang-analysis && cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+    exit_code: 0
+    counts: "static-analysis passed: 21 file(s); log: .ai/validation/cvf007-developer/logs/static-analysis.log"
+  - command: "cmake --preset wsl-gcc-asan && cmake --build --preset wsl-gcc-asan --parallel && ctest --preset wsl-gcc-asan --output-on-failure"
+    exit_code: 0
+    counts: "263/263 passed under ASan/UBSan with 0 sanitizer findings; logs: .ai/validation/cvf007-developer/logs/configure-wsl-gcc-asan.log, build-wsl-gcc-asan.log, ctest-wsl-gcc-asan.log"
+  - command: "bash .ai/validation/cvf007-developer/run-canonical.sh"
+    exit_code: 0
+    counts: "wrapped the nine commands above; machine-readable results in logs/summary.tsv"
+  - command: "python3 .ai/validation/cvf007-developer/check-test-ownership.py"
+    exit_code: 0
+    counts: "42 pinned test-owner files (CVF-001..CVF-007) checked, 0 mismatches; log: logs/test-ownership-check.log"
+
+windows_deferred:
+  statement: >-
+    No Windows compile, link, ABI, export, package, or hardware execution evidence is claimed in
+    this report. The authoring host is WSL: there is no Windows, no MSVC, no Media Foundation, and
+    no camera, and the UVC module has zero compile rules in every WSL build tree. The best-effort
+    forced -D_WIN32 probes below are syntax self-checks against throwaway stub headers and are not
+    ABI or runtime evidence.
+  required_environment: "windows-2022 runner (MSVC v143, x64) for CI; a designated Windows 10/11 x64 station with a UVC camera for the opt-in suite"
+  checklist:
+    - "CI: cmake --preset windows-msvc-release; build; ctest; abi-check; package; package-verify (windows_full_quality) all exit 0."
+    - "MSVC compiles src/camera/uvc_windows/uvc_backend.cpp with /W4 /permissive- /utf-8 /WX; any header/API mismatch is fixed there (no MSVC evidence exists yet)."
+    - "cvforwin.dll links the Media Foundation system libraries mfplat.dll, mf.dll, mfreadwrite.dll; the runtime dependency allowlist shows no non-system DLL; export set is exactly the five cvf_* symbols."
+    - "Configure with -DCVFORWIN_BUILD_HARDWARE_TESTS=ON; confirm cvf_hw_uvc_smoke builds on Windows only and is absent from ctest -N and from all presets/workflows."
+    - "Station: run 'uvc_smoke --list' and record every descriptor (device_path, vendor_id, product_id, friendly_name); confirm each value is clean single-line text with no embedded NUL or trailing control byte (F1 regression check)."
+    - "Station: set CVF_HW_UVC_DEVICE_PATH (or CVF_HW_UVC_VID/PID/NAME) and run the suite; confirm it refuses to run without an explicit selector (never a first-device fallback)."
+    - "Station boundary run: CVF_HW_EXPECT_ZERO_DEVICES=1 on a camera-less station asserts empty enumeration and camera_not_found resolution."
+    - "Station manual run: CVF_HW_UNPLUG_TEST=1 exercises the unplug/replug bounded reconnect + recapture procedure (at most one retry)."
+    - "Planar-conversion coverage gap: the primary RGB32 negotiation normally makes Media Foundation convert internally, so the native I420/YV12/NV12 fallback conversion may not be exercised by a single station camera. Record the negotiated media subtype for the station device and, when available, repeat the run on a device/driver that surfaces planar YUV so the F2 chroma-stride/height/width path is hardware-verified."
+    - "Record raw command lines, exit codes, and outputs for the hardware run; a PASS on representative hardware is required before FCT deployment."
+
+non_evidence_windows_syntax_probes:
+  statement: >-
+    Best-effort, clearly non-evidence self-checks executed on WSL. Probe C/D use throwaway stub
+    Windows/MF declarations under .ai/validation/cvf007-developer/stub_win/ and clang's Microsoft
+    extensions; they verify C++20 well-formedness, template/COM-pointer usage, callback override
+    signatures, and OpenCV call typing only. They prove nothing about the real SDK headers, MSVC
+    semantics, linking, or ABI.
+  commands:
+    - command: "g++ -std=c++20 -Wall -Wextra -Werror -fsyntax-only -D_WIN32 ... tests/unit/test_uvc_runtime_factory.cpp"
+      exit_code: 0
+      counts: "developer test Windows branch compiles against the real uvc_backend.h; log: logs/win-probe-developer-test.log"
+    - command: "g++ -std=c++20 -Wall -Wextra -fsyntax-only -D_WIN32 ... tests/hardware/uvc_smoke.cpp"
+      exit_code: 0
+      counts: "test-owner hardware suite compiles against the real uvc_backend.h (interface assumption W4 verified structurally); log: logs/win-probe-hardware-suite.log"
+    - command: "clang++ -std=c++20 -fsyntax-only -fms-extensions -D_WIN32 ... src/camera/uvc_windows/uvc_backend.cpp (stub Windows/MF headers)"
+      exit_code: 0
+      counts: "Windows-only implementation parses with no diagnostics; log: logs/win-probe-uvc-backend.log"
+    - command: "same, with the project warning set (-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion -Wnon-virtual-dtor -Wold-style-cast -Wcast-align -Wunused -Woverloaded-virtual -Wdouble-promotion -Wformat=2 -Wimplicit-fallthrough -Wnull-dereference -Werror; third-party headers as system headers; -Wno-language-extension-token for native MSVC __uuidof)"
+      exit_code: 0
+      counts: "no diagnostics from the module sources; log: logs/win-probe-uvc-backend-strict.log"
+    - command: "bash .ai/validation/cvf007-developer/win-syntax-probe.sh"
+      exit_code: 0
+      counts: "4/4 probes passed; logs/win-syntax-probe.tsv"
+
+independent_test_integrity:
+  test_owner_files_checked: 42
+  mismatches: 0
+  cvf007_hardware_suite_sha256: "02141468189556cae2f71985f65a6009b63d37aeb148c2faf3eeb3feeb5ff69c (matches .ai/test-ownership.yaml)"
+  notes: >-
+    No file under tests/hardware/**, tests/abi/**, or any cvf00*_* independent test was edited.
+    The developer only added tests/unit/test_uvc_runtime_factory.cpp and the CMake build/registration
+    wiring. The hash-pinned hardware suite was compiled read-only in the forced-Windows probe.
+    Verification script: .ai/validation/cvf007-developer/check-test-ownership.py.
+
+decisions_and_deviations:
+  - id: D1
+    item: "CTest total"
+    decision: "263 tests after this change (262 pre-existing + 1 CVF-007 developer case), in both wsl-gcc-debug and wsl-gcc-asan."
+    reason: >-
+      The CVF-007 change contract pinned the pre-change portable suite at 262/262. The follow-up
+      instruction required registering the developer test with CTest; the independent test-owner
+      suites and their counts are unchanged (baseline 262/262 log recorded before the change).
+  - id: D2
+    item: "static-analysis coverage of the Windows-only source"
+    decision: "static-analysis exits 0 with '21 file(s)'; clang-tidy silently skips src/camera/uvc_windows/uvc_backend.cpp because it has no compile command in the Linux build tree."
+    reason: >-
+      The module is excluded from portable builds by design. The log contains no uvc_backend
+      entry and the compile database has zero occurrences; the merged count is the glob size
+      (20 analyzed + 1 not-in-database). Windows-side analysis remains part of the deferred
+      windows-2022 evidence.
+  - id: D3
+    item: "open vs reconnect failure mapping"
+    decision: "open maps a non-resolving descriptor to camera_not_found (ambiguous detail preserved); reconnect maps a device that has not reappeared to camera_io/camera_disconnected."
+    reason: >-
+      H6 requires the bounded capture_with_one_retry to fail with camera_io while the device is
+      absent and to recover after replug, and reconnect must remain callable after a failed
+      reconnect attempt even though the session is closed.
+  - id: D4
+    item: "devices without a symbolic link"
+    decision: "such devices are not enumerated at all (device_path would be empty and the descriptor contract/H1 requires a non-empty path)."
+    reason: "No stable identity means no safe selector; fabricating one would risk a wrong-device open."
+  - id: D5
+    item: "forced-Windows probes"
+    decision: "recorded as non-evidence syntax checks only."
+    reason: "Stub headers are not the Windows SDK and clang is not MSVC; the contract defers Windows compile/ABI evidence to windows-2022."
+
+invariants_verified:
+  - "No Daheng/vendor SDK headers, binaries, runtime dependencies, or includes: the module links only cvforwin_camera, opencv_imgproc, and MF system libraries."
+  - "No inspection, recipe, C ABI, or runtime coupling in the UVC module; it exchanges only camera_contract values."
+  - "Exactly-one identity resolution through the existing resolve_identity; zero/multiple matches fail; no first-device fallback anywhere (the hardware suite refuses to run without an explicit selector)."
+  - "At most one reconnect plus one recapture remains enforced by the frozen camera_contract helper; reconnect() itself never retries internally."
+  - "Portable WSL builds are unaffected: the module has zero compile rules and zero compile-database entries; only formatting (format-check) and the unregistered-free developer test reference it."
+  - "No test-owner file was modified (42/42 pinned hashes match)."
+  - "The public export set and all ABI surfaces are untouched."
+
+blockers:
+  - "Windows MSVC compile/link/ABI/package evidence is deferred: no Windows host, MSVC, or Media Foundation in this environment (contract-sanctioned deferral to windows-2022 CI)."
+  - "Opt-in hardware suite execution is deferred: no Windows station with a UVC camera (contract-sanctioned deferral)."
+
+notes:
+  - "Build trees and logs: .ai/validation/cvf007-developer/logs/{summary.tsv,win-syntax-probe.tsv}; harness scripts run-canonical.sh, win-syntax-probe.sh, check-test-ownership.py, stub_win/."
+  - "The change contract's verification line 'unchanged 262/262' predates the developer-test registration required by the follow-up instruction; the recorded delta is exactly +1 case with all 262 independently authored tests still green."
+  - "Windows CI is not runnable from this workspace (no git remote/CI setup); that remains an outstanding release prerequisite tracked in workflow-state."
+
+review_amendment:
+  recorded_at: 2026-09-15
+  author: developer
+  trigger: >-
+    Independent review REQUEST_CHANGES on src/camera/uvc_windows/uvc_backend.cpp:
+    F1 (high, embedded trailing NUL in identity strings) and F2 (medium, planar chroma
+    stride/bounds), plus non-blocking notes.
+  files_touched:
+    - src/camera/uvc_windows/uvc_backend.cpp
+  findings_addressed:
+    - id: F1
+      severity: high
+      finding: >-
+        attribute_string passed GetAllocatedString's reported character count into wide_to_utf8;
+        when the count includes the terminating NUL, the converted device_path and friendly_name
+        carried an embedded trailing NUL that the rest of the library treats as invalid text.
+      fix: >-
+        wide_to_utf8 no longer trusts the reported count for NUL handling: it scans the UTF-16
+        source up to the reported length, stops at the first NUL character, and additionally
+        truncates the produced UTF-8 at the first NUL byte. Identity values are therefore clean
+        under either GetAllocatedString length convention (the current documentation states the
+        count excludes the terminator, but older implementations are reported to include it, and
+        the descriptor contract must hold regardless).
+      evidence: "forced -D_WIN32 strict syntax probe of uvc_backend.cpp exit 0; no WSL impact (Windows-only source)"
+    - id: F2
+      severity: medium
+      finding: >-
+        copy_planar_rows addressed I420/YV12 chroma rows with the luma stride, copied only
+        height/4 chroma rows with a full-width memcpy, and the only length check compared the
+        tightly packed size against the locked buffer. A padded-stride planar device could drive
+        reads past the locked sample buffer.
+      fix: >-
+        Planar 4:2:0 conversion now follows the documented Media Foundation layout: each chroma
+        plane has half the luma stride (S/2) and half the luma height (H/2), plane offsets are H*S
+        and H*S + (H/2)*(S/2), and each chroma row carries W/2 samples. I420 and YV12 are both
+        re-ordered into the canonical Y,U,V layout and converted with COLOR_YUV2BGR_I420. A new
+        required_extent_bytes() computes the exact byte extent addressed for the actual subtype,
+        stride and layout (including padding), and convert_video_buffer() rejects any sample whose
+        locked length (IMF2DBuffer::GetContiguousLength, or IMFMediaBuffer::Lock current length)
+        is smaller than that extent; a locked buffer that reports zero bytes is rejected as an
+        empty sample rather than being treated as unvalidated. Planar paths additionally require a
+        top-down, even stride and even width/height. Reference: Media Foundation "Image Stride"
+        (planar YV12 example: chroma planes have half the stride and half the height of the luma
+        plane).
+      evidence: "forced -D_WIN32 strict syntax probe of uvc_backend.cpp exit 0; no WSL impact (Windows-only source)"
+  non_blocking_notes_addressed:
+    - id: N1
+      note: "capture flush grace could exceed the remaining deadline"
+      change: >-
+        cancel_pending_read(deadline) waits for OnFlush for at most min(k_flush_grace,
+        deadline.remaining()); the asynchronous Flush request is still issued when the deadline is
+        spent, but the stream is then marked needs_reconnect_ and any late completion is cleared,
+        so the capture wait can never extend past the deadline.
+    - id: N2
+      note: "format negotiation not deadline-bounded"
+      change: >-
+        The activation deadline is threaded through activate -> start_stream -> select_format ->
+        select_native_format. Every negotiation attempt, each native-type probe, and the final
+        selection check deadline.expired() and fail with timeout/deadline_expired.
+    - id: N3
+      note: "MSVC /W4 risk spots (unused members, casts, wide-string usage)"
+      change: >-
+        Removed the unused ReadCallback::read_timestamp_ member and its stores (the OnReadSample
+        timestamp parameter is now intentionally unnamed). Casts and wide-string handling were
+        re-checked with the strict probe running the project warning set
+        (-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion -Wnon-virtual-dtor
+        -Wold-style-cast -Wcast-align -Wunused -Woverloaded-virtual -Wdouble-promotion -Wformat=2
+        -Wimplicit-fallthrough -Wnull-dereference -Werror) with zero diagnostics.
+    - id: N4
+      note: "add a chroma-stride comment"
+      change: >-
+        copy_planar_rows and required_extent_bytes now document the S/2 chroma pitch, H/2 chroma
+        plane height, W/2 chroma row width, plane offsets, and the canonical Y,U,V ordering.
+    - id: N5
+      note: "planar-conversion coverage gap for the station run"
+      change: >-
+        Added to windows_deferred.checklist: the primary RGB32 negotiation normally makes Media
+        Foundation convert internally, so the native I420/YV12/NV12 fallback may not be exercised
+        by one station camera; the station run must record the negotiated subtype and, where
+        available, use a device/driver that surfaces planar YUV.
+  fresh_commands:
+    - command: "cmake --preset wsl-gcc-debug"
+      exit_code: 0
+      counts: "configure OK; log .ai/validation/cvf007-developer/logs/configure-wsl-gcc-debug.log"
+    - command: "cmake --build --preset wsl-gcc-debug --parallel"
+      exit_code: 0
+      counts: "all targets built, 0 compiler warnings; log .../logs/build-wsl-gcc-debug.log"
+    - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+      exit_code: 0
+      counts: "263/263 passed, 0 failed (test #258 is the CVF-007 developer case); log .../logs/ctest-wsl-gcc-debug.log"
+    - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+      exit_code: 0
+      counts: "format-check passed: 82 file(s) conform; log .../logs/format-check.log"
+    - command: "cmake --preset wsl-clang-analysis && cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+      exit_code: 0
+      counts: "static-analysis passed: 21 file(s) (uvc_backend.cpp has no Linux compile command and is skipped by clang-tidy); log .../logs/static-analysis.log"
+    - command: "cmake --preset wsl-gcc-asan && cmake --build --preset wsl-gcc-asan --parallel && ctest --preset wsl-gcc-asan --output-on-failure"
+      exit_code: 0
+      counts: "263/263 passed under ASan/UBSan, 0 sanitizer findings; logs configure-wsl-gcc-asan.log, build-wsl-gcc-asan.log, ctest-wsl-gcc-asan.log"
+    - command: "bash .ai/validation/cvf007-developer/win-syntax-probe.sh"
+      exit_code: 0
+      counts: "4/4 forced -D_WIN32 probes pass (developer test and hardware suite against the real uvc_backend.h; backend under stub Windows/MF headers with basic and project warning sets); non-evidence"
+    - command: "python3 .ai/validation/cvf007-developer/check-test-ownership.py"
+      exit_code: 0
+      counts: "42 pinned test-owner files checked, 0 mismatches (tests/hardware/uvc_smoke.cpp hash unchanged)"
+  windows_impact_statement: >-
+    Both fixes live entirely in the Windows-only translation unit, so the portable WSL suite is
+    provably unaffected (the file has zero compile rules in the Linux build). They are validated
+    locally only by the forced -D_WIN32 syntax probes; the windows-2022 MSVC build must re-verify
+    compilation and linking, `uvc_smoke --list` must confirm clean identity strings (F1), and a
+    planar-YUV-capable station device is required to hardware-verify the F2 conversion path.

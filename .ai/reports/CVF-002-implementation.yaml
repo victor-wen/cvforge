@@ -1,0 +1,238 @@
+schema_version: 1
+change_id: CVF-002
+role: developer
+status: COMPLETE
+recorded_at: 2026-09-15
+implemented_against:
+  change_contract: .ai/changes/CVF-002.yaml
+  architecture_baseline: .ai/project-contract.yaml (1.0.0, APPROVED)
+  frozen_interface: interface_v1 (core result/deadline/camera error codes; camera contract; test backends)
+
+changed_files:
+  core_model:
+    - path: src/core/result.h
+      change: new
+      notes: "Result<T> and Result<void> exactly per interface_v1; accessor misuse throws std::logic_error."
+    - path: src/core/deadline.h
+      change: new
+      notes: "from_timeout_ms/immediate/expired/remaining (saturating clamp >= 0)."
+    - path: src/core/deadline.cpp
+      change: new
+      notes: "steady_clock absolute instant; remaining() clamps to zero."
+    - path: src/core/error.h
+      change: modified
+      notes: "Added camera_not_found=1400 .. descriptor_mismatch=1409."
+    - path: src/core/error.cpp
+      change: modified
+      notes: "Frozen broad-status mapping for 1400-1409 and stable error_code_name entries."
+  camera_contract:
+    - path: src/camera/captured_frame.h
+      change: new
+      notes: "PixelFormat, FrameMetadata, CapturedFrame; owned BGR8 cv::Mat, no backend handles."
+    - path: src/camera/camera_backend.h
+      change: new
+      notes: "CameraDescriptor/Selector/Settings, ICameraBackend, resolve_identity, capture_with_one_retry."
+    - path: src/camera/camera_backend.cpp
+      change: new
+      notes: "Unique-match identity resolution (no first-match fallback) and bounded one-reconnect/one-recapture capture."
+  test_camera_backends:
+    - path: src/camera/test_backends/test_backend_support.h
+      change: new
+      notes: "FaultKind, CallCounter (see deviation a), descriptors_equal, FaultInjector."
+    - path: src/camera/test_backends/test_backend_support.cpp
+      change: new
+      notes: "Per-call fault plan collections; delay honors the remaining deadline; disconnect/capture_error semantics."
+    - path: src/camera/test_backends/file_camera_backend.h
+      change: new
+      notes: "FileCameraConfig + FileCameraBackend with counters and fault API."
+    - path: src/camera/test_backends/file_camera_backend.cpp
+      change: new
+      notes: "imgcodecs decode, mono->BGR8, sequence from 0, frames_exhausted, capture_failed, camera_not_open, idempotent close."
+    - path: src/camera/test_backends/synthetic_camera_backend.h
+      change: new
+      notes: "SyntheticCameraConfig (descriptor backend_key defaults to synthetic; width=64, height=48)."
+    - path: src/camera/test_backends/synthetic_camera_backend.cpp
+      change: new
+      notes: "Frozen pixel formula, settings override, deterministic sequence."
+  build:
+    - path: CMakeLists.txt
+      change: modified
+      notes: "deadline.cpp into cvforwin_core; cvforwin_camera; cvforwin_test_backends; cvf_camera_tests via catch_discover_tests; two unit test sources."
+    - path: cmake/CvfOptions.cmake
+      change: modified
+      notes: "CVFORWIN_BUILD_TEST_BACKENDS option (dev/DEBUG default ON, release/multi-config default OFF, explicit -D wins)."
+    - path: cmake/CvfFormat.cmake
+      change: modified
+      notes: "tests/camera added to the same format-check exclusion policy as tests/abi (D1 precedent)."
+  developer_tests:
+    - path: tests/unit/test_core_result_deadline.cpp
+      change: new
+      notes: "Focused Result/Result<void>/Deadline unit tests."
+    - path: tests/unit/test_core_camera_error_codes.cpp
+      change: new
+      notes: "Camera error code numbering, broad-status mapping, stable names."
+  evidence_harness:
+    - path: .ai/validation/cvf-002-implement.sh
+      change: new
+      notes: "Developer harness (red/syntax/configure/build/test/format/analysis/asan/hashes)."
+    - path: .ai/validation/cvf-002-implement-out/
+      change: new
+      notes: "Raw command logs including option-off/option-on evidence."
+
+out_of_scope_paths_not_touched:
+  - CMakePresets.json  # not in scope.allowed_files; option preset behavior encoded in cmake/CvfOptions.cmake
+  - tests/camera/**    # read-only, hashes verified unchanged
+  - tests/abi/**       # read-only, pre-existing tests pass unchanged
+  - include/cvforwin/**, src/c_api/**, src/camera/uvc_windows/**
+  - .ai/project-contract.yaml, .ai/changes/**, .ai/test-ownership.yaml, .ai/test-briefs/**, .ai/reviews/**
+
+red_phase_evidence:
+  harness: "bash .ai/validation/cvf-002-implement.sh red"
+  result: >-
+    Before implementation all six tests/camera translation units failed with
+    "core/deadline.h: No such file or directory" at tests/camera/camera_test_support.h:21;
+    the pre-existing tests/unit translation units compiled (exit 0). Harness exit 0 with
+    the documented expected overall non-zero.
+
+verification:
+  canonical_wsl:
+    - command: "cmake --preset wsl-gcc-debug"
+      exit_code: 0
+      counts: "OpenCV 4.12.0 found (core imgcodecs imgproc); vcpkg install cached"
+    - command: "cmake --build --preset wsl-gcc-debug --parallel"
+      exit_code: 0
+      counts: "all production, test-backend, unit, ABI, and camera targets built"
+    - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+      exit_code: 0
+      counts: "100% tests passed, 0 failed out of 86 = 49 camera (CVF-002) + 4 abi + 33 unit"
+    - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+      exit_code: 0
+      counts: "format-check passed: 30 file(s) conform; tests/abi and tests/camera excluded as test-owner hash-pinned paths"
+    - command: "cmake --preset wsl-clang-analysis"
+      exit_code: 0
+      counts: "analysis build tree configured with compile_commands.json"
+    - command: "cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+      exit_code: 0
+      counts: "static-analysis passed: 11 file(s) clean under .clang-tidy"
+    - command: "cmake --preset wsl-gcc-asan"
+      exit_code: 0
+      counts: "sanitizer build tree configured"
+    - command: "cmake --build --preset wsl-gcc-asan --parallel"
+      exit_code: 0
+      counts: "all targets built with AddressSanitizer/UndefinedBehaviorSanitizer"
+    - command: "ctest --preset wsl-gcc-asan --output-on-failure"
+      exit_code: 0
+      counts: "100% tests passed, 0 failed out of 86"
+  additional:
+    - command: "cmake --build --preset wsl-gcc-debug --target abi-check"
+      exit_code: 0
+      counts: "exactly 5 export(s): cvf_get_abi_version;cvf_initialize;cvf_inspect;cvf_reload_recipes;cvf_shutdown"
+  option_gate_check:
+    note: >-
+      Verifies that CVFORWIN_BUILD_TEST_BACKENDS=OFF compiles the test backends
+      out and does not register tests/camera, then restores the tree to green.
+    commands:
+      - command: "cmake --preset wsl-gcc-debug -DCVFORWIN_BUILD_TEST_BACKENDS=OFF"
+        exit_code: 0
+        counts: "configure message: 'cvforwin: tests/camera is not registered because CVFORWIN_BUILD_TEST_BACKENDS is OFF'"
+      - command: "ctest --preset wsl-gcc-debug -N"
+        exit_code: 0
+        counts: "Total Tests: 37; camera CVF-002 tests present: 0; abi tests present: 4"
+      - command: "cmake --preset wsl-gcc-debug -DCVFORWIN_BUILD_TEST_BACKENDS=ON"
+        exit_code: 0
+        counts: "camera suite and test-backend targets re-enabled"
+      - command: "cmake --build --preset wsl-gcc-debug --parallel"
+        exit_code: 0
+        counts: "ninja: no work to do (artifacts up to date)"
+      - command: "ctest --preset wsl-gcc-debug -N"
+        exit_code: 0
+        counts: "Total Tests: 86; camera CVF-002 tests present: 49"
+      - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+        exit_code: 0
+        counts: "100% tests passed, 0 failed out of 86 (tree left green)"
+
+independent_tests_integrity:
+  manifest: .ai/test-ownership.yaml
+  change_key: CVF-002
+  mismatches: []
+  files:
+    - path: tests/camera/camera_test_support.h
+      sha256: dcd26a9c20557f19cba31fff527cfa6312bc4d7ca90fd63f5f435a82f0984f82
+    - path: tests/camera/camera_frame_fixtures.h
+      sha256: 18a04ec51bf392183817bbe3b8f3e4784019098815cb9f0e617eed3eb323d56e
+    - path: tests/camera/test_core_result_deadline.cpp
+      sha256: 739a68cc357aa88176e9f38dd0d0e763380c84974f211667c8debee38a89807d
+    - path: tests/camera/test_camera_identity_resolution.cpp
+      sha256: 9216dba9462c36dce7c8dea45e89d3b62b92c213530b64fcf041d916106bd825
+    - path: tests/camera/test_file_camera_backend.cpp
+      sha256: 1ffc03d2948954f6e56503088aba8344a6a0826358d87f13ab846d4657e96202
+    - path: tests/camera/test_synthetic_camera_backend.cpp
+      sha256: e5c6fd057310b647b19f82842dee31ecdba3f2bf3cedef046a3367fbc190b74f
+    - path: tests/camera/test_camera_fault_injection.cpp
+      sha256: 7d3a08682e08e1c815106b5675cbf03f2d982e3736fe7ada58d7be728992a89f
+    - path: tests/camera/test_capture_with_one_retry.cpp
+      sha256: 1a2051c2a9fc293bd7386148b8999e037f1cde693da5a2b7be40170f13aa7cd5
+
+deviations:
+  - id: a
+    area: test_backends counters
+    severity: benign-compat
+    detail: >-
+      interface_v1 spells the counters as callable accessors
+      (std::uint32_t capture_call_count() const noexcept) while the independent
+      black-box suite observes them as plain members
+      (backend.capture_call_count == 1). Both spellings are provided by the same
+      CallCounter object (const operator() and implicit conversion to
+      std::uint32_t) sharing one value, so neither the frozen semantics nor the
+      hash-pinned assertions change. Implementation: test_backend_support.h.
+  - id: b
+    area: synthetic backend open
+    severity: deliberate-fail-closed
+    detail: >-
+      SyntheticCameraBackend::open also validates the descriptor field-by-field
+      and returns Failure(Status::camera_not_found, ErrorCode::descriptor_mismatch)
+      on mismatch. The change contract specified descriptor validation only for
+      the file backend; the synthetic check is fail-closed symmetry so a backend
+      can never open an identity it did not enumerate. No independent test
+      exercises a mismatched synthetic open.
+  - id: c
+    area: build/CI coverage
+    severity: flagged-for-review
+    detail: >-
+      CVFORWIN_BUILD_TEST_BACKENDS defaults OFF for multi-config/release
+      configurations, so the windows-msvc-release preset (the only Windows
+      preset) would not build the test backends and would not register the
+      tests/camera suite. That is in tension with the approved test policy,
+      which lists camera_contract environments "Windows MSVC with
+      synthetic/file/fault backends". CMakePresets.json is not in the CVF-002
+      allowed_files list, so the option could not be forced ON in that preset.
+      Flagged for the reviewer to resolve (e.g. an explicit ON in the Windows
+      preset or a dedicated Windows test preset) in CVF-008.
+  - id: d
+    area: core/camera headers
+    severity: cosmetic
+    detail: >-
+      FrameMetadata::captured_at and Deadline::deadline_ carry no "{}" default
+      member initializer because clang-tidy readability-redundant-member-init
+      (warnings-as-errors) rejects it; std::chrono::steady_clock::time_point's
+      default constructor zeroes the value, so behavior is unchanged.
+  - id: e
+    area: fault plan storage
+    severity: test-driven correction
+    detail: >-
+      Fault plans are stored per targeted call (vectors, latest injection for
+      the same call index replaces the previous plan) because
+      test_capture_with_one_retry.cpp requires failures at call 1 AND call 2 to
+      coexist. The first single-slot implementation failed that case and was
+      corrected; the final run is green.
+
+implementation_notes:
+  - "capture_with_one_retry checks the deadline before the first capture, before reconnect, and before recapture; non-camera_io failures are returned unchanged; reconnect failure is converted to the recapture return type and returned with no recapture."
+  - "File capture does not advance its frame index on a decode failure, so an undecodable frame keeps failing with capture_failed (no frames_exhausted drift)."
+  - "Synthetic/open and file/open reset sequence to 0; reconnect keeps position and only clears the disconnected state; close resets the open state and is idempotent."
+  - "Delay fault never sleeps past the deadline: delay > remaining sleeps exactly remaining and returns capture_timed_out; an already-expired deadline returns capture_timed_out immediately."
+  - "CMakePresets.json untouched; the ON/OFF preset split is implemented in cmake/CvfOptions.cmake (Debug or single-config-without-type -> ON; multi-config/other -> OFF; explicit -D always wins)."
+  - "tests/camera is exempted from format-check exactly like tests/abi (hash-pinned test-owner sources); both remain compiled with -Wall -Wextra -Werror."
+
+blockers: []
+next_phase: independent verification (recompute tests/camera hashes, rerun canonical commands, inspect deviations a-d)

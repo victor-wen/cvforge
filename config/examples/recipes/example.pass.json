@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "recipe_id": "example.pass",
+  "algorithm": "example.threshold",
+  "parameters": {
+    "threshold": 128,
+    "min_pass_ratio": 0.0
+  },
+  "capture": {
+    "settle_frames": 0
+  },
+  "artifacts": {
+    "save_policy": "always",
+    "required": false
+  }
+}

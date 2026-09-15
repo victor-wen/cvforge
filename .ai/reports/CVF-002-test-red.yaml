@@ -1,0 +1,166 @@
+change_id: CVF-002
+phase: AUTHOR
+recorded_at: 2026-09-15
+author: test-engineer
+target: >-
+  Camera contract (identity, settings, captured frames, bounded capture) plus
+  deterministic file/synthetic test backends with fault injection.
+methodology: >-
+  Black-box authoring from .ai/test-briefs/CVF-002.yaml and the approved
+  .ai/project-contract.yaml only. No production .cpp file was opened; the only
+  src/** files touched are the frozen interface headers the brief licenses for
+  compile-against use (src/core/*.h, src/camera/**). No CMake file was modified.
+
+summary: >-
+  Six independent Catch2 v3 / C++20 translation units were authored under the
+  test-owner path tests/camera/**. Author-phase RED is a compile failure in every
+  TU because the frozen interface headers core/result.h, core/deadline.h,
+  camera/captured_frame.h, camera/camera_backend.h and camera/test_backends/*.h do
+  not exist yet. The first diagnostic is the expected missing-header error; no test
+  case executed, so no assertion ever passed before implementation.
+
+commands:
+  - command: "bash .ai/validation/cvf-002-author-red.sh red"
+    exit_code: 1
+    counts: "translation_units=6, compiled=0, failed=6, executed_test_cases=0, passed=0, skipped=0"
+    notes: >-
+      Harness written by test-engineer under .ai/validation/. It globs
+      tests/camera/*.cpp, runs each syntax-only compile, and prints the command,
+      first diagnostics, and exit code. Overall exit is non-zero.
+  - command: "g++ -std=c++20 -Wall -Wextra -Werror -I src -I include -isystem /home/administrator/c_cpp_project/cvforwin/build/wsl-gcc-debug/vcpkg_installed/x64-linux/include -isystem /home/administrator/c_cpp_project/cvforwin/build/wsl-gcc-debug/vcpkg_installed/x64-linux/include/opencv4 -fsyntax-only tests/camera/test_core_result_deadline.cpp"
+    exit_code: 1
+    observed: "tests/camera/camera_test_support.h:21:10: fatal error: core/deadline.h: No such file or directory"
+  - command: "g++ -std=c++20 -Wall -Wextra -Werror -I src -I include -isystem /home/administrator/c_cpp_project/cvforwin/build/wsl-gcc-debug/vcpkg_installed/x64-linux/include -isystem /home/administrator/c_cpp_project/cvforwin/build/wsl-gcc-debug/vcpkg_installed/x64-linux/include/opencv4 -fsyntax-only tests/camera/test_camera_identity_resolution.cpp"
+    exit_code: 1
+    observed: "tests/camera/camera_test_support.h:21:10: fatal error: core/deadline.h: No such file or directory"
+  - command: "g++ -std=c++20 -Wall -Wextra -Werror -I src -I include -isystem /home/administrator/c_cpp_project/cvforwin/build/wsl-gcc-debug/vcpkg_installed/x64-linux/include -isystem /home/administrator/c_cpp_project/cvforwin/build/wsl-gcc-debug/vcpkg_installed/x64-linux/include/opencv4 -fsyntax-only tests/camera/test_file_camera_backend.cpp"
+    exit_code: 1
+    observed: "tests/camera/camera_test_support.h:21:10: fatal error: core/deadline.h: No such file or directory"
+  - command: "g++ -std=c++20 -Wall -Wextra -Werror -I src -I include -isystem /home/administrator/c_cpp_project/cvforwin/build/wsl-gcc-debug/vcpkg_installed/x64-linux/include -isystem /home/administrator/c_cpp_project/cvforwin/build/wsl-gcc-debug/vcpkg_installed/x64-linux/include/opencv4 -fsyntax-only tests/camera/test_synthetic_camera_backend.cpp"
+    exit_code: 1
+    observed: "tests/camera/camera_test_support.h:21:10: fatal error: core/deadline.h: No such file or directory"
+  - command: "g++ -std=c++20 -Wall -Wextra -Werror -I src -I include -isystem /home/administrator/c_cpp_project/cvforwin/build/wsl-gcc-debug/vcpkg_installed/x64-linux/include -isystem /home/administrator/c_cpp_project/cvforwin/build/wsl-gcc-debug/vcpkg_installed/x64-linux/include/opencv4 -fsyntax-only tests/camera/test_camera_fault_injection.cpp"
+    exit_code: 1
+    observed: "tests/camera/camera_test_support.h:21:10: fatal error: core/deadline.h: No such file or directory"
+  - command: "g++ -std=c++20 -Wall -Wextra -Werror -I src -I include -isystem /home/administrator/c_cpp_project/cvforwin/build/wsl-gcc-debug/vcpkg_installed/x64-linux/include -isystem /home/administrator/c_cpp_project/cvforwin/build/wsl-gcc-debug/vcpkg_installed/x64-linux/include/opencv4 -fsyntax-only tests/camera/test_capture_with_one_retry.cpp"
+    exit_code: 1
+    observed: "tests/camera/camera_test_support.h:21:10: fatal error: core/deadline.h: No such file or directory"
+
+red_tests:
+  note: >-
+    RED is a compile-time failure of the whole TU, so Catch2 case names could not be
+    listed from a run. The planned case inventory is recorded below; all 49 cases are
+    expected to be RED until the frozen headers and the camera suite build wiring exist.
+  translation_units:
+    - tests/camera/test_core_result_deadline.cpp
+    - tests/camera/test_camera_identity_resolution.cpp
+    - tests/camera/test_file_camera_backend.cpp
+    - tests/camera/test_synthetic_camera_backend.cpp
+    - tests/camera/test_camera_fault_injection.cpp
+    - tests/camera/test_capture_with_one_retry.cpp
+  planned_case_counts:
+    tests/camera/test_core_result_deadline.cpp: 8
+    tests/camera/test_camera_identity_resolution.cpp: 8
+    tests/camera/test_file_camera_backend.cpp: 9
+    tests/camera/test_synthetic_camera_backend.cpp: 6
+    tests/camera/test_camera_fault_injection.cpp: 10
+    tests/camera/test_capture_with_one_retry.cpp: 8
+    total: 49
+
+failures:
+  - test: "all six translation units (preprocessing stage)"
+    expected: >-
+      Compile failure because the frozen interface headers do not exist before
+      implementation: core/result.h, core/deadline.h, camera/captured_frame.h,
+      camera/camera_backend.h, camera/test_backends/file_camera_backend.h,
+      camera/test_backends/synthetic_camera_backend.h.
+    observed: >-
+      exit code 1 in all six TUs; the first fatal diagnostic is
+      `core/deadline.h: No such file or directory` at
+      tests/camera/camera_test_support.h:21 (include order is
+      core/deadline.h, core/error.h, core/result.h, core/status.h; error.h exists
+      from CVF-001, so deadline.h is the first missing header). No Catch2 case ran.
+  - test: "informational: cmake --preset wsl-gcc-debug"
+    expected: "Camera suite not wired into CMakeLists.txt yet."
+    observed: >-
+      Not executed: the sandbox command allowlist for this role does not include
+      `cmake` (only my harness, sha256sum, and ctest patterns). Wiring is confirmed
+      absent by inspection of the build configuration: CMakeLists.txt registers only
+      tests/abi/** (C ABI) and tests/unit/** (developer Catch2 tests); no
+      tests/camera/** target exists and no camera source is referenced.
+
+ownership:
+  manifest: .ai/test-ownership.yaml
+  change_key: CVF-002
+  owner: test-engineer
+  algorithm: sha256
+  files_checked: 8
+  mismatches: []
+  files:
+    - path: tests/camera/camera_test_support.h
+      sha256: dcd26a9c20557f19cba31fff527cfa6312bc4d7ca90fd63f5f435a82f0984f82
+    - path: tests/camera/camera_frame_fixtures.h
+      sha256: 18a04ec51bf392183817bbe3b8f3e4784019098815cb9f0e617eed3eb323d56e
+    - path: tests/camera/test_core_result_deadline.cpp
+      sha256: 739a68cc357aa88176e9f38dd0d0e763380c84974f211667c8debee38a89807d
+    - path: tests/camera/test_camera_identity_resolution.cpp
+      sha256: 9216dba9462c36dce7c8dea45e89d3b62b92c213530b64fcf041d916106bd825
+    - path: tests/camera/test_file_camera_backend.cpp
+      sha256: 1ffc03d2948954f6e56503088aba8344a6a0826358d87f13ab846d4657e96202
+    - path: tests/camera/test_synthetic_camera_backend.cpp
+      sha256: e5c6fd057310b647b19f82842dee31ecdba3f2bf3cedef046a3367fbc190b74f
+    - path: tests/camera/test_camera_fault_injection.cpp
+      sha256: 7d3a08682e08e1c815106b5675cbf03f2d982e3736fe7ada58d7be728992a89f
+    - path: tests/camera/test_capture_with_one_retry.cpp
+      sha256: 1a2051c2a9fc293bd7386148b8999e037f1cde693da5a2b7be40170f13aa7cd5
+
+coverage:
+  B1: tests/camera/test_camera_identity_resolution.cpp
+  B2: tests/camera/test_file_camera_backend.cpp
+  B3: tests/camera/test_file_camera_backend.cpp
+  B4: tests/camera/test_synthetic_camera_backend.cpp
+  B5: tests/camera/test_camera_fault_injection.cpp
+  B6: tests/camera/test_camera_fault_injection.cpp
+  B7: tests/camera/test_camera_fault_injection.cpp
+  B8: tests/camera/test_capture_with_one_retry.cpp
+  B9: tests/camera/test_capture_with_one_retry.cpp
+  B10: tests/camera/test_capture_with_one_retry.cpp
+  B11: tests/camera/test_core_result_deadline.cpp
+  B12: tests/camera/test_core_result_deadline.cpp
+  boundary_and_negative_cases: >-
+    Covered inside the files above: single-field selectors with shared values,
+    empty candidate list, faults beyond the reached call count, delay shorter/longer
+    than remaining, delay equal to nominal remaining (bounded), reconnect failing
+    before recapture, reconnect twice, second-retry failure, non-camera_io no-retry,
+    expired deadline, zero settings dimension, descriptor mismatch, capture and
+    reconnect before open, undecodable file, and frame exhaustion.
+
+interface_facts_confirmed_by_probe:
+  note: >-
+    The probes under .ai/validation/cvf-002-probe/ compile only against the already
+    existing frozen headers src/core/status.h and src/core/error.h; they never read
+    source. They pinned the shared core spellings instead of guessing them.
+  - "cvforwin::core::Status::ok=0, invalid_argument=1, camera_not_found=7, camera_io=8, timeout=9 exist as expected."
+  - "cvforwin::core::Failure exists, is default-constructible, and exposes assignable members status (Status), code (ErrorCode), message (std::string); positional order (status, code, message) type-checks."
+  - "Camera enumerators (1400..1409) are not present yet, confirming the expected RED for CVF-002's new error codes."
+  - "No core mapping function is named in the brief; the broad/detailed pair is therefore asserted through failure().status and failure().code, which the frozen Failure already carries."
+
+author_assumptions:
+  - "Fault kind enum spelling `cvforwin::camera::FaultKind` with enumerators `disconnect` and `capture_error`; spec was updated to match this spelling."
+  - "Settings type `cvforwin::camera::CameraSettings` with assignable `width`/`height`; zero means unspecified."
+  - "Pixel format spelling `cvforwin::camera::PixelFormat::bgr8`."
+  - "Test-backend header names `camera/test_backends/file_camera_backend.h` and `camera/test_backends/synthetic_camera_backend.h`; spec was updated to match these names."
+  - "Config structs are aggregates built with designated initializers: FileCameraConfig{.descriptor, .frame_paths} and SyntheticCameraConfig{.descriptor, .width, .height}, with default member initializers 64 and 48."
+  - "CameraDescriptor has backend_key/device_path/vendor_id/product_id/friendly_name in the brief's order and is built with designated initializers; CameraSelector is default-constructed and assigned per field."
+  - "capture_with_one_retry takes the backend by reference (ICameraBackend&) and the settings by value/reference; it is called with a concrete test backend lvalue."
+  - "close() may return void or Result<void>; the tests cast the call to void so a [[nodiscard]] Result cannot break the build."
+  - "enumerate is driven with a generous 5000 ms deadline so the deadline itself is not the subject of those checks."
+  - "B7 delay == nominal remaining: because the wall clock consumes part of the timeout before any comparison, either documented outcome is acceptable; the test asserts a timeout-or-frame outcome and a bounded elapsed time rather than guessing the race."
+
+blockers: []
+
+notes: >-
+  Author phase complete. The next phase is implementation; verification must run in a
+  fresh session with the same brief, this manifest, and the canonical CTest command,
+  then recompute every sha256 above and confirm no assertion was weakened, skipped, or
+  removed.

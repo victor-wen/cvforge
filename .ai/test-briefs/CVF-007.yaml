@@ -1,0 +1,68 @@
+schema_version: 1
+change_id: CVF-007
+target: "UVC Windows backend (Media Foundation) — contract exercises and opt-in hardware smoke suite"
+in_scope:
+  - identity enumeration/resolution semantics for Windows video-capture devices
+  - open/configure/capture/reconnect/close ordering, deadline handling, error mapping
+  - opt-in hardware smoke coverage (stable identity, frame integrity, repeated cycles, unplug/replug retry)
+out_of_scope:
+  - hosted CI execution (no camera), inspection/recipe/ABI behavior, Daheng SDK
+constraints:
+  - "Windows-only: the entire hardware test file is guarded by #if defined(_WIN32); the CMake target is registered only on WIN32 and only under an opt-in option (CVFORWIN_BUILD_HARDWARE_TESTS, default OFF)."
+  - "Never fall back to the first device in any test path."
+  - "Unplug/replug retry is a manual, environment-gated step (e.g. CVF_HW_UNPLUG_TEST=1) and must be documented as a manual operator procedure; it must not run automatically."
+interface_reference:
+  backend: "cvforwin::camera::ICameraBackend (CVF-002 contract) with backend_key \"uvc\""
+  headers:
+    - "src/camera/uvc_windows/uvc_backend.h"
+    - "src/camera/camera_backend.h"
+    - "src/camera/captured_frame.h"
+    - "src/core/{status,error,result,deadline}.h"
+  descriptor: "backend_key \"uvc\", device_path (MF symbolic link UTF-8), vendor_id/product_id (4 lowercase hex), friendly_name"
+  errors: "camera_not_found (no/ambiguous match), camera_io (device/stream failure; details camera_disconnected/capture_failed), timeout/capture_timed_out"
+observable_behaviors:
+  - id: H1
+    behavior: "enumerate returns descriptors whose backend_key is \"uvc\" and whose identity fields are non-empty where the OS exposes them."
+  - id: H2
+    behavior: "resolve_identity with a selector matching no device -> camera_not_found/camera_not_found; a selector matching multiple devices -> camera_not_found/camera_identity_ambiguous; never a first-device fallback."
+  - id: H3
+    behavior: "open with a resolved descriptor and configured settings succeeds; capture returns an owned BGR8 frame with the configured dimensions and an incrementing sequence; close is idempotent."
+  - id: H4
+    behavior: "Repeated capture cycles (e.g. 50) keep producing valid frames without resource exhaustion (device remains usable)."
+  - id: H5
+    behavior: "capture with an already-expired deadline -> timeout/capture_timed_out."
+  - id: H6
+    behavior: "Manual unplug/replug (env-gated): the first capture after unplug fails with camera_io; a bounded reconnect + recapture recovers when the device returns; at most one retry is attempted."
+boundary_cases:
+  - "Selector with only friendly_name set (must still resolve uniquely or fail per rules)."
+  - "Zero devices attached: enumerate empty; resolution fails with camera_not_found."
+negative_cases:
+  - "Open before resolve / with a stale descriptor -> documented failure, no crash."
+compatibility_requirements:
+  - "Test file clang-format clean before hashing; entire content inside #if defined(_WIN32)."
+  - "No hardware execution is attempted in this environment; evidence is deferred to a designated Windows station."
+acceptance_criteria:
+  - "Portable WSL build/test suite remains green (262/262) with the module excluded; the hardware suite is authored and its execution deferred to representative hardware per contract test policy."
+allowed_context:
+  - .ai/project-contract.yaml
+  - .ai/test-briefs/CVF-007.yaml
+  - tests/hardware/**
+  - CMakeLists.txt, CMakePresets.json
+  - "frozen headers (may #include, must not open .cpp files): src/camera/camera_backend.h, src/camera/captured_frame.h, src/core/{status,error,result,deadline}.h"
+  - ~/.config/opencode/skills/black-box-testing/SKILL.md
+forbidden_context:
+  - "any src/** .cpp implementation file"
+  - .ai/changes/**
+  - .ai/reports/**
+  - "any diff, changed-file list, developer note, or root-cause description"
+allowed_test_paths:
+  - tests/hardware/**
+ownership_manifest: .ai/test-ownership.yaml
+evidence:
+  red_report: .ai/reports/CVF-007-test-red.yaml
+  verify_report: .ai/reports/CVF-007-test-verify.yaml
+notes: >-
+  RED in this environment is structural: the file is authored before the Windows-only
+  implementation exists and cannot compile or run on WSL (guarded out). Record that honestly
+  as deferred evidence; do not fabricate compile/run output. Extend the changes: mapping with
+  a CVF-007 section; preserve existing sections byte-exact.

@@ -1,0 +1,57 @@
+# Scripted body of the abi-check target. Configured into the build tree by
+# cmake/CvfAbiCheck.cmake.
+
+if(NOT EXISTS "${CVF_LIBRARY}")
+    message(FATAL_ERROR "abi-check: library does not exist: ${CVF_LIBRARY}")
+endif()
+
+set(actual "")
+if(WIN32 OR CVF_DUMPBIN)
+    # Windows: dumpbin is authoritative for the DLL export surface.
+    execute_process(
+        COMMAND "${CVF_DUMPBIN}" "/exports" "${CVF_LIBRARY}"
+        RESULT_VARIABLE result
+        OUTPUT_VARIABLE output
+        ERROR_VARIABLE error_output
+    )
+    if(NOT result EQUAL 0)
+        message(FATAL_ERROR "abi-check: dumpbin failed (${result}): ${error_output}")
+    endif()
+    string(REPLACE "\r\n" "\n" output "${output}")
+    string(REPLACE "\n" ";" lines "${output}")
+    foreach(line IN LISTS lines)
+        if(line MATCHES "^[ \t]+[0-9]+[ \t]+[0-9A-Fa-f]+[ \t]+[0-9A-Fa-f]+[ \t]+(cvf_[A-Za-z0-9_]+)")
+            list(APPEND actual "${CMAKE_MATCH_1}")
+        endif()
+    endforeach()
+else()
+    # Portable: nm reads the ELF dynamic symbol table.
+    execute_process(
+        COMMAND "${CVF_NM}" "-D" "--defined-only" "${CVF_LIBRARY}"
+        RESULT_VARIABLE result
+        OUTPUT_VARIABLE output
+        ERROR_VARIABLE error_output
+    )
+    if(NOT result EQUAL 0)
+        message(FATAL_ERROR "abi-check: nm failed (${result}): ${error_output}")
+    endif()
+    string(REPLACE "\n" ";" lines "${output}")
+    foreach(line IN LISTS lines)
+        if(line MATCHES "[ \t](cvf_[A-Za-z0-9_]+)$")
+            list(APPEND actual "${CMAKE_MATCH_1}")
+        endif()
+    endforeach()
+endif()
+
+list(REMOVE_DUPLICATES actual)
+list(SORT actual)
+set(expected "${CVF_EXPECTED}")
+
+if(NOT actual STREQUAL expected)
+    message(STATUS "abi-check: expected exports: ${expected}")
+    message(STATUS "abi-check: observed exports: ${actual}")
+    message(FATAL_ERROR "abi-check: export surface does not match src/c_api/cvforwin.def")
+endif()
+
+list(LENGTH actual count)
+message(STATUS "abi-check passed: exactly ${count} export(s): ${actual}")

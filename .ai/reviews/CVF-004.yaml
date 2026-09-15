@@ -1,0 +1,214 @@
+schema_version: 1
+change_id: CVF-004
+role: reviewer
+recorded_at: 2026-09-15
+verdict: APPROVE
+
+reviewed_artifacts:
+  - .ai/project-contract.yaml
+  - .ai/changes/CVF-004.yaml
+  - .ai/reports/CVF-004-implementation.yaml
+  - .ai/reports/CVF-004-test-red.yaml
+  - .ai/reports/CVF-004-test-red-amendment.yaml
+  - .ai/reports/CVF-004-test-verify.yaml
+  - .ai/test-ownership.yaml
+  - .ai/test-briefs/CVF-004.yaml
+  - .ai/workflow-state.yaml
+  - src/recipes/config.h, src/recipes/config.cpp
+  - src/recipes/recipe.h, src/recipes/recipe.cpp
+  - src/recipes/recipe_catalog.h, src/recipes/recipe_catalog.cpp
+  - src/core/error.h, src/core/error.cpp
+  - CMakeLists.txt, CMakePresets.json, cmake/CvfFormat.cmake, cmake/CvfAnalysis.cmake
+  - tests/unit/cvf004_test_support.h, tests/unit/cvf004_error_codes_test.cpp,
+    tests/unit/cvf004_config_test.cpp, tests/unit/cvf004_recipe_test.cpp,
+    tests/unit/cvf004_catalog_test.cpp, tests/unit/cvf004_holder_test.cpp
+  - tests/unit/test_recipes_store.cpp
+  - .ai/validation/cvf004-developer/*.log, .ai/validation/cvf004-test-engineer-verify*
+  - installed nlohmann 3.12 detail/input/json_sax.hpp (callback depth semantics)
+
+summary: >-
+  The change implements the frozen recipe_store interface_v1 exactly. Error codes
+  1600-1623 exist with the frozen names, values, and broad-status mapping
+  (1622 -> recipe_not_found, all other config/recipe codes -> config_error);
+  load_global_config enforces absolute roots (1011), missing/unreadable/parse/
+  duplicate/unknown/schema/backend/selector/string-cap/hex/bounds rules; load_recipe_file
+  enforces the required and unknown key sets, schema version, recipe_id and algorithm
+  byte patterns with registry lookup, algorithm-delegated parameter validation with
+  message preservation, and the capture/artifacts rules including the std::string
+  save_policy tokens frozen on disk; RecipeCatalog loads sorted non-recursive *.json
+  all-or-nothing with duplicate-id rejection and immutable lookup; RecipeHolder uses
+  std::atomic<std::shared_ptr<const RecipeCatalog>> with release/acquire. The
+  duplicate-key detector was verified correct against the installed nlohmann 3.12
+  callback depth semantics (object_start at depth d, keys at d+1; sibling objects in
+  arrays cannot false-positive), and invalid UTF-8 is rejected by the parser. No camera
+  implementation or public C ABI enters src/recipes/**, and identifiers cannot form
+  paths. Scope is clean: only scope.allowed_files were touched; the only independent
+  cvf004 test edits are the owner-recorded TV-1 anchor fix and the verify-phase
+  frame_rate boundary probes, both without weakening any assertion. Evidence is
+  internally consistent: 204 = 135 pre-existing + 60 independent + 9 developer with
+  0 skips; format-check 56 files; static-analysis 17 src-only TUs (unaffected by the
+  later test-only edits); ASan build green with the single historical ASan failure
+  being test-side TV-1; ownership hashes match across the developer report, verify
+  report, and manifest at each stage. The six notes below are quality-gate evidence
+  hygiene items, not contract violations.
+
+blocking_findings: []
+
+non_blocking_findings:
+  - id: NB-1
+    severity: minor
+    area: sanitizer evidence on the frozen state
+    finding: >-
+      The only recorded ASan/UBSan ctest run predates the TV-1 fix and the
+      verify-phase extension (203 tests, 1 failure = TV-1, a test-helper anchor bug
+      in cvf004_config_test.cpp). No zero-exit sanitizer ctest run exists for the
+      final frozen test sources; the post-fix reruns were wsl-gcc-debug only.
+    evidence: >-
+      .ai/validation/cvf004-developer/ctest-asan.log:435-441 (99% passed, 1 of 203
+      failed, test #153 TV-1); .ai/validation/cvf004-developer/ctest-gcc-postfix.log
+      (203/203 debug); .ai/validation/cvf004-test-engineer-verify-summary.txt (204/204
+      debug only)
+    required_action: >-
+      quality_owner: run the canonical sanitizer workflow
+      (cmake --preset wsl-gcc-asan && cmake --build --preset wsl-gcc-asan --parallel
+      && ctest --preset wsl-gcc-asan --output-on-failure) on the frozen state and
+      record the zero exit codes in .ai/reports/CVF-004-quality.yaml.
+  - id: NB-2
+    severity: minor
+    area: format evidence on the frozen state
+    finding: >-
+      The canonical format-check run (56 files conform) predates the TV-1 amendment
+      and the verify-phase extension. The test owner recorded a direct clang-format
+      dry run (exit 0) only for the amendment revision; no canonical format-check or
+      persisted format log exists for the final cvf004 test files, which the format
+      target covers (tests/unit/*.cpp and *.h are not excluded).
+    evidence: >-
+      .ai/validation/cvf004-developer/format-check.log; .ai/reports/CVF-004-test-red-amendment.yaml
+      (clang-format --dry-run exit 0); .ai/reports/CVF-004-test-verify.yaml (extension
+      with no format evidence); cmake/CvfFormat.cmake:21-30
+    required_action: >-
+      quality_owner: run the canonical format-check target on the frozen state and
+      record the result in the quality report; no rework by the test owner required
+      if it stays clean.
+  - id: NB-3
+    severity: minor
+    area: independent-test hash integrity
+    finding: >-
+      The reviewer (read-only, no shell) could not recompute the six sha256 digests.
+      The values are mutually consistent across the developer report, the verify
+      report, and .ai/test-ownership.yaml at every stage (initial 6/6, owner-updated
+      after the TV-1 amendment, owner-updated again after the verify extension), and
+      the strengthened anchors are present in the files as described, but
+      recomputation remains deferred.
+    evidence: >-
+      .ai/test-ownership.yaml:89-131; .ai/validation/cvf004-developer/cvf004-hashes.txt
+      (pre-amendment values); .ai/reports/CVF-004-test-red-amendment.yaml:70-87;
+      .ai/reports/CVF-004-test-verify.yaml:36-39,77-95
+    required_action: >-
+      quality_owner: recompute all six CVF-004 sha256 digests against
+      .ai/test-ownership.yaml as part of the quality gate and record the result.
+  - id: NB-4
+    severity: minor
+    area: canonical-command execution path during verify
+    finding: >-
+      The verify session ran the canonical cmake/ctest commands through the
+      test-owner harness .ai/validation/cvf004-test-engineer-verify.sh because direct
+      cmake invocations were sandbox-denied. The harness invokes the exact preset
+      commands, logs raw output, and propagates the exit code, but it is an
+      intermediary rather than a direct canonical invocation.
+    evidence: >-
+      .ai/validation/cvf004-test-engineer-verify.sh:42-50,82; .ai/reports/CVF-004-test-verify.yaml:9-13
+    required_action: >-
+      quality_owner: execute the canonical command set unmodified for the quality
+      evidence; non-blocking for this review.
+  - id: NB-5
+    severity: observation
+    area: recipes directory IO classification
+    finding: >-
+      A missing recipes directory maps to 1606 (recipes_dir_missing) while a directory
+      iteration failure maps to 1607 (config_io_error), because the frozen numbering
+      has no dedicated directory-unreadable code. This is a documented deviation
+      (developer decision d4) and is not covered by the independent suite.
+    evidence: >-
+      src/recipes/recipe_catalog.cpp:36-46,55-58; .ai/reports/CVF-004-implementation.yaml:189-194
+    required_action: >-
+      None required; acceptable fail-closed mapping. Optionally pin the split with a
+      future test or clarify the interface text at the next revision.
+  - id: NB-6
+    severity: observation
+    area: invalid UTF-8 classification tolerance in independent tests
+    finding: >-
+      Two independent cases accept a small set of frozen codes for invalid UTF-8
+      (config_parse_error|config_value_invalid; recipe_parse_error|recipe_value_invalid|
+      recipe_id_invalid|recipe_algorithm_unknown) because the brief does not pin the
+      classification between parser-level and value-level rejection. The
+      implementation deterministically reports the parse-level codes. The tolerance is
+      consistent with author assumption A3 and does not weaken the required rejection.
+    evidence: >-
+      tests/unit/cvf004_config_test.cpp:489-508; tests/unit/cvf004_recipe_test.cpp:557-599;
+      .ai/reports/CVF-004-test-red.yaml:131-137
+    required_action: >-
+      None required; optionally pin the exact parse-error code at the next interface
+      revision.
+
+assessment:
+  frozen_interface_compliance: >-
+    PASS. Error codes 1600-1623 and status mapping match exactly; load_global_config
+    (absolute roots, missing/io/parse/duplicate/unknown, schema_version, backend, selector
+    sufficiency, all bounds), load_recipe_file (key set, patterns, registry lookup +
+    validate_parameters, capture/artifacts, all codes), catalog (sorted non-recursive
+    load, all-or-nothing, duplicate id, empty dir, find/ids/size) and holder (noexcept
+    publish/current, default nullptr, atomic swap) all match interface_v1, including the
+    std::string save_policy alignment frozen in the on-disk contract revision.
+  invariants: >-
+    PASS. Strict/duplicate-key-safe/bounded UTF-8 parsing; all-or-nothing reload with
+    no partial catalog observable; unknown algorithm or rejected parameters fail the
+    candidate set; no camera implementation or public C ABI in src/recipes/**;
+    identifiers cannot form paths (recipe_id alphabet excludes separators).
+  duplicate_key_and_utf8: >-
+    PASS. The callback clears keys_[depth+1] on object_start and records keys at
+    keys_[depth] on key events; checked against the installed nlohmann 3.12
+    json_sax.hpp where object_start is reported at ref_stack.size() and keys at
+    ref_stack.size()+1, so nested objects and sibling array objects are handled without
+    false positives or misses. Invalid UTF-8 is rejected by the nlohmann lexer and
+    surfaces as the parse-error codes the tests accept.
+  holder_memory_ordering: >-
+    PASS. std::atomic<std::shared_ptr<const RecipeCatalog>> with default nullptr,
+    release store in publish(), acquire load in current(); the specialization's atomic
+    refcount handling makes any concurrently observed snapshot a complete old or new
+    catalog. The catalog is move-only and immutable after load.
+  scope_and_independence: >-
+    PASS. Only scope.allowed_files were touched (src/recipes/**, src/core/error.*,
+    CMakeLists.txt, tests/unit developer tests, evidence harness). Independent
+    cvf004_* files were edited only by the test owner: TV-1 anchor corrected to the
+    fixture text and the verify-phase frame_rate probes added, both hash-recorded and
+    both preserving the intended assertions (the TV-1 case still requires
+    config_error/config_duplicate_key). No assertion was removed, skipped, or weakened.
+  evidence_consistency: >-
+    PASS. ctest 204 = 135 pre-existing + 60 independent + 9 developer, 0 failures,
+    0 skips (verify log). Format-check 56 files; static-analysis 17 src-only TUs
+    (production sources unchanged after that run, so the evidence remains valid).
+    ASan build green with the single historical failure proven test-side. Ownership
+    hashes consistent across the developer report, verify report, and manifest at each
+    stage. Windows MSVC evidence remains a CI concern per the baseline.
+
+required_actions:
+  - "quality_owner: run the canonical command set on the frozen state with clean flavors (configure/build/ctest, format-check, static-analysis, and the sanitizer workflow incl. ctest), and record zero exit codes."
+  - "quality_owner: recompute all six tests/unit/cvf004_* sha256 digests against .ai/test-ownership.yaml."
+  - "quality_owner: record the sanitizer, format, hash, and direct-command results in .ai/reports/CVF-004-quality.yaml (NB-1..NB-4)."
+  - "No blocking rework required; NB-5 and NB-6 are observations only."
+
+independence_notes: >-
+  The six tests/unit/cvf004_* files include only frozen interface headers plus
+  tests/unit support, never production .cpp files, and contain no SKIP/hidden tags
+  beyond the platform-guarded unreadable-file cases (permission bits skipped only when
+  running as root; the verify session ran non-root with no skip output). They are
+  behavior-derived from the brief B1-B7 plus documented boundary/negative cases, and
+  they failed RED by compilation against the missing recipes headers before
+  implementation existed. The holder concurrency case is bounded (3 readers, 200
+  publish rounds, no sleeps). Developer tests are complementary (array sibling-object
+  duplicate false-positive guard, nested config duplicate raw text, selector string
+  cap, missing sections, diagnostic preservation, non-JSON-only directory) and do not
+  duplicate the independent acceptance cases. The two owner-recorded test-file
+  updates are legitimate test-owner amendments with fresh evidence and updated
+  hashes; final digest recomputation is deferred to the quality gate (NB-3).

@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "camera": {
+    "backend": "synthetic",
+    "device_path": "synthetic0",
+    "vendor_id": "0000",
+    "product_id": "0000",
+    "friendly_name": "Synthetic camera"
+  },
+  "base_capture": {
+    "width": 64,
+    "height": 48,
+    "frame_rate": 30.0,
+    "pixel_format": "bgr8"
+  },
+  "logging": {
+    "level": "info",
+    "max_file_bytes": 1048576,
+    "max_files": 2
+  },
+  "retention": {
+    "max_age_days": 30,
+    "max_total_bytes": 1073741824
+  }
+}

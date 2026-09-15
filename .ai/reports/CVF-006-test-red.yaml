@@ -1,0 +1,168 @@
+change_id: CVF-006
+phase: AUTHOR
+recorded_at: 2026-09-15
+author: test-engineer
+brief: .ai/test-briefs/CVF-006.yaml
+harness: .ai/validation/cvf006-test-engineer-author.sh
+implementation_blindness: >-
+  No src/** .cpp file and no src/** file outside the brief's frozen header list
+  was opened. The public header was used through #include only; its exact field
+  and constant spellings were cross-checked against the allowed existing
+  tests/abi sources. The internal runtime interface is exercised only through
+  the brief's documented type and member names.
+
+commands:
+  - command: >-
+      clang-format -i tests/abi/cvf006_lifecycle.c tests/unit/cvf006_test_support.h
+      tests/unit/cvf006_deadline_test.cpp tests/unit/cvf006_reconnect_test.cpp
+      tests/unit/cvf006_save_policy_test.cpp tests/unit/cvf006_degraded_log_test.cpp
+      tests/unit/cvf006_rollback_test.cpp tests/unit/cvf006_serialization_test.cpp
+    exit_code: 0
+    counts: "8/8 independent files formatted"
+  - command: >-
+      clang-format --dry-run --Werror (same eight files)
+    exit_code: 0
+    counts: "8/8 clean; hashes recorded after this command"
+  - command: >-
+      gcc -std=c11 -Wall -Wextra -Werror -pthread -I include
+      -DCVF_TEST_FIXTURES_DIR='"tests/fixtures/runtime"'
+      -DCVF_TEST_TMP_DIR='"/tmp/cvf006_red"'
+      -fsyntax-only tests/abi/cvf006_lifecycle.c
+    exit_code: 0
+    counts: "strict C11 compile against the frozen public header succeeds"
+  - command: >-
+      gcc -std=c11 -Wall -Wextra -Werror -pthread -I include
+      -DCVF_TEST_FIXTURES_DIR='"tests/fixtures/runtime"'
+      -DCVF_TEST_TMP_DIR='"/tmp/cvf006_red"'
+      tests/abi/cvf006_lifecycle.c -L build/wsl-gcc-debug -lcvforwin
+      -Wl,-rpath,build/wsl-gcc-debug -o /tmp/cvf006_red/bin/cvf006_lifecycle
+    exit_code: 0
+    counts: "links against the currently built (pre-CVF-006) cvforwin shared library"
+  - command: "/tmp/cvf006_red/bin/cvf006_lifecycle"
+    exit_code: 1
+    counts: "checks=55 failures=18"
+    red_tests:
+      - b1_initialize_with_fixture_config
+      - b2_retry_after_failed_initialize
+      - b3_initialize
+      - b4_initialize
+      - b4_file_initialize
+      - b5_initialize
+      - b6_initialize
+      - b13_initialize
+      - b13_file_initialize
+  - command: >-
+      g++ -std=c++20 -fsyntax-only -I include -I src -I tests/unit
+      tests/unit/cvf006_deadline_test.cpp (and the other five cvf006_*.cpp files)
+    exit_code: 1
+    counts: "6/6 files fail to compile, each with the same first diagnostic"
+    red_tests:
+      - cvf006_deadline_test.cpp
+      - cvf006_reconnect_test.cpp
+      - cvf006_save_policy_test.cpp
+      - cvf006_degraded_log_test.cpp
+      - cvf006_rollback_test.cpp
+      - cvf006_serialization_test.cpp
+
+failures:
+  - test: b1_initialize_with_fixture_config
+    expected: >-
+      CVF_STATUS_OK with a non-null context for the valid fixture config and a
+      synthetic test backend
+    observed: >-
+      CVF_STATUS_CONFIG_ERROR (5) with out_context NULL; the current build has no
+      runtime orchestrator, so no live context can be created
+  - test: b2_retry_after_failed_initialize
+    expected: "CVF_STATUS_OK; a failed initialize leaves no context slot behind"
+    observed: "CVF_STATUS_CONFIG_ERROR (5); blocked by the missing runtime, not by CONTEXT_LIMIT"
+  - test: b3_initialize
+    expected: "CVF_STATUS_OK so the inspect happy path (B3) can be exercised"
+    observed: "CVF_STATUS_CONFIG_ERROR (5)"
+  - test: b4_initialize
+    expected: "CVF_STATUS_OK so inspect validation (B4) can be exercised"
+    observed: "CVF_STATUS_CONFIG_ERROR (5)"
+  - test: b4_file_initialize
+    expected: "CVF_STATUS_OK with the file backend for the pre-capture proof"
+    observed: "CVF_STATUS_CONFIG_ERROR (5)"
+  - test: b5_initialize
+    expected: "CVF_STATUS_OK so atomic reload (B5) can be exercised"
+    observed: "CVF_STATUS_CONFIG_ERROR (5)"
+  - test: b6_initialize
+    expected: "CVF_STATUS_OK so serialized concurrency (B6) can be exercised"
+    observed: "CVF_STATUS_CONFIG_ERROR (5)"
+  - test: b13_initialize
+    expected: "CVF_STATUS_OK so request validation (B13) can be exercised"
+    observed: "CVF_STATUS_CONFIG_ERROR (5)"
+  - test: b13_file_initialize
+    expected: "CVF_STATUS_OK with the file backend for input_json passthrough"
+    observed: "CVF_STATUS_CONFIG_ERROR (5)"
+  - test: cvf006_*_test.cpp (six C++ files)
+    expected: "compile against the frozen runtime interface (src/runtime/context.h)"
+    observed: >-
+      fatal error: runtime/context.h: No such file or directory
+      (tests/unit/cvf006_test_support.h:24:10)
+  - test: pre-existing validation checks inside the C lifecycle run
+    expected: "b2 negative cases (missing/invalid config, unknown algorithm, duplicate ids),
+      b4_null_context and the null-context verdict check keep their documented statuses"
+    observed: >-
+      these already pass at RED time because the CVF-001 public validation layer
+      already rejects them; this is expected pre-existing behavior, not a
+      test that passed for the wrong reason
+
+author_assumptions:
+  - "Internal runtime namespace is cvforwin::runtime with types RuntimeOptions, Context,
+    InspectionRequest, and InspectionOutcome (brief interface_reference names)."
+  - "Context::create(const RuntimeOptions&) returns a Result-like value
+    (has_value()/value()/failure()) holding a std::unique_ptr<Context>; the tests call it
+    with an lvalue options object."
+  - "Context::inspect returns the InspectionOutcome value; the support helpers also compile
+    against a Result<InspectionOutcome> return shape (try_capture_outcome overloads)."
+  - "Context::warning_flags() exists and reports the context-level warning bits; the same
+    bit mask (1u<<0 log sink, 1u<<1 image save) appears in the outcome."
+  - "RuntimeOptions.config_root/output_root accept std::string assignment (the tests pass
+    path.string()); enable_file_logging/enable_callback_logging are bools;
+    camera_override accepts std::shared_ptr<cam::ICameraBackend> (assigned a
+    shared_ptr<SyntheticCameraBackend>)."
+  - "InspectionRequest.recipe_id/request_id accept std::string assignment; timeout_ms is
+    either an integral millisecond count or a chrono duration (the RequestHolder detects
+    which one compiles)."
+  - "InspectionOutcome.output_json is nlohmann::json or a JSON text; image_path behaves as
+    a path/string; elapsed_ms is an integral count or chrono duration (accessors are
+    shape-tolerant)."
+  - "Configuration layout: <config_root>/cvforwin.json plus <config_root>/recipes/*.json,
+    matching the contract's global_configuration_v1 and inspection_recipe_v1 paths."
+  - "Test-enabled runtime accepts camera.backend 'synthetic' (exact synthetic descriptor from
+    the brief) and 'file' (device_path = absolute frames directory)."
+  - "Synthetic PASS recipe: threshold 128 + min_pass_ratio 0.0 (pass_ratio >= 0 always
+    passes). Synthetic FAIL recipe: threshold 255 + min_pass_ratio 1.0 (pixel (0,0) of the
+    synthetic frame is black, so the required full pass ratio can never be met)."
+  - "settle_frames is 0 in every fixture, so one inspect = one capture and the evaluated and
+    saved frame is the last captured frame (expected sequence = capture_call_count - 1)."
+  - "Degraded file sink (B10): the file-log sink is derived from output_root, so the tests
+    place a regular file at <output_root>/logs (and <output_root>/log as a hedge) with
+    enable_file_logging=true; initialization must still succeed with warning bit 1u<<0."
+  - "Save failures (B9): after a successful initialization the output_root tree is replaced
+    by a regular file so any later write below it fails (ENOTDIR / not-a-directory) even for
+    a privileged user; this does not depend on the internal captures subdirectory name."
+  - "Rollback (B11): a file backend whose frames directory does not exist fails at camera
+    resolution, after config and diagnostics creation."
+  - "Pre-capture proof (B4): with a file backend holding a 2x2 black frame first and a 5x3
+    white frame second, an undersized-buffer rejection is proven to precede acquisition by
+    the next successful inspect still reporting total_pixels 4."
+
+developer_wiring_expectations:
+  - "C target: C11, links the cvforwin shared library, defines CVF_TEST_FIXTURES_DIR
+    (tests/fixtures/runtime; an absolute path is safest because ctest runs from the build
+    directory) and CVF_TEST_TMP_DIR (writable scratch), and needs POSIX threads."
+  - "C++ target: links the new runtime library, cvforwin_test_backends, OpenCV core and
+    imgcodecs, Threads::Threads, and Catch2::Catch2WithMain, with src, include, and
+    tests/unit on the include path."
+  - "The C tests write all of their config/recipe/frame inputs below
+    CVF_TEST_TMP_DIR; only tests/fixtures/runtime/valid_config is read-only fixture data."
+
+ownership:
+  manifest: .ai/test-ownership.yaml
+  files_checked: 10
+  mismatches: []
+
+blockers: []

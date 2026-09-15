@@ -1,0 +1,103 @@
+change_id: CVF-003
+phase: VERIFY
+session: >-
+  Fresh implementation-blind verify session. Inputs used: .ai/test-briefs/CVF-003.yaml,
+  .ai/project-contract.yaml, .ai/test-ownership.yaml, and the four owned
+  tests/unit/cvf003_* test files only. No production .cpp, .ai/changes/**, other-role
+  report, diff, changed-file list, or developer note was read. The forbidden directory
+  .ai/validation/cvf003-developer/ was observed only as a directory name during hash
+  globbing and was never opened.
+date: 2026-09-15
+
+canonical_commands:
+  - command: "export VCPKG_ROOT=$HOME/vcpkg; cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    counts: "configure completed in 19.3s; build files written to build/wsl-gcc-debug"
+    evidence_log: .ai/validation/logs/cvf003-verify-configure.log
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    counts: "ninja: no work to do; build tree current with the hashed test sources"
+    evidence_log: .ai/validation/logs/cvf003-verify-build.log
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "passed=135, failed=0, skipped=0 ('100% tests passed, 0 tests failed out of 135')"
+    evidence_log: .ai/validation/logs/cvf003-verify-test.log
+
+supplementary_evidence:
+  - command: "ctest --preset wsl-gcc-debug -N"
+    exit_code: 0
+    counts: "CVF-003 cases are CTest entries #95-#131 = 37 of 135 total"
+    evidence_log: .ai/validation/logs/cvf003-verify-list.log
+  - command: "build/wsl-gcc-debug/cvf003_tests [cvf-003]"
+    exit_code: 0
+    counts: "'All tests passed (295 assertions in 37 test cases)'; 0 skipped"
+    evidence_log: .ai/validation/logs/cvf003-tag-run-cvf003_tests.log
+  - command: "clang-format --dry-run --Werror tests/unit/cvf003_*.cpp tests/unit/cvf003_*.h"
+    exit_code: 0
+    counts: "4/4 owned files format-clean (non-modifying dry run)"
+    evidence_log: recorded in the verify session terminal; no file was rewritten
+
+test_count:
+  independent_cvf003_cases: 37
+  breakdown: "registry=11, dispatch=9, example=17"
+  ctest_range: "#95-#131"
+
+failures: []
+
+ownership:
+  manifest: .ai/test-ownership.yaml
+  files_checked: 4
+  mismatches: []
+  verified:
+    - path: tests/unit/cvf003_test_support.h
+      manifest_sha256: db9b17fcbf1f36abeff72e2be3976fa694b0d5f1eb82045bda6889bff0ec0485
+      computed_sha256: db9b17fcbf1f36abeff72e2be3976fa694b0d5f1eb82045bda6889bff0ec0485
+      match: true
+    - path: tests/unit/cvf003_registry_test.cpp
+      manifest_sha256: d43c2ec1b75848e3bcfb8d2b7dc09cd67234f3a8072975bfc385fee8c2186937
+      computed_sha256: d43c2ec1b75848e3bcfb8d2b7dc09cd67234f3a8072975bfc385fee8c2186937
+      match: true
+    - path: tests/unit/cvf003_dispatch_test.cpp
+      manifest_sha256: 9ffd09e1d22a1e0b385ec5b4cda092d5311e719415caa18ddfe54f858301f306
+      computed_sha256: 9ffd09e1d22a1e0b385ec5b4cda092d5311e719415caa18ddfe54f858301f306
+      match: true
+    - path: tests/unit/cvf003_example_threshold_test.cpp
+      manifest_sha256: 0b40a3a77134661520bf54e741dfca84a07cc1a2ebe2a2f9acc7238cef5d5c5f
+      computed_sha256: 0b40a3a77134661520bf54e741dfca84a07cc1a2ebe2a2f9acc7238cef5d5c5f
+      match: true
+  recheck_after_canonical_run: "4/4 hashes recomputed after the full run, unchanged"
+
+skip_and_weakening_audit:
+  ctest_output_skip_markers: >-
+    None. Full canonical output inspected: no 'Skipped', 'Not Run', disabled, or
+    excluded entries; the run summary carries no skipped count.
+  catch2_summary_skips: >-
+    None. The direct [cvf-003] run reports only 'All tests passed
+    (295 assertions in 37 test cases)' with no skipped-case line.
+  owned_file_review: >-
+    All four owned files re-read in this session. No SKIP/WARN macros, no hidden or
+    suppression tags ([.], [!mayfail], [!shouldfail], [!hide]), no early returns and no
+    conditional branches that bypass assertions. Every case keeps real CHECK/REQUIRE
+    assertions against brief-derived observable expectations, including the stub
+    invocation counters that prove non-invocation on deadline/frame rejection.
+  assertion_count: "295 assertions across the 37 owned cases"
+
+coverage_added: []
+coverage_audit: >-
+  Brief B1-B10 plus every boundary_case and negative_case entry is already asserted by
+  the 37 owned cases (64/65-char keys, [a-z0-9._-] alphabet, duplicate/null/unknown
+  registry paths, threshold 0/255, min_pass_ratio 0.0/1.0, 1x1 frames, pass_ratio equal
+  to min_pass_ratio, dispatch JSON just under and over 65536 bytes, every unsupported
+  input_json shape). No requirement demanded an unauthored case, so no test was added
+  and the ownership manifest was not modified.
+
+notes: >-
+  Direct 'cmake' invocations are sandbox-denied for this role, so the canonical
+  commands were executed unmodified through the test-owner harness
+  .ai/validation/cvf003-verify.sh, which propagates real exit codes; raw output is
+  retained under .ai/validation/logs/. Supplementary test-owner harnesses
+  cvf003-verify-count.sh and cvf003-verify-format-dryrun.sh were added for the
+  framework-level count and a non-modifying format check. No other role's harness was
+  modified, no production or build file was touched, and no assertion was weakened.
+
+blockers: []

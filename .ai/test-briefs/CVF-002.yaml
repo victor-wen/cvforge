@@ -1,0 +1,100 @@
+schema_version: 1
+change_id: CVF-002
+target: "Camera contract (identity, settings, captured frames, bounded capture) + deterministic test backends with fault injection"
+in_scope:
+  - identity resolution semantics (unique match only, no first-device fallback)
+  - backend open/configure/capture/reconnect/close ordering and observable counters
+  - captured-frame normalization and metadata
+  - fault injection semantics (disconnect, capture error, delay/deadline timeout)
+  - bounded capture: at most one reconnect + one recapture within the remaining deadline
+  - Deadline and Result core behaviors used by the contract
+out_of_scope:
+  - UVC/Windows hardware backends
+  - runtime orchestrator, recipes, algorithms, C ABI lifecycle
+  - performance and real-time precision
+interface_reference:
+  namespace: "cvforwin::core / cvforwin::camera (internal contract frozen for this change)"
+  core:
+    Result: "template <typename T> Result: construct from T or Failure; has_value(); explicit operator bool(); value() (throws std::logic_error when empty); failure() (throws std::logic_error when valued). Result<void>: default = success; construct from Failure; has_value()/operator bool()/failure()."
+    Deadline: "Deadline::from_timeout_ms(uint32_t); Deadline::immediate(); bool expired(); std::chrono::milliseconds remaining() (clamped >= 0). from_timeout_ms(0) is immediately expired."
+  error_codes: "camera_not_found=1400, camera_identity_ambiguous=1401, camera_not_open=1402, camera_disconnected=1403, capture_failed=1404, capture_timed_out=1405, frames_exhausted=1406, deadline_expired=1407, selector_empty=1408, descriptor_mismatch=1409 (broad statuses: 1400/1401/1409 -> camera_not_found(7); 1402/1403/1404/1406 -> camera_io(8); 1405/1407 -> timeout(9); 1408 -> invalid_argument(1))."
+  camera_types:
+    CapturedFrame: "cv::Mat pixels (owned, normalized BGR8) + FrameMetadata { uint64 sequence; steady_clock::time_point captured_at; uint32 width; uint32 height; PixelFormat pixel_format }"
+    CameraDescriptor: "backend_key, device_path, vendor_id, product_id, friendly_name (strings)"
+    CameraSelector: "device_path, vendor_id, product_id, friendly_name; empty = unspecified"
+    ICameraBackend: "backend_key(); enumerate(Deadline); open(descriptor, settings, Deadline); capture(Deadline); reconnect(settings, Deadline); close()"
+    resolve_identity: "Result<CameraDescriptor> resolve_identity(candidates, selector)"
+    capture_with_one_retry: "Result<CapturedFrame> capture_with_one_retry(backend, settings, Deadline)"
+  test_backends:
+    file: "FileCameraBackend(FileCameraConfig { descriptor; vector<string> frame_paths })"
+    synthetic: "SyntheticCameraBackend(SyntheticCameraConfig { descriptor; width=64; height=48 })"
+    faults: "FaultKind enum { disconnect, capture_error }; inject_capture_failure(call_1based, FaultKind); inject_capture_delay(call_1based, milliseconds); clear_faults(); counters enumerate_call_count/open_call_count/capture_call_count/reconnect_call_count/close_call_count; headers camera/test_backends/file_camera_backend.h and synthetic_camera_backend.h"
+observable_behaviors:
+  - id: B1
+    behavior: "resolve_identity: empty selector -> invalid_argument/selector_empty; exactly one match -> that descriptor; zero matches -> camera_not_found/camera_not_found; two or more matches -> camera_not_found/camera_identity_ambiguous; never a first-match fallback."
+  - id: B2
+    behavior: "File backend: enumerate returns its configured descriptor; open with a different descriptor -> camera_not_found/descriptor_mismatch; capture or reconnect before a successful open -> camera_io/camera_not_open; close is idempotent; counters reflect the exact call order."
+  - id: B3
+    behavior: "File backend capture returns the configured frames in order with owned BGR8 pixels, incrementing sequence from 0; mono input is converted to BGR8; after the last frame -> camera_io/frames_exhausted; an undecodable file -> camera_io/capture_failed."
+  - id: B4
+    behavior: "Synthetic backend capture without open -> camera_io/camera_not_open; after open, pixel(x,y) = BGR((x+y+seq)&0xFF, (x+2y+seq)&0xFF, (2x+y+seq)&0xFF) with sequence starting at 0; non-zero settings width/height override the config defaults; metadata.pixel_format is bgr8."
+  - id: B5
+    behavior: "inject_capture_failure(n, disconnect): the n-th capture call returns camera_io/camera_disconnected and every later capture fails the same way until reconnect() succeeds; reconnect on an open backend clears it; reconnect on a closed backend -> camera_io/camera_not_open."
+  - id: B6
+    behavior: "inject_capture_failure(n, capture_error): only the n-th call fails with camera_io/capture_failed; the following call behaves normally."
+  - id: B7
+    behavior: "inject_capture_delay(n, delay): if the deadline is already expired -> timeout/capture_timed_out immediately; if delay > remaining -> timeout/capture_timed_out after honoring the deadline; if delay <= remaining -> the frame is returned."
+  - id: B8
+    behavior: "capture_with_one_retry success path: exactly one capture call, no reconnect, no enumerate."
+  - id: B9
+    behavior: "capture_with_one_retry on a camera_io failure: exactly one reconnect and then exactly one recapture; success returns the recaptured frame; a second failure is returned as-is (no third attempt); the helper never calls enumerate or selects another descriptor."
+  - id: B10
+    behavior: "capture_with_one_retry on a non-camera_io failure (e.g. timeout) returns it unchanged with zero reconnect calls; an expired deadline produces timeout/deadline_expired; a deadline that expires before recapture produces timeout/deadline_expired."
+  - id: B11
+    behavior: "Deadline::from_timeout_ms(0).expired() is true; Deadline::from_timeout_ms(5000).expired() is false and remaining() <= 5000 ms and >= 0."
+  - id: B12
+    behavior: "Result: a valued Result reports has_value() true and returns the value; an error Result reports has_value() false and exposes the Failure; Result<void> default constructs as success; accessing the wrong side throws std::logic_error."
+boundary_cases:
+  - "Selector where only one field is set and multiple descriptors share it."
+  - "Fault injected for a call index beyond the number of calls actually made (no effect)."
+  - "Delay exactly equal to remaining time; delay larger than remaining."
+  - "capture_with_one_retry when reconnect itself fails (failure returned, no recapture)."
+  - "Reconnect called twice after one disconnect (second reconnect still succeeds, no fault state)."
+negative_cases:
+  - "Empty selector (all fields empty)."
+  - "Descriptor mismatch on open."
+  - "capture/reconnect before open."
+  - "Non-camera_io failures must not trigger reconnect."
+compatibility_requirements:
+  - "Tests are Catch2 v3 C++20; hardware-free and deterministic."
+  - "No test may sleep for more than ~250 ms; use small delays with generous slack."
+acceptance_criteria:
+  - "After implementation, canonical WSL configure/build/ctest/format-check/static-analysis/sanitizers pass with the camera suite executing inside ctest."
+allowed_context:
+  - .ai/project-contract.yaml
+  - .ai/test-briefs/CVF-002.yaml
+  - tests/camera/**
+  - tests/fixtures/camera/**
+  - CMakeLists.txt, CMakePresets.json
+  - "frozen interface headers once they exist (may #include, must not open .cpp files): src/core/result.h, src/core/deadline.h, src/core/status.h, src/core/error.h, src/camera/captured_frame.h, src/camera/camera_backend.h, src/camera/test_backends/*.h"
+  - ~/.config/opencode/skills/black-box-testing/SKILL.md
+forbidden_context:
+  - "any src/** .cpp implementation file or any src/** file not listed above"
+  - .ai/changes/**
+  - .ai/reports/**
+  - "any diff, changed-file list, developer note, or root-cause description"
+allowed_test_paths:
+  - tests/camera/**
+fixtures_path:
+  - tests/fixtures/camera/**
+ownership_manifest: .ai/test-ownership.yaml
+evidence:
+  red_report: .ai/reports/CVF-002-test-red.yaml
+  verify_report: .ai/reports/CVF-002-test-verify.yaml
+suggested_red_commands:
+  - "g++ -std=c++20 -Wall -Wextra -Werror -I src -I include -I \"$VCPKG_ROOT/installed/x64-linux/include\" -fsyntax-only tests/camera/<test>.cpp"
+  - "cmake --preset wsl-gcc-debug (informational: camera suite not wired yet)"
+notes: >-
+  Expect RED because the camera/core interface headers and the tests/camera build wiring do
+  not exist yet. RED must fail for exactly that reason. The manifest must preserve the
+  CVF-001 entries and hashes byte-exact while adding a CVF-002 section.

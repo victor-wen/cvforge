@@ -1,0 +1,30 @@
+{
+  "name": "cvforwin",
+  "version-string": "1.0.0",
+  "description": "Windows x64 visual-inspection DLL with a native C ABI v1",
+  "homepage": "https://example.invalid/cvforwin",
+  "license": "MIT",
+  "builtin-baseline": "a1cae005c39be7b18ba319fced856b68d7276271",
+  "dependencies": [
+    {
+      "name": "opencv4",
+      "default-features": false,
+      "features": [
+        "fs",
+        "jpeg",
+        "png",
+        "thread"
+      ]
+    },
+    "nlohmann-json",
+    "spdlog"
+  ],
+  "features": {
+    "test": {
+      "description": "Developer unit tests (Catch2 v3)",
+      "dependencies": [
+        "catch2"
+      ]
+    }
+  }
+}

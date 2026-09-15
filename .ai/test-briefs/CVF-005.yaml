@@ -1,0 +1,92 @@
+schema_version: 1
+change_id: CVF-005
+target: "Diagnostics (rotating file + C callback + warning flags) and managed capture persistence with retention"
+in_scope:
+  - diagnostics create/validation, level filtering, callback delivery, file sink and rotation bounds
+  - sink-failure containment as internal warning flags (never throw)
+  - capture save path generation/sanitization and PNG persistence
+  - save-policy decision primitive
+  - retention by age and total size, symlink-safe, never leaving the managed root
+out_of_scope:
+  - runtime wiring, public C ABI/header changes, recipes, cameras, inspect integration
+interface_reference:
+  namespace: "cvforwin::core / cvforwin::diagnostics / cvforwin::artifacts"
+  warnings: "core::WarningFlags: warning_none=0, warning_log_sink_failed=1<<0, warning_image_save_failed=1<<1"
+  error_codes: "1700 diagnostics_invalid_config (invalid_argument), 1701 log_write_error (internal_error), 1800 artifacts_root_error (config_error), 1801 image_encode_error (internal_error), 1802 image_write_error (internal_error), 1803 retention_error (internal_error), plus existing 1011 path_not_absolute (invalid_argument)"
+  headers:
+    - "src/core/warnings.h"
+    - "src/diagnostics/diagnostics.h"
+    - "src/artifacts/capture_store.h"
+  api:
+    diagnostics: "Diagnostics::create(DiagnosticsConfig{level, max_file_bytes, max_files, log_dir}, CallbackBinding{fn, user_data}) -> Result<unique_ptr<Diagnostics>>; log(level, message) noexcept; warnings(); clear_warnings(); log_file_path()"
+    artifacts: "CaptureStore::create(captures_root) -> Result<unique_ptr<CaptureStore>>; save(CaptureSaveRequest{pixels, recipe_id, request_id, sequence}) -> Result<path>; static enforce_retention(root, max_age seconds, max_total_bytes) -> Result<uint32_t>; decide_capture_save(save_policy, verdict, execution_ok) -> SaveDecision"
+observable_behaviors:
+  - id: B1
+    behavior: "create validation: relative log_dir -> invalid_argument/path_not_absolute; max_file_bytes < 1024 or max_files < 1 -> invalid_argument/diagnostics_invalid_config; a valid config creates log_dir and <log_dir>/cvforwin.log."
+  - id: B2
+    behavior: "Level filtering: log() entries below the configured level are dropped (no callback invocation, no file growth); entries at or above the level are delivered."
+  - id: B3
+    behavior: "Callback delivery: receives the level as its numeric value and the exact message as a NUL-terminated string; user_data is passed through; delivery is synchronous (observable before log() returns); messages longer than 4096 bytes are truncated to a UTF-8-safe prefix <= 4096 bytes."
+  - id: B4
+    behavior: "File sink: written entries appear in <log_dir>/cvforwin.log; with small max_file_bytes and max_files (e.g. 128/2), after many entries the number of cvforwin.log* files stays <= max_files."
+  - id: B5
+    behavior: "Degraded file sink: when the log directory cannot be created/opened, create() still succeeds, warnings() already contains warning_log_sink_failed, the callback still works, and log() never throws."
+  - id: B6
+    behavior: "Warnings: warning flags accumulate on file-write/callback failure and are cleared by clear_warnings(); a throwing callback is caught and sets warning_log_sink_failed without propagating."
+  - id: B7
+    behavior: "CaptureStore::create: relative root -> invalid_argument/path_not_absolute; a root that cannot be created -> config_error/artifacts_root_error; valid root is created if missing."
+  - id: B8
+    behavior: "save: writes a PNG at <root>/<utcstamp>_<recipe>_<request>_<sequence>.png; the returned absolute path is inside the root; the file decodes back to an image of the same size; recipe/request are sanitized to [A-Za-z0-9._-] with other characters replaced, >64 bytes truncated, empty -> \"unnamed\"; two saves produce two distinct files."
+  - id: B9
+    behavior: "save failure: empty pixels -> image_encode_error."
+  - id: B10
+    behavior: "decide_capture_save: \"never\" -> skip; \"always\" -> save; \"fail_or_error\" -> save iff !execution_ok or verdict == FAIL, else skip; unknown token -> skip."
+  - id: B11
+    behavior: "Retention by age: files with last_write_time older than max_age are deleted (oldest first); newer files are kept; the returned count matches."
+  - id: B12
+    behavior: "Retention by size: with three 100-byte files and a 150-byte limit, the oldest files are deleted until the remaining total is <= 150; the returned count matches."
+  - id: B13
+    behavior: "Retention symlink safety: symlinks inside the managed root are never followed and never deleted; their targets outside the root remain intact; regular files are still handled."
+  - id: B14
+    behavior: "Retention on a non-existent root -> internal_error/retention_error."
+boundary_cases:
+  - "max_file_bytes exactly 1024 accepted; 1023 rejected. max_files 1 accepted; 0 rejected."
+  - "Message exactly 4096 bytes vs 4097 bytes (truncation boundary)."
+  - "Empty recipe_id/request_id -> \"unnamed\"; ids with '/', '\\\\', '..', spaces, and >64 bytes."
+  - "Sequence 0; two saves in the same millisecond (distinct via sequence)."
+  - "Retention limit exactly equal to the remaining total (no deletion); age exactly at the boundary (treated as not expired)."
+negative_cases:
+  - "Relative roots; invalid diagnostics bounds; unknown save policy token; empty pixels on save; retention on missing root."
+compatibility_requirements:
+  - "Tests are Catch2 v3 C++20, deterministic, fast: no sleeps; use small files and explicit last_write_time values."
+  - "Independent tests use the cvf005_ prefix under tests/unit/ and must be clang-format clean before hashing."
+acceptance_criteria:
+  - "After implementation, canonical WSL configure/build/ctest/format-check/static-analysis/sanitizers pass with the new tests executing inside ctest."
+allowed_context:
+  - .ai/project-contract.yaml
+  - .ai/test-briefs/CVF-005.yaml
+  - tests/unit/**, tests/fixtures/artifacts/**
+  - CMakeLists.txt, CMakePresets.json
+  - "frozen interface headers once they exist (may #include, must not open .cpp files): src/core/{warnings,status,error,result,deadline}.h, src/diagnostics/diagnostics.h, src/artifacts/capture_store.h, src/camera/captured_frame.h"
+  - ~/.config/opencode/skills/black-box-testing/SKILL.md
+forbidden_context:
+  - "any src/** .cpp implementation file or src/** file not listed above"
+  - .ai/changes/**
+  - .ai/reports/**
+  - "any diff, changed-file list, developer note, or root-cause description"
+allowed_test_paths:
+  - tests/unit/cvf005_*.cpp
+  - tests/unit/cvf005_*.h
+fixtures_path:
+  - tests/fixtures/artifacts/**
+ownership_manifest: .ai/test-ownership.yaml
+evidence:
+  red_report: .ai/reports/CVF-005-test-red.yaml
+  verify_report: .ai/reports/CVF-005-test-verify.yaml
+suggested_red_commands:
+  - "g++ -std=c++20 -Wall -Wextra -Werror -I src -I include -isystem \"$VCPKG_ROOT/installed/x64-linux/include\" -fsyntax-only tests/unit/cvf005_<test>.cpp"
+notes: >-
+  Expect RED because the diagnostics/artifacts headers do not exist yet. Extend the
+  changes: mapping in .ai/test-ownership.yaml with a CVF-005 section; preserve existing
+  sections byte-exact. Use std::filesystem temp trees under the build tree or system temp
+  for all file-system cases.

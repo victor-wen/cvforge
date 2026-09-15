@@ -1,0 +1,87 @@
+schema_version: 1
+change_id: CVF-006
+target: "Runtime orchestrator + full C API lifecycle (initialize/inspect/reload/shutdown) with test-backend enablement"
+in_scope:
+  - cvf_initialize/cvf_inspect/cvf_reload_recipes/cvf_shutdown end-to-end through the public C ABI
+  - status/verdict/error_code/warning_flags/elapsed_ms mapping and caller buffer rules
+  - one deadline covering queue wait, capture+one retry, algorithm, encoding, required persistence
+  - serialized concurrent inspect calls and single-context limit
+  - atomic recipe reload with old-snapshot preservation
+  - rollback-safe initialization; degraded optional sink handling
+out_of_scope:
+  - Windows UVC hardware behavior, packaging, native C host example, docs
+interface_reference:
+  public: "include/cvforwin/cvf_api.h v1 surface (frozen); warning bit values: log sink failure = 1u<<0, image save failure = 1u<<1"
+  runtime:
+    header: "src/runtime/context.h"
+    types: "RuntimeOptions { config_root; output_root; enable_file_logging; enable_callback_logging; log_callback; camera_override } ; Context::create/inspect/reload_recipes/warning_flags; InspectionRequest { recipe_id; request_id; timeout_ms; input_json }; InspectionOutcome { status; verdict; error_code; warning_flags; elapsed_ms; output_json; image_path; error_message }"
+  backend_config: "release: camera.backend must be \"uvc\"; test-enabled builds additionally accept \"file\" and \"synthetic\". synthetic descriptor: device_path \"synthetic0\", vendor_id/product_id \"0000\", friendly_name \"Synthetic camera\"; file descriptor: device_path = absolute frames directory."
+  fixture_defines: "C lifecycle tests receive CVF_TEST_FIXTURES_DIR (read-only fixtures) and CVF_TEST_TMP_DIR (writable scratch) compile definitions from CMake."
+observable_behaviors:
+  - id: B1
+    behavior: "Initialize happy path (test-enabled synthetic backend, valid config/recipes): OK, out_context non-null; a second cvf_initialize while live -> CONTEXT_LIMIT; cvf_shutdown OK; cvf_shutdown(NULL) -> INVALID_CONTEXT; initialize again after shutdown -> OK (new context)."
+  - id: B2
+    behavior: "Initialize failures: missing/invalid config -> CONFIG_ERROR; unknown recipe algorithm or duplicate recipe_id -> CONFIG_ERROR; error info written following the v1 buffer rules (message NUL-terminated, bytes_required >= bytes_written + 1); out_context stays NULL; a retry after a failed initialize is not blocked by CONTEXT_LIMIT."
+  - id: B3
+    behavior: "Inspect happy path: OK execution, verdict PASS/FAIL consistent with the example.threshold recipe parameters, error_code 0, elapsed_ms >= 0, output_json is a UTF-8 JSON object containing the algorithm measurements, bytes_written excludes NUL and the buffer is NUL-terminated, bytes_required includes NUL."
+  - id: B4
+    behavior: "Inspect validation and errors: null context -> INVALID_CONTEXT; malformed request (struct_size/abi_version/reserved) -> documented INVALID_ARGUMENT/ABI_MISMATCH; undersized result buffers (output_json < 65536, image_path < 4096, error_message < 1024) -> BUFFER_TOO_SMALL before any capture (backend capture count unchanged) with bytes_required reported; unknown recipe -> RECIPE_NOT_FOUND and verdict NOT_EVALUATED with output_json/image_path cleared."
+  - id: B5
+    behavior: "Reload: valid candidate set is adopted atomically and the new recipe becomes inspectable; an invalid candidate (bad parameter, duplicate id, unknown algorithm) -> CONFIG_ERROR, error info set, and the previous recipe set still inspects successfully."
+  - id: B6
+    behavior: "Concurrency: two threads calling cvf_inspect on one context both return OK (serialized; no crash, no corrupted JSON); inspect after shutdown is not required to be called with the stale pointer (tests only use NULL and fresh contexts)."
+  - id: B7
+    behavior: "Timeout coverage: a capture delay beyond timeout_ms -> TIMEOUT + NOT_EVALUATED and elapsed_ms bounded by the deadline (with slack); timeout_ms = 0 uses the 5000 ms default (a 100 ms delay succeeds)."
+  - id: B8
+    behavior: "One reconnect/recapture: a transient disconnect on the first capture still yields an OK inspect with exactly 2 capture calls + 1 reconnect; a fault on both attempts yields CAMERA_IO after exactly 2 captures + 1 reconnect and verdict NOT_EVALUATED."
+  - id: B9
+    behavior: "Save policy: fail_or_error saves on FAIL (image_path non-empty, file exists and decodes as the saved frame) and skips on PASS; always saves on PASS; never never saves; an optional save failure adds warning bit 1u<<1 while keeping OK+PASS/FAIL; a required save failure -> REQUIRED_ARTIFACT_ERROR + NOT_EVALUATED."
+  - id: B10
+    behavior: "Degraded file sink: initializing with a blocked logs path succeeds; inspect still returns OK and result.warning_flags has bit 1u<<0 set (plus image bit when applicable)."
+  - id: B11
+    behavior: "Rollback: an initialization that fails after config/diagnostics creation (e.g. camera resolution fails) leaves no live context; a subsequent valid initialize succeeds."
+  - id: B12
+    behavior: "Serialization: with a 100 ms capture delay, two concurrent inspects complete both OK and total wall time is >= 2x the delay (serialized execution), with generous slack."
+  - id: B13
+    behavior: "Request validation: recipe_id/request_id >128 bytes, embedded NUL, or invalid UTF-8 -> INVALID_ARGUMENT; input_json not an object or >65536 bytes -> INVALID_ARGUMENT; valid optional input_json is passed to the algorithm (invert flips the example verdict on a uniform frame)."
+boundary_cases:
+  - "output_json capacity exactly 65536 vs 65535."
+  - "timeout_ms 1 (tiny) vs 0 (default 5000)."
+  - "verdict boundary pass_ratio == min_pass_ratio -> PASS."
+  - "Reload with the same content (no-op) still atomic; reload with duplicate recipe ids rejected."
+negative_cases:
+  - "Null context, null request/result, malformed struct sizes, undersized buffers, unknown recipe, invalid identifiers/UTF-8."
+compatibility_requirements:
+  - "C lifecycle tests are strict C11 against the public header only; internal tests are Catch2 v3 C++20."
+  - "Deterministic and fast: use small delays (<=100 ms), no busy loops > ~1 s, generous timeouts in assertions."
+  - "Independent files: tests/abi/cvf006_*.c(.h) and tests/unit/cvf006_*.cpp(.h); clang-format clean before hashing (C files too, via clang-format)."
+acceptance_criteria:
+  - "After implementation, canonical WSL configure/build/ctest/format-check/static-analysis/sanitizers pass with the new tests executing inside ctest."
+allowed_context:
+  - .ai/project-contract.yaml
+  - .ai/test-briefs/CVF-006.yaml
+  - tests/abi/**, tests/unit/**, tests/fixtures/runtime/**
+  - CMakeLists.txt, CMakePresets.json, cmake/**
+  - "frozen interface headers (may #include, must not open .cpp files): include/cvforwin/cvf_api.h, src/runtime/context.h, src/camera/{camera_backend,captured_frame}.h, src/camera/test_backends/*.h, src/diagnostics/diagnostics.h, src/artifacts/capture_store.h, src/recipes/{config,recipe,recipe_catalog}.h, src/inspection/{algorithm,registry}.h, src/algorithms/example_threshold.h, src/core/{status,error,result,deadline,warnings}.h"
+  - ~/.config/opencode/skills/black-box-testing/SKILL.md
+forbidden_context:
+  - "any src/** .cpp implementation file or src/** file not listed above"
+  - .ai/changes/**
+  - .ai/reports/**
+  - "any diff, changed-file list, developer note, or root-cause description"
+allowed_test_paths:
+  - tests/abi/cvf006_*
+  - tests/unit/cvf006_*
+fixtures_path:
+  - tests/fixtures/runtime/**
+ownership_manifest: .ai/test-ownership.yaml
+evidence:
+  red_report: .ai/reports/CVF-006-test-red.yaml
+  verify_report: .ai/reports/CVF-006-test-verify.yaml
+notes: >-
+  C lifecycle tests compile against the existing public header but must fail at runtime
+  before implementation (no live context can be created); internal runtime tests fail to
+  compile because src/runtime/context.h does not exist. Both are valid RED. Extend the
+  changes: mapping in .ai/test-ownership.yaml with a CVF-006 section; preserve existing
+  sections byte-exact. Camera fault injection is available to C++ tests through the CVF-002
+  test backends passed via RuntimeOptions.camera_override.

@@ -1,0 +1,68 @@
+change_id: CVF-002
+phase: VERIFY
+verdict: PASS
+verified_at: "2026-09-15T07:07:00+08:00"
+methodology: black-box-testing skill, Verify Phase (fresh session, no implementation context)
+implementation_context_used: none
+commands:
+  - command: "export VCPKG_ROOT=$HOME/vcpkg && cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    counts: "configure ok"
+    log: .ai/validation/cvf-002-verify-logs/configure.log
+  - command: "export VCPKG_ROOT=$HOME/vcpkg && cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    counts: "build ok"
+    log: .ai/validation/cvf-002-verify-logs/build.log
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "passed=86, failed=0, skipped=0 (100% tests passed, 0 tests failed out of 86)"
+    log: .ai/validation/cvf-002-verify-logs/ctest.log
+  - command: "ctest --preset wsl-gcc-debug -N"
+    exit_code: 0
+    counts: "registered=86, camera_registered=49"
+    log: .ai/validation/cvf-002-verify-logs/ctest-list.log
+  - command: "grep -rnE 'SKIP|mayfail|\\[\\.\\]|#if 0|DISABLED' tests/camera"
+    exit_code: 1
+    counts: "no matches (exit 1 = clean); no skipped, hidden, or disabled camera cases"
+    log: .ai/validation/cvf-002-verify-logs/skip-scan.log
+harness: .ai/validation/cvf-002-verify.sh  # test-engineer-owned verify harness (sandbox denies direct cmake/build commands)
+camera_suite:
+  tests_registered: 49
+  tests_passed: 49
+  tests_failed: 0
+  tests_skipped: 0
+  ctest_range: "#34..#82, all named 'CVF-002 ...'"
+  expected_case_count_from_sources: 49
+  binaries:
+    - cvf_camera_tests (tests/camera, Catch2 v3, linked against cvforwin_test_backends)
+  counts_per_file_expected:
+    - test_core_result_deadline.cpp: 8
+    - test_camera_identity_resolution.cpp: 8
+    - test_file_camera_backend.cpp: 9
+    - test_synthetic_camera_backend.cpp: 6
+    - test_camera_fault_injection.cpp: 10
+    - test_capture_with_one_retry.cpp: 8
+brief_coverage_review:
+  observable_behaviors: "B1..B12 each mapped to at least one passing case"
+  boundary_cases: "all 5 covered (single-field ambiguity, fault index beyond call count, delay equal/larger than remaining, failing reconnect with no recapture, double reconnect)"
+  negative_cases: "all 4 covered (empty selector, descriptor mismatch, capture/reconnect before open, non-camera_io no-reconnect)"
+  added_cases: "none needed; no requirement-derived gap found"
+  assertion_review: >-
+    All 8 owned files were read line-by-line. No SKIP, [!mayfail], [.], #if 0, or
+    short-circuited assertion was found. One intentional disjunctive assertion exists
+    (B7 delay-equal boundary: frame-or-capture_timed_out, both branches shape-checked)
+    and is documented in-test as the clock-race-safe requirement-derived bound.
+failures: []
+ownership:
+  manifest: .ai/test-ownership.yaml
+  files_checked: 8
+  mismatches: []
+  hashes_pre_run: "all 8 match manifest"
+  hashes_post_run: "all 8 match manifest (sources unmodified by build/test)"
+  manifest_updated_by_verifier: false
+skips_in_run_output: none
+blockers: []
+notes: >-
+  Sandbox denied direct cmake/ls commands; verification ran through the
+  test-engineer harness .ai/validation/cvf-002-verify.sh (no other role's harness
+  touched). All evidence in this report was produced in this session.

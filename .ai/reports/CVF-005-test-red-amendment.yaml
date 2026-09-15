@@ -1,0 +1,152 @@
+schema_version: 1
+change_id: CVF-005
+phase: AUTHOR
+amendment: A6
+date: 2026-09-15
+owner: test-engineer
+subject: >-
+  Test-side lifetime defect in the independent save_request() helper: the frozen
+  CaptureSaveRequest identifier fields are non-owning string_views, and the helper
+  moved std::string temporaries into them, leaving dangling views after it returned.
+
+defect:
+  reported_by: developer
+  assumption_id: A6
+  file: tests/unit/cvf005_test_support.h
+  description: >-
+    save_request(...) took recipe_id/request_id by value and std::move()d them into the
+    returned CaptureSaveRequest's recipe_id/request_id fields. The string parameters are
+    destroyed when the helper returns, so every view in the returned request dangled for
+    the duration of the save() call under test: undefined behaviour, and not a compile
+    error, which is why the earlier -fsyntax-only RED run could not see it.
+  interface_status: >-
+    The frozen interface is correct: CaptureSaveRequest carries non-owning string_view
+    identifiers. The defect was entirely test-side and is corrected here; no production
+    or spec change was requested or made.
+
+fix:
+  summary: >-
+    save_request() now returns a SaveRequestHolder that owns both identifier strings and
+    builds the CaptureSaveRequest from that owned storage; each test takes the request via
+    holder.request() on a named holder so the storage outlives the save() call.
+  mechanism:
+    - >-
+      SaveRequestHolder declares recipe_storage_ (std::string) and request_storage_
+      (std::string) before request_ and builds the frozen request from those members, so
+      the string_view fields point at holder-owned buffers.
+    - >-
+      request() is lvalue-ref-qualified (const&) and the const&& overload is deleted, so
+      calling request() on a temporary holder does not compile: the corrected dangling
+      pattern cannot be reintroduced.
+    - >-
+      SaveRequestHolder is non-copyable and non-movable; returning it from the helper and
+      initializing a named holder relies on C++17 guaranteed copy elision.
+  call_sites_updated: 10
+  call_site_file: tests/unit/cvf005_capture_store_test.cpp
+  assertions_changed: none
+  coverage_changed: none
+  spec_expectations_changed: none
+  restructure_note: >-
+    Only the call shape changed (store->save(holder.request()) with a named
+    SaveRequestHolder before it). Test names, tags, SECTION structure, expected values,
+    and every CHECK/REQUIRE are unchanged in intent; nothing was weakened, skipped, or
+    removed.
+
+commands:
+  - command: "clang-format -i tests/unit/cvf005_test_support.h tests/unit/cvf005_capture_store_test.cpp"
+    exit_code: 0
+  - command: >-
+      clang-format --dry-run --Werror tests/unit/cvf005_test_support.h
+      tests/unit/cvf005_error_codes_test.cpp tests/unit/cvf005_diagnostics_config_test.cpp
+      tests/unit/cvf005_diagnostics_logging_test.cpp tests/unit/cvf005_capture_store_test.cpp
+      tests/unit/cvf005_save_policy_test.cpp tests/unit/cvf005_retention_test.cpp
+    exit_code: 0
+    counts: "passed=7, failed=0, skipped=0"
+  - command: >-
+      g++ -std=c++20 -Wall -Wextra -Werror -fsanitize=address -I src -I include -I tests/unit
+      -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include
+      -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include/opencv4
+      .ai/validation/cvf005/holder_lifetime_check.cpp -o /tmp/opencode/cvf005_holder_check
+      -L build/wsl-gcc-debug/vcpkg_installed/x64-linux/lib -lopencv_core4 -lz -lpthread -ldl
+    exit_code: 0
+    counts: "build exit 0; run exit 0; output: SaveRequestHolder lifetime check ok"
+    note: >-
+      Harness check only, not acceptance evidence. It builds a holder from 4096-byte
+      identifier strings and reads the request's string_view fields back after the helper
+      returned, under AddressSanitizer; a dangling view would be reported as a
+      heap-use-after-free. It also asserts the holder, not the caller, owns the storage.
+
+real_header_syntax_evidence:
+  note: >-
+    The frozen headers (core/warnings.h, src/diagnostics/diagnostics.h,
+    src/artifacts/capture_store.h) now exist on disk. Every independent TU was compiled
+    with -fsyntax-only against the REAL headers: all exit 0 with no diagnostics. The
+    pre-fix sources already compiled (the defect was runtime-only UB), so this evidence
+    confirms interface alignment; it is not a substitute for running the tests.
+  command_template: >-
+    g++ -std=c++20 -Wall -Wextra -Werror -I src -I include -I tests/unit
+    -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include
+    -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include/opencv4
+    -fsyntax-only <file>
+  results:
+    - file: .ai/validation/cvf005/selfcheck_support_tu.cpp
+      exit_code: 0
+    - file: tests/unit/cvf005_error_codes_test.cpp
+      exit_code: 0
+    - file: tests/unit/cvf005_diagnostics_config_test.cpp
+      exit_code: 0
+    - file: tests/unit/cvf005_diagnostics_logging_test.cpp
+      exit_code: 0
+    - file: tests/unit/cvf005_capture_store_test.cpp
+      exit_code: 0
+    - file: tests/unit/cvf005_save_policy_test.cpp
+      exit_code: 0
+    - file: tests/unit/cvf005_retention_test.cpp
+      exit_code: 0
+  test_side_alignment_needed: "none beyond the A6 fix; no other assumption (A1-A5, A7-A9, A10-A16) required a test change"
+
+hash_changes:
+  - path: tests/unit/cvf005_test_support.h
+    previous_sha256: 07abf0edce77e3d4b3ee0a7b5a0e9a78c63af1680892e1991bc589bc9cf98124
+    current_sha256: 41d4009cc58bebc9c3220ddc3a1292d92209fe81c4730b1e86d538204d5bbd00
+    reason: "save_request() replaced by SaveRequestHolder class + holder-returning helper"
+  - path: tests/unit/cvf005_capture_store_test.cpp
+    previous_sha256: 392b0d3b5b8689b5a4689f111b6d606a005997a473f70ddafcee1713f24daa66
+    current_sha256: b9cb8cce170ce0155e739edaa14917d536926facfdeaaf4d3fece76dfb1f0eda
+    reason: "all 10 save() call sites now use a named SaveRequestHolder"
+  unchanged:
+    - path: tests/unit/cvf005_error_codes_test.cpp
+      sha256: abd938bd7c61aa931c077b4d0a922e44b03e123069c14f0f9c63cecc2c4f5e58
+    - path: tests/unit/cvf005_diagnostics_config_test.cpp
+      sha256: bffd7a751158a2e98ae057096b0ce0d0f961a08aef3e40aa31ea8487027ff07a
+    - path: tests/unit/cvf005_diagnostics_logging_test.cpp
+      sha256: c98bf03fed27006530a0e4b5eb0138849641718a385f48067ca211c1f49cff21
+    - path: tests/unit/cvf005_save_policy_test.cpp
+      sha256: 1d60adda8553a906cb88db3b21c1dd012cd12d9d730a889e0e4df4bb835b49bb
+    - path: tests/unit/cvf005_retention_test.cpp
+      sha256: 936a86e7abd26926a4e5d26575ace32490b59c0b2fecf860b63b44facf10889e
+
+ownership:
+  manifest: .ai/test-ownership.yaml
+  section: CVF-005
+  files_checked: 7
+  mismatches: []
+  hash_recheck: >-
+    All seven files re-hash to the values now recorded in the CVF-005 manifest section;
+    the manifest amendment note lists the two previous values. CVF-001..004 sections were
+    not touched.
+
+assumptions_update:
+  superseded:
+    - id: A6
+      original: >-
+        CaptureSaveRequest fields pixels/recipe_id/request_id/sequence, with the identifier
+        strings handled by value inside the helper.
+      corrected: >-
+        recipe_id and request_id are non-owning string_views in the frozen interface; the
+        test helper now owns the storage for the full save() call, and the rvalue request()
+        overload is deleted so a temporary holder cannot expose dangling views.
+  unchanged:
+    - "A1-A5, A7-A9, A10-A16: the real headers compiled against every TU without a single diagnostic, so no other test-side alignment was required."
+
+blockers: []

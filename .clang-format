@@ -1,0 +1,60 @@
+---
+# Canonical formatting style for the cvforwin repository.
+#
+# The style is intentionally close to the existing hand-written sources: braces
+# attach to control statements but open on their own line for functions and
+# records, case labels keep the switch indentation, and lines are never wrapped
+# by the formatter (ColumnLimit 0) so that tables and long string literals stay
+# readable in review.
+BasedOnStyle: LLVM
+ColumnLimit: 0
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+AccessModifierOffset: -4
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterCaseLabel: false
+  AfterClass: false
+  AfterControlStatement: Never
+  AfterEnum: false
+  AfterFunction: true
+  AfterNamespace: false
+  AfterObjCDeclaration: false
+  AfterStruct: false
+  AfterUnion: false
+  AfterExternBlock: false
+  BeforeCatch: false
+  BeforeElse: false
+  BeforeLambdaBody: false
+  BeforeWhile: false
+  IndentBraces: false
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+  SplitEmptyNamespace: false
+SpaceBeforeParens: ControlStatements
+SpaceBeforeRangeBasedForLoopColon: true
+PointerAlignment: Left
+DerivePointerAlignment: false
+ReferenceAlignment: Pointer
+IndentCaseLabels: false
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Never
+SortIncludes: Never
+IncludeBlocks: Preserve
+ReflowComments: false
+SpacesBeforeTrailingComments: 2
+AlignAfterOpenBracket: Align
+AlignOperands: Align
+AlignTrailingComments: false
+BreakConstructorInitializers: BeforeColon
+ConstructorInitializerAllOnOneLineOrOnePerLine: true
+Cpp11BracedListStyle: true
+EmptyLineBeforeAccessModifier: Always
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+NamespaceIndentation: None
+...

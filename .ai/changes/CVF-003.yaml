@@ -1,0 +1,150 @@
+schema_version: 1
+change_id: CVF-003
+program: cvforwin-implementation-1.0.0
+title: "Inspection contract and registry + deterministic example algorithm (cv2-style mapping)"
+risk: R2
+risk_justification: >-
+  Implements the approved inspection_contract_and_registry and compiled_algorithms modules
+  inside the baseline. No public ABI, schema, dependency-family, or invariant change; adds
+  bounded internal interfaces and algorithm error codes to core_model. No runtime plug-in
+  loading, no camera/ABI coupling.
+intent: >-
+  Define the algorithm authoring contract (IInspectionAlgorithm, AlgorithmRequest,
+  AlgorithmResult, deadline semantics), an in-process registry with stable keys and
+  exception/deadline/bound containment at dispatch, and one deterministic example
+  algorithm that demonstrates how Python cv2-style logic maps to C++ without changing
+  the C ABI or camera code.
+scope:
+  allowed_files:
+    production:
+      - src/inspection/algorithm.h
+      - src/inspection/registry.h
+      - src/inspection/registry.cpp
+      - src/algorithms/example_threshold.h
+      - src/algorithms/example_threshold.cpp
+      - src/algorithms/compiled_algorithms.h
+      - src/algorithms/compiled_algorithms.cpp
+      - src/core/error.h
+      - src/core/error.cpp
+      - CMakeLists.txt
+      - cmake/**
+    independent_tests:
+      - tests/unit/cvf003_*.cpp
+      - tests/unit/cvf003_*.h
+    developer_tests:
+      - tests/unit/** (files not matching cvf003_*)
+    fixtures:
+      - tests/fixtures/algorithm/**
+    evidence_harness:
+      - .ai/validation/**
+  out_of_scope:
+    - include/cvforwin/**
+    - src/c_api/**
+    - src/camera/**
+    - src/recipes/**
+    - src/diagnostics/**
+    - src/artifacts/**
+    - src/runtime/**
+    - examples/**
+    - docs/**
+    - .github/**
+    - .ai/project-contract.yaml
+interface_v1:
+  authority_note: >-
+    Frozen internal interface for tests and implementation in this change. Namespace
+    cvforwin::inspection for the contract/registry, cvforwin::algorithms for compiled
+    algorithms. Header paths and spellings are exact.
+  headers:
+    - "src/inspection/algorithm.h"
+    - "src/inspection/registry.h"
+    - "src/algorithms/example_threshold.h"
+    - "src/algorithms/compiled_algorithms.h"
+  error_codes_new:
+    - "algorithm_not_found = 1500 -> Status::algorithm_error"
+    - "algorithm_duplicate_key = 1501 -> Status::algorithm_error"
+    - "algorithm_key_invalid = 1502 -> Status::invalid_argument"
+    - "algorithm_parameters_invalid = 1503 -> Status::config_error"
+    - "algorithm_output_too_large = 1504 -> Status::algorithm_error"
+    - "algorithm_deadline_exceeded = 1505 -> Status::timeout"
+    - "algorithm_exception = 1506 -> Status::algorithm_error"
+    - "algorithm_frame_invalid = 1507 -> Status::algorithm_error"
+    - "algorithm_input_invalid = 1508 -> Status::invalid_argument"
+  contract_types:
+    AlgorithmRequest: >-
+      struct AlgorithmRequest { const camera::CapturedFrame& frame; const nlohmann::json& parameters;
+      const std::optional<nlohmann::json>& input_json; core::Deadline deadline; };
+    AlgorithmResult: >-
+      struct AlgorithmResult { core::Verdict verdict = core::Verdict::not_evaluated;
+      nlohmann::json measurements = nlohmann::json::object(); nlohmann::json defects = nlohmann::json::array();
+      std::string diagnostics; };
+    IInspectionAlgorithm: >-
+      class IInspectionAlgorithm { virtual ~IInspectionAlgorithm() = default;
+      virtual std::string_view key() const noexcept = 0;
+      virtual core::Result<void> validate_parameters(const nlohmann::json& parameters) const = 0;
+      virtual core::Result<AlgorithmResult> inspect(const AlgorithmRequest& request) = 0; };
+  registry:
+    class: "cvforwin::inspection::AlgorithmRegistry"
+    api:
+      - "core::Result<void> add(std::unique_ptr<IInspectionAlgorithm> algorithm);"
+      - "core::Result<const IInspectionAlgorithm*> find(std::string_view key) const;"
+      - "std::vector<std::string> keys() const;  // registration order"
+      - "std::size_t size() const noexcept; bool empty() const noexcept;"
+    rules:
+      - "add(nullptr) -> Failure(invalid_argument, algorithm_key_invalid)."
+      - "Keys must be non-empty and match [a-z0-9._-]{1,64}; otherwise Failure(invalid_argument, algorithm_key_invalid)."
+      - "Duplicate key -> Failure(algorithm_error, algorithm_duplicate_key); the existing entry is kept."
+      - "find(unknown) -> Failure(algorithm_error, algorithm_not_found)."
+      - "keys() lists keys in registration order."
+  dispatch:
+    function: "core::Result<AlgorithmResult> cvforwin::inspection::dispatch(const IInspectionAlgorithm& algorithm, const AlgorithmRequest& request);"
+    rules:
+      - "Expired deadline at entry -> Failure(timeout, algorithm_deadline_exceeded) WITHOUT calling inspect."
+      - "Empty request.frame.pixels -> Failure(algorithm_error, algorithm_frame_invalid) WITHOUT calling inspect."
+      - "Any exception thrown by inspect is caught and converted to Failure(algorithm_error, algorithm_exception)."
+      - "After inspect: serialized measurements+defects larger than inspection::k_max_result_json_bytes -> Failure(algorithm_error, algorithm_output_too_large)."
+      - "constexpr std::size_t k_max_result_json_bytes = 65536;"
+  example_algorithm:
+    class: "cvforwin::algorithms::ExampleThresholdAlgorithm final : public inspection::IInspectionAlgorithm"
+    key: "example.threshold"
+    parameters:
+      - "object with optional keys: threshold (integer 0..255, default 128), min_pass_ratio (number 0..1, default 0.5); unknown keys, wrong types, or out-of-range values -> Failure(config_error, algorithm_parameters_invalid)."
+    input_json:
+      - "optional; when present must be an object; supported optional key: invert (boolean, default false); unknown keys or wrong types -> Failure(invalid_argument, algorithm_input_invalid)."
+    inspect_rules:
+      - "Expired deadline -> Failure(timeout, algorithm_deadline_exceeded) before heavy work."
+      - "Convert frame pixels (BGR8) to grayscale, threshold to a binary mask (gray > threshold), optionally invert (mask = 255 - mask)."
+      - "white_pixels = countNonZero(mask); total_pixels = mask.total(); pass_ratio = white_pixels / total_pixels (0.0 when total is 0)."
+      - "verdict = PASS iff pass_ratio >= min_pass_ratio, else FAIL; never NOT_EVALUATED on success."
+      - "measurements = object {white_pixels, total_pixels, pass_ratio}; defects = empty array; diagnostics = non-empty short string."
+  compiled_registration:
+    function: "core::Result<void> cvforwin::algorithms::register_compiled_algorithms(inspection::AlgorithmRegistry& registry);"
+    rules: "Adds every compiled algorithm (currently example.threshold) via registry.add and propagates the first failure."
+invariants:
+  - "Algorithms receive an owned frame, immutable validated parameters, optional input JSON, and a deadline only."
+  - "Algorithms never open cameras, select recipes, persist files, invoke host callbacks, use global mutable state, or access the C ABI."
+  - "Registry rejects duplicate keys and never replaces an existing algorithm; unknown keys always fail."
+  - "Dispatch contains exceptions, honors the deadline before invoking the algorithm, and bounds result JSON."
+  - "No public ABI, camera backend, or recipe dependency in src/inspection/** or src/algorithms/**."
+verification:
+  canonical_wsl:
+    - "cmake --preset wsl-gcc-debug"
+    - "cmake --build --preset wsl-gcc-debug --parallel"
+    - "ctest --preset wsl-gcc-debug --output-on-failure"
+    - "cmake --build --preset wsl-gcc-debug --target format-check"
+    - "cmake --preset wsl-clang-analysis && cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+    - "cmake --preset wsl-gcc-asan && cmake --build --preset wsl-gcc-asan --parallel && ctest --preset wsl-gcc-asan --output-on-failure"
+acceptance_reference: >-
+  Contract acceptance_checks 9 (algorithms can be added behind the internal registry without
+  modifying camera, runtime, or C ABI contracts; the example documents cv2-to-C++ mapping)
+  and portable_unit coverage for the registry and algorithm example.
+rollback: "Remove src/inspection/**, src/algorithms/**, the CVF-003 tests, and the new error codes."
+reporting:
+  developer_report: .ai/reports/CVF-003-implementation.yaml
+  test_red_report: .ai/reports/CVF-003-test-red.yaml
+  test_verify_report: .ai/reports/CVF-003-test-verify.yaml
+  review_report: .ai/reviews/CVF-003.yaml
+  quality_report: .ai/reports/CVF-003-quality.yaml
+notes:
+  - "Independent tests live in tests/unit/ with the cvf003_*.cpp|cpp prefix; they must be clang-format clean before hashing so the standard format-check policy needs no new exclusions."
+  - "No runtime plug-in loading: registration is compile-time only."
+  - "Local command sandbox: workers may add their own harness scripts under .ai/validation/**."

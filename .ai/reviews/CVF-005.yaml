@@ -1,0 +1,255 @@
+schema_version: 1
+change_id: CVF-005
+role: reviewer
+recorded_at: 2026-09-15
+verdict: APPROVE
+
+reviewed_artifacts:
+  - .ai/project-contract.yaml
+  - .ai/changes/CVF-005.yaml
+  - .ai/reports/CVF-005-implementation.yaml
+  - .ai/reports/CVF-005-test-red.yaml
+  - .ai/reports/CVF-005-test-red-amendment.yaml
+  - .ai/reports/CVF-005-test-red-amendment-2.yaml
+  - .ai/reports/CVF-005-test-verify.yaml
+  - .ai/test-ownership.yaml
+  - .ai/test-briefs/CVF-005.yaml
+  - src/core/warnings.h, src/core/error.h, src/core/error.cpp
+  - src/diagnostics/diagnostics.h, src/diagnostics/diagnostics.cpp
+  - src/artifacts/capture_store.h, src/artifacts/capture_store.cpp
+  - src/core/text.h, src/core/text.cpp (utf8_safe_prefix reuse), src/core/status.h, src/core/result.h
+  - CMakeLists.txt, cmake/CvfFormat.cmake, cmake/CvfStaticAnalysis.cmake.in
+  - include/cvforwin/cvf_api.h (untouched confirmation), src/c_api/** (no CVF-005 coupling)
+  - tests/unit/cvf005_test_support.h, tests/unit/cvf005_error_codes_test.cpp,
+    tests/unit/cvf005_diagnostics_config_test.cpp, tests/unit/cvf005_diagnostics_logging_test.cpp,
+    tests/unit/cvf005_capture_store_test.cpp, tests/unit/cvf005_save_policy_test.cpp,
+    tests/unit/cvf005_retention_test.cpp, tests/unit/test_diagnostics_artifacts.cpp
+  - .ai/validation/cvf005-developer/logs/static-analysis_after_fix.log, format-check.log,
+    hash_verification.txt, ctest_wsl-gcc-debug_final.log, evidence_probe.txt
+  - .ai/validation/cvf005/td_debug_ctest.sh, .ai/validation/cvf005/td_asan_ctest.sh
+  - vcpkg.json, .ai/reports/CVF-001-implementation.yaml (spdlog pre-existing in the manifest)
+
+summary: >-
+  The change implements the frozen diagnostics_and_artifacts interface_v1 exactly and
+  stays inside the approved module boundary. WarningFlags keeps bits 1<<0 / 1<<1;
+  ErrorCode adds 1700/1701 and 1800-1803 with the frozen spellings and broad-status
+  mappings (1700 and 1011 -> invalid_argument, 1701/1801-1803 -> internal_error,
+  1800 -> config_error). Diagnostics::create validates absolute log_dir (1011) and the
+  >= 1024 / >= 1 bounds (1700) before any side effect, opens a size-rotating spdlog
+  sink at <log_dir>/cvforwin.log, degrades to callback-only with warning_log_sink_failed
+  when the directory or sink cannot be opened, filters below-level entries, truncates
+  UTF-8-safely to <= 4096 bytes via the existing core::utf8_safe_prefix, delivers
+  synchronously to the numeric-level NUL-terminated callback, contains both sink and
+  callback exceptions as warning bits, and never throws. CaptureStore::create validates
+  the absolute root and fails closed with artifacts_root_error; save() sanitizes
+  identifiers to [A-Za-z0-9._-], bounds them to 64 bytes, maps empty to "unnamed",
+  splits encode (1801) from write (1802) failures, removes partial files, and always
+  writes a direct child of the managed root; decide_capture_save implements the frozen
+  table with unknown tokens skipping; enforce_retention is non-recursive, classifies
+  entries with symlink_status so links and other non-regular entries are skipped and
+  never followed, deletes expired files oldest-first then oldest survivors until the
+  total fits, returns the count, and reports retention_error on scan/delete failure.
+  The public header, src/c_api/**, and vcpkg.json are untouched, and the new modules
+  depend only on core_model, spdlog, and OpenCV imgcodecs. The two independent-suite
+  failures were correctly diagnosed as test defects (TD-1: 128-byte bound contradicts
+  the frozen 1024 minimum; TD-2: double-underscore filename expectation) and were fixed
+  by the test owner with owner-recorded hash amendments and no weakened assertions.
+  Evidence is internally consistent: 242 = 204 pre-existing + 38 new (34 independent +
+  4 developer) with 0 failures and 0 skips at the final state in debug and ASan, format
+  check 69 files, static analysis 19 src-only TUs clean, ownership hashes 7/7 with the
+  A6/TD-1/TD-2 prior values recorded, and all seven independent files RED by compile
+  failure before implementation. No blocking findings.
+
+blocking_findings: []
+
+non_blocking_findings:
+  - id: NB-1
+    severity: minor
+    area: managed-root link resolution (defense in depth)
+    finding: >-
+      save() and enforce_retention() resolve the captures_root path itself through the
+      filesystem. Entries inside the root are handled safely (symlink_status
+      classification, links skipped and never followed), but if the configured root
+      path itself is replaced by a symlink/junction to another directory, writes and
+      deletions act on the link target, i.e. beyond the intended managed subtree.
+      interface_v1 does not specify root-link rejection, and the deployment controls
+      output_root, so this is reported as residual hardening rather than a violation.
+    evidence: >-
+      src/artifacts/capture_store.cpp:142-161 (create uses create_directories without
+      symlink_status on the root), :197-206 (directory_iterator on the root path);
+      tests cover links inside the root only (tests/unit/cvf005_retention_test.cpp:144-237)
+    required_action: >-
+      runtime_orchestrator change (CVF-006+): validate the managed capture root's real
+      path under the caller output root at initialization and/or re-check the root with
+      symlink_status before retention; optionally add a junction/symlink-root negative
+      case. No rework required for CVF-005.
+
+  - id: NB-2
+    severity: minor
+    area: retention delete accounting
+    finding: >-
+      std::filesystem::remove(file.path, error) is called for its error_code only; the
+      boolean return is ignored, so deleted is incremented even when remove() reports
+      false without an error (entry already gone via a concurrent external removal).
+      The returned count can overcount by one in that race; no path or safety impact.
+    evidence: >-
+      src/artifacts/capture_store.cpp:241-252 (age loop), :255-265 (size loop)
+    required_action: >-
+      Optional follow-up: count only remove() == true (or treat false-without-error as
+      not deleted). Not acceptance-relevant for this change.
+
+  - id: NB-3
+    severity: minor
+    area: final-state canonical evidence durability
+    finding: >-
+      The zero-exit runs for the frozen test state (ctest 242/242 in wsl-gcc-debug and
+      wsl-gcc-asan, and format-check 69 files in verify) were produced through test-owner
+      harness scripts (td_debug_ctest.sh / td_asan_ctest.sh / cvf005-test-engineer-verify*)
+      that echo exit codes but do not persist raw output, and the verify logs live under
+      /tmp/opencode (not durable). The developer's persisted logs describe the
+      pre-amendment state (242 registered, TD-1/TD-2 failing) and the pre-amendment
+      static-analysis run (19 src-only TUs clean, still valid because production sources
+      were frozen before the test-only TD fixes and the analysis target globs src/*.cpp
+      only). Independently verified assertions and hash matches are unchanged.
+    evidence: >-
+      .ai/reports/CVF-005-test-red-amendment-2.yaml:48-78; .ai/reports/CVF-005-test-verify.yaml:20-44;
+      .ai/validation/cvf005-developer/logs/static-analysis_after_fix.log (19 files clean);
+      cmake/CvfStaticAnalysis.cmake.in:8-10 (src/*.cpp glob)
+    required_action: >-
+      quality_owner: execute the canonical command set unmodified on the frozen state
+      (configure/build/ctest debug and asan, format-check, static-analysis) and record
+      raw zero-exit output under .ai/validation/ in .ai/reports/CVF-005-quality.yaml.
+      Non-blocking (CVF-004 NB-4 precedent).
+
+  - id: NB-4
+    severity: observation
+    area: spdlog rotation-count adaptation (documented deviation D1)
+    finding: >-
+      spdlog keeps max_files + 1 files, so the sink is constructed with max_files - 1
+      rotated files; max_files therefore denotes the total cvforwin* family (current +
+      rotated), and max_files == 1 truncates on rotation. The frozen <= max_files bound
+      is honored and probe/test verified, but a max_files reduction between runs can
+      leave stale cvforwin_N.log files that the sink does not prune at startup.
+    evidence: >-
+      src/diagnostics/diagnostics.cpp:85-99; .ai/validation/cvf005-developer/logs/evidence_probe.txt:4-5
+      (max_files=1 -> 1 file, max_files=2 -> 2 files); tests/unit/cvf005_diagnostics_logging_test.cpp:166-213
+    required_action: >-
+      architect: confirm the NFR-012 "five 10 MiB rolling files" reading (at most 5
+      files total, i.e. <= 50 MiB) at the next contract revision; optionally prune the
+      cvforwin*.log family beyond the configured count at create(). No rework required.
+
+  - id: NB-5
+    severity: observation
+    area: contract-internal inconsistency (test note vs normative bound)
+    finding: >-
+      The change-contract notes suggest max_file_bytes = 128 for tests while the
+      normative interface_v1.rules fix the minimum at 1024 and the independent B1 case
+      requires 1023 to be rejected. TD-1 was correctly resolved in favor of the
+      normative rule; the note text remains misleading for future test authors.
+    evidence: >-
+      .ai/changes/CVF-005.yaml:125 (note) vs :77 (rule); tests/unit/cvf005_diagnostics_config_test.cpp:50-62
+    required_action: >-
+      architect: reconcile the note at the next contract revision. No code or test
+      change required.
+
+  - id: NB-6
+    severity: observation
+    area: Windows symlink-retention coverage
+    finding: >-
+      The two B13 symlink retention cases are guarded by #ifndef _WIN32, so the
+      symlink-safety rule is exercised on WSL/GCC only; the MSVC run (where junctions are
+      the relevant reparse type) has no equivalent case. The production code path uses
+      portable symlink_status and is exercised on POSIX.
+    evidence: >-
+      tests/unit/cvf005_retention_test.cpp:144-237; .ai/test-ownership.yaml CVF-005 notes
+      ("the two symlink cases are POSIX-only (#ifndef _WIN32)")
+    required_action: >-
+      Optional follow-up: add a Windows junction-based retention case when the MSVC
+      suite runs in CI. Not blocking for this change.
+
+assessment:
+  frozen_interface_compliance: >-
+    PASS. Headers, namespaces, spellings, and signatures match interface_v1 exactly
+    (CallbackBinding::Fn, DiagnosticsConfig defaults, create/log/warnings/clear_warnings/
+    log_file_path/~Diagnostics, CaptureSaveRequest string_view identifiers,
+    SaveDecision, static enforce_retention, free decide_capture_save). WarningFlags bits
+    and the six error codes with their broad-status mappings match the frozen values.
+    create() validates path first (1011) then bounds (1700) with no side effects;
+    degraded mode keeps warning_log_sink_failed, the callback path, and
+    <log_dir>/cvforwin.log; level filtering, UTF-8-safe <= 4096 truncation, synchronous
+    numeric-level NUL-terminated callback delivery, and exception containment are as
+    specified. CaptureStore create/save/enforce_retention follow the frozen rules,
+    including the sanitization alphabet, 64-byte bound, "unnamed" substitution, the
+    encode/write error split with partial-file cleanup, and the age-then-size
+    oldest-first retention with a returned count.
+  invariants: >-
+    PASS. Optional sink failures become warning bits only and never touch a verdict;
+    image-save failures are returned as precise failures for the runtime to map to
+    warning_image_save_failed or the required-artifact rule. Retention stays inside the
+    managed root lexically, never follows entry links (symlink_status classification,
+    directory_options::none, non-recursive) and never deletes them; generated names
+    cannot form paths or escape the root (byte-wise sanitization, impossible separators).
+    No logging/artifact code includes or depends on recipes, cameras, or the public
+    C ABI; log() and the callback boundary are contained by catch(...) with all
+    throwing operations inside the try blocks, so log() cannot propagate.
+  deviations: >-
+    ACCEPTABLE. D1 (spdlog max_files - 1) honors the frozen observable bound and is
+    documented with probe and independent-test evidence (NB-4 records the semantic
+    consequence). The image encode/write split matches the frozen two-code surface.
+    Degraded diagnostics follow the frozen optional-sink semantics. No undisclosed
+    deviation was found; deviations_from_spec is empty in the developer report.
+  scope_and_integrity: >-
+    PASS. Only scope.allowed_files were touched: src/core/warnings.h (new), error.h/.cpp
+    (extended), src/diagnostics/**, src/artifacts/**, CMakeLists.txt (two static
+    libraries + cvf005_tests + developer test), tests/unit/test_diagnostics_artifacts.cpp,
+    and .ai/validation/**. include/cvforwin/** and src/c_api/** show no CVF-005 coupling
+    (comment-only matches); vcpkg.json already carried spdlog from CVF-001, so no
+    manifest change was needed; CMakePresets.json and cmake/** required no edits
+    (glob-based analysis/format/static-analysis pick up the new sources automatically).
+    Independent cvf005_* files were modified only by the test owner (A6, TD-1, TD-2)
+    with prior hashes recorded in .ai/test-ownership.yaml and .ai/reports/CVF-005-test-red-amendment*.yaml;
+    assertions were preserved (TD-2 strengthened), none removed/skipped/weakened, and the
+    developer reports no test-file modification. The A6 fix (SaveRequestHolder with
+    declaration-ordered storage, lvalue-qualified request(), deleted rvalue overload)
+    removes the dangling string_view pattern and prevents its recurrence.
+  evidence_consistency: >-
+    PASS. 242 = 204 pre-existing + 38 new (34 independent + 4 developer), 0 failures and
+    0 skips at the final state in wsl-gcc-debug and wsl-gcc-asan; format-check 69 files;
+    static analysis 19 src-only TUs clean; ownership hashes 7/7 with amendment chains;
+    RED is present for all seven independent files (compile-stage failures against the
+    intentionally absent interface, per-file exit 1) plus the developer probe evidence
+    for TD-1/TD-2 and the rotation bound. The developer's persisted ctest log records the
+    two historical test-defect failures that the amendments removed (NB-3 covers
+    durability of the final-state canonical run).
+
+independence_notes: >-
+  The seven cvf005_* files include only frozen interface headers, core headers, and the
+  frozen support header; they never include production .cpp files or inspect
+  implementation state, and their expectations derive from the brief behaviors B1-B14
+  plus documented boundary/negative cases (error-code contract values, 1023/1024 and
+  0/1 bounds, 4096/4097 truncation and split code point, hostile identifiers including
+  '../escape', '..', backslashes and spaces, 64/100-byte identifiers, the 17-case policy
+  table, age/size boundaries, symlink no-follow, non-existent root). No skips, mayfail
+  tags, or commented-out assertions exist in the owned files; the amended B4 genuinely
+  exercises rotation (40 x ~120 bytes against 1024 bytes) and the amended TD-2
+  expectation is stronger than the original. The three owner-recorded amendments (A6,
+  TD-1, TD-2) are legitimate test-owner corrections with fresh evidence and hash
+  updates; no developer edit to owned files is evidenced, and the developer-reported
+  independent failures were proven test-side by the evidence probe. Residual caveats:
+  I could not recompute sha256 digests (read-only, no shell) and rely on the verify
+  report's byte-exact 7/7 match for the quality gate's recomputation; the verify role
+  is the same test-owner that authored the suite (author/execution separation is
+  preserved relative to implementation, and the final independent canonical gate remains
+  the quality-owner run recorded in the pending CVF-005-quality report); the two symlink
+  retention cases run only on POSIX (NB-6).
+
+notes: >-
+  The verdict is APPROVE with zero blocking findings. The six non-blocking items are
+  evidence-hygiene, hardening, and documentation observations for the quality owner and
+  the architect; none requires rework of production or test code in this change. The
+  runtime change should map CaptureStore::save failures to warning_image_save_failed
+  (optional) or CVF_STATUS_REQUIRED_ARTIFACT_ERROR (recipe-required) and copy the
+  internal warning bits into cvf_inspection_result_v1.warning_flags; the
+  warning_image_save_failed bit is intentionally not set inside this module. The
+  change-contract note suggesting 128-byte log files (NB-5) and the NFR-012 max_files
+  reading (NB-4) should be settled by the architect at the next revision.

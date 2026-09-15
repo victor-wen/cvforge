@@ -1,0 +1,90 @@
+# Scripted body of the package target (Windows only).
+#
+# Runs in `cmake -P` script mode: generator expressions are not expanded here.
+# The caller passes CVF_CONFIG together with the resolved CVF_DLL and
+# CVF_IMPORT_LIB paths; this script locates the build outputs through
+# CVF_CONFIG (with the explicit paths preferred) and fails loudly when an
+# expected input is missing. No generator expression may appear in this file.
+
+set(cvf_package_name "cvforwin-@PROJECT_VERSION@")
+set(package_root "${CVF_PACKAGE_DIR}/${cvf_package_name}")
+
+if(NOT DEFINED CVF_CONFIG)
+    set(CVF_CONFIG "")
+endif()
+if(NOT DEFINED CVF_DLL)
+    set(CVF_DLL "")
+endif()
+if(NOT DEFINED CVF_IMPORT_LIB)
+    set(CVF_IMPORT_LIB "")
+endif()
+
+# Locate one build output: prefer the explicit generator-expression path, then
+# the configuration directory, then a plain single-config directory. The
+# configuration suffix is the passed CVF_CONFIG, never a generator expression.
+function(cvf_resolve_output out_var label explicit_path directory file_name)
+    if(NOT "${explicit_path}" STREQUAL "" AND EXISTS "${explicit_path}")
+        set(${out_var} "${explicit_path}" PARENT_SCOPE)
+        return()
+    endif()
+    if(NOT "${CVF_CONFIG}" STREQUAL "")
+        set(candidate "${CVF_BUILD_DIR}/${directory}/${CVF_CONFIG}/${file_name}")
+        if(EXISTS "${candidate}")
+            set(${out_var} "${candidate}" PARENT_SCOPE)
+            return()
+        endif()
+    endif()
+    set(candidate "${CVF_BUILD_DIR}/${directory}/${file_name}")
+    if(EXISTS "${candidate}")
+        set(${out_var} "${candidate}" PARENT_SCOPE)
+        return()
+    endif()
+    message(FATAL_ERROR
+        "package: ${label} not found for configuration '${CVF_CONFIG}'; expected one of the "
+        "configuration directories below ${CVF_BUILD_DIR}/${directory}")
+endfunction()
+
+cvf_resolve_output(dll "cvforwin.dll" "${CVF_DLL}" "bin" "cvforwin.dll")
+cvf_resolve_output(import_lib "cvforwin.lib" "${CVF_IMPORT_LIB}" "lib" "cvforwin.lib")
+
+foreach(required IN ITEMS "config/examples/cvforwin.json" "config/examples/recipes" "docs" "LICENSES")
+    if(NOT EXISTS "${CVF_SOURCE_DIR}/${required}")
+        message(FATAL_ERROR "package: required input is missing from the source tree: ${required}")
+    endif()
+endforeach()
+
+file(REMOVE_RECURSE "${CVF_PACKAGE_DIR}")
+file(MAKE_DIRECTORY
+    "${package_root}/bin"
+    "${package_root}/lib"
+    "${package_root}/include/cvforwin"
+    "${package_root}/docs"
+    "${package_root}/LICENSES"
+)
+
+file(COPY "${dll}" DESTINATION "${package_root}/bin")
+file(COPY "${import_lib}" DESTINATION "${package_root}/lib")
+file(COPY "${CVF_SOURCE_DIR}/include/cvforwin/cvf_api.h" DESTINATION "${package_root}/include/cvforwin")
+
+# file(COPY) of a directory copies its contents, so each tree is copied into
+# its explicit destination to preserve the documented package layout.
+file(COPY "${CVF_SOURCE_DIR}/config/examples/" DESTINATION "${package_root}/config/examples")
+file(COPY "${CVF_SOURCE_DIR}/docs/" DESTINATION "${package_root}/docs")
+file(COPY "${CVF_SOURCE_DIR}/LICENSES/" DESTINATION "${package_root}/LICENSES")
+
+# The staged directory is the verification root; the ZIP is the upload
+# artifact. Uploading is only allowed after package-verify passed.
+set(archive "${CVF_PACKAGE_DIR}/${cvf_package_name}.zip")
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E tar cf "${archive}" --format=zip "${cvf_package_name}"
+    WORKING_DIRECTORY "${CVF_PACKAGE_DIR}"
+    RESULT_VARIABLE archive_result
+    OUTPUT_VARIABLE archive_output
+    ERROR_VARIABLE archive_error
+)
+if(NOT archive_result EQUAL 0)
+    message(FATAL_ERROR "package: creating ${archive} failed: ${archive_output}${archive_error}")
+endif()
+
+message(STATUS "package: staged ${package_root}")
+message(STATUS "package: archive ${archive} (configuration '${CVF_CONFIG}')")

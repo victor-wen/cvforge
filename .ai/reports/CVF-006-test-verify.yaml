@@ -1,0 +1,127 @@
+schema_version: 1
+change_id: CVF-006
+phase: VERIFY
+date: 2026-09-15
+verifier: test-engineer
+
+independence:
+  method: >-
+    Fresh session. Inputs limited to .ai/test-briefs/CVF-006.yaml, the approved
+    .ai/project-contract.yaml, the test-engineer-owned CVF-006 test files and
+    fixtures, .ai/test-ownership.yaml, and CMake runner/build configuration.
+    No production implementation source, diff, changed-file list, developer
+    note, root-cause report, or .ai/changes/** artifact was read.
+  production_source_read: false
+  forbidden_input_exposure: none
+
+ownership:
+  manifest: .ai/test-ownership.yaml
+  files_checked: 10
+  initial_mismatches: []
+  final_mismatches: []
+  notes: >-
+    All ten CVF-006 files re-hashed at session start matched the recorded
+    manifest values exactly. After the verify-phase extension recorded under
+    added_cases, nine files still match; tests/abi/cvf006_lifecycle.c was
+    re-hashed by its owner and its new sha256 was recorded in the manifest.
+
+commands:
+  - command: "export VCPKG_ROOT=$HOME/vcpkg && cmake --preset wsl-gcc-debug"
+    cwd: /home/administrator/c_cpp_project/cvforwin
+    exit_code: 0
+    counts: "configure ok; build tree build/wsl-gcc-debug (GNU 13.3.0, Debug)"
+    note: >-
+      Executed via the test-engineer-owned harness
+      .ai/validation/cvf006-test-engineer-verify.sh because direct cmake
+      invocation is sandbox-restricted; the harness runs exactly the canonical
+      commands and no production or test file is modified.
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    counts: >-
+      initial run: no work to do (tree already up to date with sources);
+      post-amendment run: compiled tests/abi/cvf006_lifecycle.c and linked
+      cvf006_lifecycle
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "passed=262, failed=0, skipped=0"
+  - command: "ctest --preset wsl-gcc-debug -R 'cvf006|CVF-006' --output-on-failure"
+    exit_code: 0
+    counts: "passed=20, failed=0, skipped=0"
+    note: >-
+      20 = 15 independent Catch2 cases in cvf006_tests (brief B7-B12) +
+      1 independent C lifecycle executable cvf006.lifecycle (brief B1-B6/B13) +
+      4 developer-authored cases in cvf006_developer_tests (not test-engineer
+      owned and not used as independent evidence).
+  - command: "./build/wsl-gcc-debug/cvf006_lifecycle"
+    exit_code: 0
+    counts: "checks=186, failures=0"
+  - command: "./build/wsl-gcc-debug/cvf006_tests"
+    exit_code: 0
+    counts: "All tests passed (213 assertions in 15 test cases)"
+  - command: "clang-format --dry-run --Werror tests/abi/cvf006_lifecycle.c"
+    exit_code: 0
+    counts: "no formatting drift after the extension"
+  - command: "cmake --build --preset wsl-gcc-asan --parallel"
+    exit_code: 0
+    counts: "rebuilt the amended C lifecycle object under ASan"
+  - command: "ctest --preset wsl-gcc-asan -R 'cvf006|CVF-006' --output-on-failure"
+    exit_code: 0
+    counts: "passed=20, failed=0, skipped=0"
+  - command: "./build/wsl-gcc-asan/cvf006_lifecycle"
+    exit_code: 0
+    counts: "checks=186, failures=0"
+
+failures: []
+
+skips:
+  scan: >-
+    Every ctest and direct-run log was searched for skip|disabled|excluded|not
+    run. The only match is the test case name "CVF-006 B9: fail_or_error skips
+    persistence on PASS", which is an assertion about the runtime save policy,
+    not a skipped test. No SKIP macros, no hidden [.] tags, no disabled CTest
+    entries.
+  skipped_tests: 0
+
+assertion_review:
+  result: pass
+  notes: >-
+    Reviewed every owned file. All cases assert through CHECK/REQUIRE or the
+    C harness check_* helpers; there is no #if 0, no early return that bypasses
+    a recorded failure, and no assertion was weakened, disabled, or removed.
+    Two if constexpr branches in tests/unit/cvf006_test_support.h adapt to the
+    documented interface shape; both branches perform real value extraction and
+    neither bypasses validation.
+
+added_cases:
+  - file: tests/abi/cvf006_lifecycle.c
+    case: b3_ratio_equal_passes / b3_ratio_above_fails (case_b3_verdict_ratio_boundary)
+    requirement: >-
+      .ai/test-briefs/CVF-006.yaml boundary_cases: "verdict boundary pass_ratio
+      == min_pass_ratio -> PASS"; not asserted by any independent test of this
+      change before this session.
+    method: >-
+      File-backed camera fed a 4x4 frame with 8 pure-white and 8 pure-black
+      pixels (pass_ratio exactly 0.5); recipe min_pass_ratio 0.5 must yield PASS
+      and 0.51 must yield FAIL, observed end-to-end through cvf_inspect.
+    observed: "both cases pass; lifecycle check count 178 -> 186"
+    manifest_update: >-
+      As owner, updated the recorded sha256 for tests/abi/cvf006_lifecycle.c
+      from 93a6699b3724d3c548620a87c5458673b131be09d12b997556c58b85832e0c49 to
+      ebecb06e9412fb1558f4cfd0a50c6ff20be6e7ff7d19f485203e4609b181b442 and
+      documented the extension in the CVF-006 section of .ai/test-ownership.yaml.
+
+brief_coverage:
+  B1-B6, B13: "tests/abi/cvf006_lifecycle.c (public C ABI end-to-end)"
+  B7-B12: "tests/unit/cvf006_*.cpp (runtime via RuntimeOptions.camera_override)"
+  boundary_cases:
+    - "output_json capacity 65536 vs 65535: covered (b3 exact-capacity inspect; b4_output_json_undersized)"
+    - "timeout_ms 1 vs 0: covered (cvf006_deadline_test.cpp)"
+    - "pass_ratio == min_pass_ratio -> PASS: covered by the added case above"
+    - "reload same content no-op; duplicate ids rejected: covered (b5 reload cases)"
+  negative_cases: >-
+    Covered: null context/request/result, malformed struct_size/abi_version/
+    reserved, undersized output_json/image_path/error_message buffers,
+    unknown recipe, invalid identifiers/UTF-8/embedded NUL, non-object and
+    oversized input_json.
+
+blockers: []

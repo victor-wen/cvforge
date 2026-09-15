@@ -1,0 +1,301 @@
+change_id: CVF-002
+verdict: APPROVE
+reviewed_artifacts:
+  - .ai/project-contract.yaml
+  - .ai/changes/CVF-002.yaml
+  - .ai/test-briefs/CVF-002.yaml
+  - .ai/reports/CVF-002-implementation.yaml
+  - .ai/reports/CVF-002-test-red.yaml
+  - .ai/reports/CVF-002-test-verify.yaml
+  - .ai/test-ownership.yaml
+  - src/core/result.h
+  - src/core/deadline.h
+  - src/core/deadline.cpp
+  - src/core/error.h
+  - src/core/error.cpp
+  - src/core/status.h
+  - src/camera/captured_frame.h
+  - src/camera/camera_backend.h
+  - src/camera/camera_backend.cpp
+  - src/camera/test_backends/**
+  - CMakeLists.txt
+  - CMakePresets.json (read-only context for deviation c)
+  - cmake/CvfOptions.cmake
+  - cmake/CvfFormat.cmake
+  - tests/camera/**
+  - tests/unit/test_core_result_deadline.cpp
+  - tests/unit/test_core_camera_error_codes.cpp
+  - .ai/validation/cvf-002-implement-out/**
+  - .ai/validation/cvf-002-verify-logs/**
+
+summary: >-
+  Independent semantic review of CVF-002 (camera_contract + test_camera_backends,
+  with Result/Deadline and error-code additions to core_model). The frozen
+  interface_v1 surface was verified line by line: Result<T>/Result<void> accessors
+  and throw-on-misuse, Deadline from_timeout_ms/immediate/expired/saturating
+  remaining, error codes 1400-1409 with the exact frozen broad-status mapping and
+  stable names, PixelFormat/FrameMetadata/CapturedFrame (owned BGR8 cv::Mat, no
+  backend handles), CameraDescriptor/Selector/Settings, the six-method
+  ICameraBackend, resolve_identity (empty selector -> selector_empty; zero matches
+  -> camera_not_found; >=2 matches -> camera_identity_ambiguous; no first-match
+  fallback), and capture_with_one_retry (one capture; non-camera_io returned
+  unchanged; at most one reconnect plus one recapture; deadline_expired checks
+  before each retry step; never enumerates or opens another descriptor). Test
+  backends implement the frozen FaultKind/inject/clear API, per-call fault
+  consumption, disconnect persistence until reconnect, one-shot capture errors,
+  deadline-bounded delays, deterministic synthetic pixels/sizes/sequences, file
+  decode/mono-BGR8/frames_exhausted/capture_failed/camera_not_open semantics, and
+  option-gated registration. Camera code contains no verdict, recipe, or C ABI
+  concept (grep-verified); module boundaries and dependency direction hold; the
+  public ABI is untouched (deadline.cpp only joins the private static core library;
+  abi-check stays at exactly five exports). Scope is clean: the changed paths are
+  all inside scope.allowed_files (tests/unit developer tests, .ai/validation
+  harness, cmake/**, CMakeLists.txt); tests/camera was not modified by the
+  developer per the recorded hashes, which are identical across .ai/test-ownership.yaml,
+  the author-phase, developer and verify-phase reports. All 49 independent camera
+  cases are substantive and behavior-derived (8/8/9/6/10/8 per file), none skipped,
+  disabled or weakened; the verify ctest log shows all 49 Passed inside 86/86, and
+  the option-OFF/ON runs show the expected 37/86 registration split. Arithmetic is
+  fully consistent (86 = 49 camera + 4 abi + 33 unit; 11 clang-tidy translation
+  units; 30 format-checked files). No blocking finding: the one escalation is
+  deviation (c), a program-level Windows MSVC registration gap that CVF-002 could
+  not fix inside its allowed files and cannot be blamed on the implementation, which
+  followed the frozen "OFF in release presets" instruction. It is recorded as a
+  required follow-up with owner before any Windows camera_contract evidence claim is
+  accepted.
+
+blocking_findings: []
+
+non_blocking_findings:
+  - id: F1
+    severity: high (program-level escalation; not a CVF-002 implementation defect)
+    area: test policy compliance / Windows MSVC camera_contract environment
+    finding: >-
+      CVFORWIN_BUILD_TEST_BACKENDS defaults OFF for multi-config and non-Debug
+      configurations (cmake/CvfOptions.cmake L53-L57), and the camera suite is
+      registered only when the option is ON (CMakeLists.txt L289-L315). The only
+      Windows preset, windows-msvc-release, is a Visual Studio multi-config preset
+      with no CMAKE_BUILD_TYPE and no explicit option override (CMakePresets.json
+      L60-L78), so on Windows MSVC the test backends are not built and the
+      camera_contract suite is not registered: the Windows ctest run would execute
+      37 tests (33 unit + 4 abi), not 86. The approved project contract test_policy
+      lists camera_contract environments as "WSL GCC with synthetic/file/fault
+      backends" AND "Windows MSVC with synthetic/file/fault backends", so the
+      Windows half of that policy would silently never run. The developer reported
+      and escalated this correctly (deviation c); the frozen change interface_v1
+      itself says "ON in dev presets, OFF in release presets" and CMakePresets.json
+      is outside CVF-002 scope.allowed_files, so the implementation could not and
+      should not have changed it here. No Windows evidence is claimed by CVF-002.
+    evidence: >-
+      cmake/CvfOptions.cmake L53-L57; CMakeLists.txt L289-L315; CMakePresets.json
+      L60-L78 (windows-msvc-release, no CVFORWIN_BUILD_TEST_BACKENDS, no
+      CMAKE_BUILD_TYPE); .ai/project-contract.yaml test_policy.suites camera_contract
+      environments; .ai/reports/CVF-002-implementation.yaml deviations.c.
+    required_action: >-
+      Before any program-level claim that the camera_contract suite passes under
+      Windows MSVC, the owner of CMakePresets.json (quality_owner, with architect
+      approval of the test-policy reading) must add an explicit
+      CVFORWIN_BUILD_TEST_BACKENDS=ON Windows test/CI preset (or a dedicated
+      windows test preset referenced by the windows-ci workflow / windows_test
+      command) and record a windows-2022 ctest run that includes the 49 CVF-002
+      cases. Do not relax the test policy and do not substitute a WSL run for the
+      Windows environment. Track this as the first-class follow-up the developer
+      proposed for CVF-008 (or whichever change owns CMakePresets.json).
+
+  - id: F2
+    severity: low
+    area: frozen interface conformance / test-backend counters (deviation a)
+    finding: >-
+      interface_v1 spells the counters as callable accessors
+      (std::uint32_t capture_call_count() const noexcept), while the hash-pinned
+      independent suite observes them as plain members
+      (backend.capture_call_count == 1). The implementation resolves the conflict
+      with one CallCounter object per counter exposing operator() and a non-explicit
+      implicit conversion to std::uint32_t over a single value, so both spellings
+      work and no assertion or semantic changed. This is benign but it means the
+      delivered public surface of the test backends literal-declares data members
+      where the frozen text declares accessors, and the non-explicit conversion
+      silently permits comparisons/arithmetic on the counter object.
+    evidence: >-
+      .ai/changes/CVF-002.yaml interface_v1.test_backends.common_fault_api;
+      src/camera/test_backends/test_backend_support.h L32-L63;
+      tests/camera/test_file_camera_backend.cpp L37-L41 (member spelling);
+      .ai/reports/CVF-002-implementation.yaml deviations.a.
+    required_action: >-
+      At the next bounded revision of the internal camera interface, pick one
+      canonical spelling (prefer the frozen accessor form), update the frozen
+      interface text and the test-owner sources plus .ai/test-ownership.yaml hashes
+      together, and drop the dual-spelling shim; alternatively record the shim as an
+      intentional compatibility contract in the interface text. No change is
+      required for CVF-002.
+
+  - id: F3
+    severity: info
+    area: test-backend open semantics (deviation b) / frozen interface completeness
+    finding: >-
+      SyntheticCameraBackend::open also validates the descriptor field-by-field and
+      returns Failure(Status::camera_not_found, ErrorCode::descriptor_mismatch) on
+      mismatch, although interface_v1 specified descriptor validation only for the
+      file backend. The extra behavior is fail-closed and consistent with the
+      identity invariant (a backend can never open an identity it did not
+      enumerate), and no independent test exercises or contradicts it. The same
+      reasoning should apply to the future UVC backend but the contract text does
+      not yet say so.
+    evidence: >-
+      src/camera/test_backends/synthetic_camera_backend.cpp L52-L59;
+      src/camera/test_backends/file_camera_backend.cpp L33-L45;
+      .ai/reports/CVF-002-implementation.yaml deviations.b.
+    required_action: >-
+      Architect may add a one-line rule to camera_backend_contract / the next change
+      interface ("open validates the descriptor it was given and fails with
+      descriptor_mismatch on any field difference") so file, synthetic and UVC
+      backends keep identical fail-closed semantics. Documentation-only; no code
+      change required for CVF-002.
+
+  - id: F4
+    severity: info
+    area: core/camera headers (deviation d)
+    finding: >-
+      FrameMetadata::captured_at and Deadline::deadline_ have no "{}" default member
+      initializer because clang-tidy readability-redundant-member-init (warnings as
+      errors) rejects it. Behavior is defined and unchanged: std::chrono::time_point
+      default-constructs to the clock epoch, Deadline's member is assigned in
+      from_timeout_ms and value-initialized by immediate(), and CapturedFrame
+      metadata is always overwritten by both backends before return.
+    evidence: >-
+      src/camera/captured_frame.h L26-L32; src/core/deadline.h L31-L33;
+      src/core/deadline.cpp L5-L16; .ai/reports/CVF-002-implementation.yaml
+      deviations.d.
+    required_action: >-
+      None. Optional: note the epoch value in a comment for readers at the next
+      touch.
+
+  - id: F5
+    severity: info
+    area: fault plan storage (deviation e) / residual unspecified edge
+    finding: >-
+      Fault plans are stored per targeted 1-based call index in vectors, with a
+      repeat injection for the same index replacing the earlier plan. This matches
+      the frozen semantics ("faults are consumed by the calls they target"; the
+      retry test requires call-1 and call-2 failures to coexist) and was corrected
+      after a real test failure, which is exactly the intended red-to-green
+      behavior. Residual unspecified case: a plan whose target call returns early
+      before the fault point (not-open/disconnected, or a delay overrun) is never
+      consumed and stays pending for the life of the backend; interface_v1 does not
+      define it and no test depends on it.
+    evidence: >-
+      src/camera/test_backends/test_backend_support.cpp L14-L82;
+      .ai/reports/CVF-002-implementation.yaml deviations.e.
+    required_action: >-
+      None for CVF-002. If the internal fault API is ever frozen formally, state
+      explicitly whether unreached plans persist or expire per call index.
+
+  - id: F6
+    severity: low
+    area: build robustness (CMakeLists.txt)
+    finding: >-
+      The unit-test target guards Catch2 discovery with include(Catch OPTIONAL) and
+      falls back to a single ctest entry when Catch.cmake is absent (CMakeLists.txt
+      L275-L281), but the camera suite calls catch_discover_tests unconditionally
+      inside the test-backends branch (L312). A toolchain that provides Catch2's
+      package but not Catch.cmake would fail configuration instead of degrading to
+      one test entry. All canonical presets currently find Catch.cmake, so no run is
+      affected today.
+    evidence: >-
+      CMakeLists.txt L275-L281 and L289-L315.
+    required_action: >-
+      Reuse the existing OPTIONAL include guard/fallback for cvf_camera_tests, or
+      hoist a single include(Catch OPTIONAL) above both test targets, at the next
+      build-file touch.
+
+  - id: F7
+    severity: info
+    area: architecture notes / module dependency list accuracy
+    finding: >-
+      The project contract lists test_camera_backends dependencies as camera_contract
+      plus OpenCV imgcodecs, while the implementation additionally links OpenCV
+      imgproc (cvtColor for mono/BGRA normalization) and includes core_model headers
+      (core/deadline.h, core/error.h) directly. This violates no dependency direction
+      or invariant: imgproc is an explicitly approved initial OpenCV component
+      (contract dependencies.external) and core_model is the permitted downstream
+      leaf already exposed through camera_contract's own header. It is a
+      documentation-accuracy gap only.
+    evidence: >-
+      CMakeLists.txt L101-L107; src/camera/test_backends/file_camera_backend.cpp
+      L80-L90; src/camera/test_backends/test_backend_support.h L21-L23;
+      .ai/project-contract.yaml modules.test_camera_backends.dependencies.
+    required_action: >-
+      Architect may amend the test_camera_backends dependency list to "camera_contract,
+      core_model, OpenCV core/imgcodecs/imgproc" when the contract is next revised;
+      no code change required.
+
+  - id: F8
+    severity: low
+    area: evidence quality / verification completeness
+    finding: >-
+      The independent verify session re-ran configure/build/ctest (86/86) and the
+      skip scan through the test-engineer harness and recorded raw logs, but the
+      remaining canonical gates that CVF-002's verification section lists
+      (format-check, static-analysis, sanitizers, abi-check) rest on
+      developer-claimed exit codes recorded through the developer harness under
+      .ai/validation/cvf-002-implement-out. The claims are internally consistent
+      (30 format-checked files, 11 clang-tidy translation units = src/core 5 +
+      src/c_api 2 + src/camera 1 + test_backends 3, 86/86 ASan, exactly 5 exports),
+      and the reviewer confirmed the 37/86 option split, all 49 camera case names
+      Passing in the verify ctest log, and case counts from source, but did not
+      re-run any command (read-only session).
+    evidence: >-
+      .ai/validation/cvf-002-verify-logs/{ctest.log,ctest-list.log,skip-scan.log};
+      .ai/validation/cvf-002-implement-out/{option-off-ctest-N.log,option-on-ctest-N.log};
+      .ai/reports/CVF-002-implementation.yaml verification;
+      .ai/reports/CVF-002-test-verify.yaml.
+    required_action: >-
+      Quality gate re-runs the canonical wsl-gcc-debug test/format/abi-check,
+      wsl-clang-analysis static-analysis and wsl-gcc-asan presets with fresh exit
+      codes and records them verbatim in .ai/reports/CVF-002-quality.yaml.
+
+independence_notes: >-
+  The independent suite was authored black-box before implementation (RED evidence:
+  all six TUs failed at tests/camera/camera_test_support.h:21 on the missing
+  core/deadline.h, which matches the on-disk include order), and the developer did
+  not modify tests/camera: the eight sha256 values recorded in .ai/test-ownership.yaml
+  are byte-identical in the author-phase, developer and verify-phase reports, and the
+  verify session recorded both pre-run and post-run manifest matches. I inspected all
+  eight files line by line: they assert only contract-derived observable behavior
+  through the frozen headers (no production .cpp, no diffs, no developer notes), the
+  case inventory is 8/8/9/6/10/8 = 49 exactly as planned and as registered by ctest,
+  and there is no SKIP, [!mayfail], [.], #if 0, DISABLED or short-circuited assertion
+  (grep and the verify skip-scan log both clean). The single disjunctive assertion is
+  the documented clock-race-safe delay-equal bound in B7, and it still shape-checks
+  both outcomes. One interface pressure point exists: the tests observe counters as
+  data members while the frozen text declares accessors; the implementation absorbed
+  that with the dual-spelling CallCounter (F2) rather than by touching test files,
+  so no assertion was weakened. Limitation: this reviewer has no shell and cannot
+  recompute sha256 or re-execute builds; hash integrity is judged from the three
+  mutually consistent owner/developer recordings plus direct source inspection, and
+  the quality gate remains the authoritative executor.
+
+notes:
+  - The Windows MSVC side of the camera_contract test-policy environment is the only
+    substantive gap in this change package; it is F1 and must be closed by the owner
+    of CMakePresets.json before any Windows camera-suite claim. CVF-002 itself is
+    WSL-complete and its acceptance reference (camera fault tests proving at most one
+    reconnect/recapture with no device re-selection, plus the camera_contract coverage
+    list) is demonstrably met by the 49 passing independent cases.
+  - Scope compliance verified by inspection of every recorded changed path: only
+    src/core/{result.h,deadline.h,deadline.cpp,error.h,error.cpp},
+    src/camera/{camera_backend.*,captured_frame.h,test_backends/**},
+    CMakeLists.txt, cmake/** and the allowed tests/unit and .ai/validation additions
+    are touched; include/cvforwin/**, src/c_api/**, src/camera/uvc_windows/**,
+    .github/**, and .ai/project-contract.yaml are untouched, CMakePresets.json was
+    deliberately left alone, and no public symbol, status value, layout or ownership
+    rule changed (deadline.cpp only joins the private static core library; the
+    five-export abi-check and .def/version-script allowlists are unaffected).
+  - Optional observations with no action: Result<T> is returned by copy at one
+    capture_with_one_retry return site (correct, merely a shallow cv::Mat refcount
+    copy); the file backend maps 2-channel and >4-channel images to capture_failed
+    beyond the frozen mono/3/4-channel rules (extra fail-closed path, untested and
+    uncontradicted); the B7 "delay == nominal remaining" race is bounded by design;
+    and the format-check exclusion for tests/abi and tests/camera is documentation
+    only (the target's globs already cover src/**, include/** and tests/unit/**, and
+    those remain checked with -Wall -Wextra -Werror on the CTest side).

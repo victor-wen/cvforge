@@ -1,0 +1,354 @@
+schema_version: 1
+change_id: CVF-008
+phase: IMPLEMENT
+recorded_at: 2026-09-15
+author: developer
+baseline:
+  path: .ai/project-contract.yaml
+  contract_version: 1.0.0
+  status: APPROVED
+change_file: .ai/changes/CVF-008.yaml
+harness: .ai/validation/cvf008-developer/
+
+summary: >-
+  Implemented the CVF-008 delivery surface inside the approved baseline: a strict C11 native C
+  host example that consumes only cvf_api.h and runs end-to-end on WSL against the test-enabled
+  build; schema-valid example configuration and recipes for a "uvc" deployment and for local
+  synthetic runs; the packaging fixes F3 (script-mode configuration resolution, no literal
+  generator expression in a -P body), F4 (real package-verify: contents, exactly one project
+  DLL, notices, packaged-vs-built hash equality, exact five exports from cvforwin.def, runtime
+  dependency allowlist, upload archive), and QE-1 (shell-metacharacter-free portable refusal
+  that exits non-zero without the /bin/sh syntax error); the F1 Windows test preset
+  (windows-msvc-tests with CVFORWIN_BUILD_TEST_BACKENDS=ON, release kept OFF); auditable
+  LICENSES notices and a component mapping; usage/build/packaging documentation; and the
+  windows-2022 workflow with immutable action references, least permissions, and no secrets.
+  Portable WSL evidence: configure exit 0, build exit 0, ctest 263/263 with no delta,
+  format-check 83/83 files, clang static-analysis 21 files clean, ASan 263/263, example run exit
+  0 with PASS/JSON/image path, refusals exit 1 cleanly under Ninja and non-zero under Unix
+  Makefiles, and a 17/17 local harness of the package script logic. Windows MSVC
+  build/test/abi-check/package/package-verify, the real dumpbin export and dependency checks,
+  the symbols archive, and the clean package-consumer run remain deferred to windows-2022 CI;
+  no Windows result is claimed.
+
+files:
+  created:
+    - path: examples/c_host/main.c
+      role: >-
+        Strict C11 template host using only <cvforwin/cvf_api.h>: ABI query, cvf_initialize with
+        file+callback logging, one cvf_inspect per cycle printing status/verdict/elapsed_ms/
+        output-JSON excerpt/image path, cvf_reload_recipes, cvf_shutdown; non-zero exit on any
+        failure; usage errors return 2. Header states it is a template, not production
+        inspection.
+    - path: examples/c_host/CMakeLists.txt
+      role: >-
+        Defines cvf_c_host_example (C11, links the cvforwin target, test warning options,
+        sanitizers, predictable RUNTIME_OUTPUT_DIRECTORY for single- and multi-config builds).
+    - path: examples/c_host/config/cvforwin.json
+      role: >-
+        Local run configuration with the "synthetic" backend (accepted only by test-enabled
+        builds), 64x48 bgr8, 30 fps, info logging, 30-day/1 GiB retention.
+    - path: examples/c_host/config/recipes/example.pass.json
+      role: >-
+        Deterministic example recipe (example.threshold, min_pass_ratio 0.0, save_policy
+        "always") so a local run always PASSes and prints a real capture path.
+    - path: examples/c_host/run_example.sh
+      role: >-
+        Build-tree runner: locates <build>/examples/c_host/cvf_c_host_example, creates a
+        throwaway output root, forwards the example exit code unchanged.
+    - path: config/examples/cvforwin.json
+      role: >-
+        Deployment template: backend "uvc", VID/PID selector, 1280x720 bgr8 at 30 fps, rolling
+        logging (10 MiB x 5), 30-day/10 GiB retention.
+    - path: config/examples/recipes/example.pass.json
+      role: >-
+        Example PASS template (example.threshold, min_pass_ratio 0.0, save_policy always);
+        package-consumer and host compatible.
+    - path: config/examples/recipes/example.strict.json
+      role: >-
+        Second template showing capture overrides, settle_frames, min_pass_ratio 0.9, and
+        save_policy fail_or_error.
+    - path: LICENSES/OpenCV-LICENSE.txt
+      role: "Verbatim Apache-2.0 text from the vcpkg opencv4 copyright (4.12.0)."
+    - path: LICENSES/nlohmann-json-LICENSE.txt
+      role: "Verbatim MIT text from the vcpkg nlohmann-json copyright (3.12.0)."
+    - path: LICENSES/spdlog-LICENSE.txt
+      role: "Verbatim MIT text from the vcpkg spdlog copyright (1.17.0)."
+    - path: LICENSES/fmt-LICENSE.txt
+      role: "Verbatim MIT text from the vcpkg fmt copyright (12.2.0), spdlog's formatting backend."
+    - path: LICENSES/Catch2-LICENSE.txt
+      role: "Verbatim BSL-1.0 text from the vcpkg catch2 copyright (3.16.0); test-only, never redistributed."
+    - path: LICENSES/libjpeg-turbo-LICENSE.txt
+      role: "Verbatim BSD/IJG text from the vcpkg libjpeg-turbo copyright (3.2.0), statically linked into OpenCV imgcodecs."
+    - path: LICENSES/libpng-LICENSE.txt
+      role: "Verbatim libpng-2.0 text from the vcpkg libpng copyright (1.6.58), statically linked into OpenCV imgcodecs."
+    - path: LICENSES/zlib-LICENSE.txt
+      role: "Verbatim Zlib text from the vcpkg zlib copyright (1.3.2), statically linked into OpenCV."
+    - path: LICENSES/README.md
+      role: >-
+        Auditable mapping component -> version -> SPDX license -> role -> linkage -> notice
+        file, pinned baseline, and the notes that no vendor/Daheng binary exists, the PDB is a
+        separate artifact, and Windows system DLLs are OS components.
+    - path: docs/README.md
+      role: "Documentation index and the template warning for examples/configs."
+    - path: docs/usage.md
+      role: >-
+        C ABI lifecycle, buffer/ownership and status-vs-verdict rules, configuration and recipe
+        schema summary with the implemented bounds, and the example host usage.
+    - path: docs/build.md
+      role: >-
+        Prerequisites, WSL and Windows preset tables, canonical commands, test-backend policy,
+        options, and the WSL-portable/MSVC-authoritative split.
+    - path: docs/packaging.md
+      role: >-
+        Package layout, what package/package-verify/package-symbols do, clean-consumer
+        invocation, release flow, and the hardware-evidence deferral.
+    - path: .github/workflows/windows.yml
+      role: >-
+        windows-2022 workflow: permissions contents: read, no secrets, pinned
+        actions/checkout 11d5960a326750d5838078e36cf38b85af677262 (v4) and
+        actions/upload-artifact ea165f8d65b6e75b540449e92b4886f43607fa02 (v4); release job runs
+        cmake --workflow --preset windows-ci (windows_full_quality: configure/build/test/
+        abi-check/package/package-verify/package-symbols) and uploads only the verified package
+        ZIP and the symbols ZIP; the test job runs windows-tests-quality and then the clean
+        package-consumer kit with CVF_PACKAGE_ROOT.
+    - path: .ai/validation/cvf008-developer/verify-package-scripts.sh
+      role: >-
+        Developer harness that generates the scripted bodies and exercises them with a clearly
+        labeled simulated dumpbin: positive content/export/dependency path plus extra-export,
+        non-system-dependency, tampered-DLL, missing-notices, and missing-dumpbin negatives;
+        non-Windows evidence.
+    - path: .ai/validation/cvf008-developer/01-configure.log
+      role: "Canonical WSL configure log (exit 0)."
+    - path: .ai/validation/cvf008-developer/02-build.log
+      role: "Canonical WSL build log (exit 0)."
+    - path: .ai/validation/cvf008-developer/03-ctest.log
+      role: "Canonical WSL ctest log: 263/263 passed."
+    - path: .ai/validation/cvf008-developer/04-format-check.log
+      role: "format-check log: 83 files conform (82 pre-existing + examples/c_host/main.c)."
+    - path: .ai/validation/cvf008-developer/05-example-run.log
+      role: "C host example end-to-end run log (exit 0, PASS)."
+    - path: .ai/validation/cvf008-developer/06-static-analysis-configure.log
+      role: "wsl-clang-analysis configure log (exit 0)."
+    - path: .ai/validation/cvf008-developer/06-static-analysis.log
+      role: "static-analysis log: 21 files clean under .clang-tidy."
+    - path: .ai/validation/cvf008-developer/07-package-refusal.log
+      role: "WSL package target refusal log (exit 1, clean message, no shell syntax error)."
+    - path: .ai/validation/cvf008-developer/08-package-verify-refusal.log
+      role: "WSL package-verify target refusal log (exit 1, clean message)."
+    - path: .ai/validation/cvf008-developer/09-package-script-harness.log
+      role: "Package-script harness log: 17/17 probes pass."
+    - path: .ai/validation/cvf008-developer/10-asan-configure.log
+      role: "ASan configure log (exit 0)."
+    - path: .ai/validation/cvf008-developer/11-asan-build.log
+      role: "ASan build log (exit 0)."
+    - path: .ai/validation/cvf008-developer/12-asan-ctest.log
+      role: "ASan ctest log: 263/263 passed, 0 sanitizer findings."
+    - path: .ai/validation/cvf008-developer/13-asan-example-run.log
+      role: "ASan example run log (exit 0)."
+    - path: .ai/validation/cvf008-developer/14-example-negative-paths.log
+      role: "Example usage error (exit 2) and missing-config failure (exit 1) log."
+    - path: .ai/validation/cvf008-developer/15-deployment-config-parse.log
+      role: "Run against config/examples: schema-valid, fails only on portable uvc availability (status 7)."
+    - path: .ai/validation/cvf008-developer/16-makefiles-package-refusal.log
+      role: "Unix Makefiles package refusal log (make exit 2, no /bin/sh syntax error)."
+    - path: .ai/validation/cvf008-developer/16-makefiles-generated-command.txt
+      role: "Excerpt of the generated Makefile command lines showing the metacharacter-free refusal message."
+  modified:
+    - path: CMakeLists.txt
+      role: "Added add_subdirectory(examples/c_host) so the C11 example builds on every platform."
+    - path: CMakePresets.json
+      role: >-
+        F1: new windows-msvc-tests configure/build/test presets with
+        CVFORWIN_BUILD_TEST_BACKENDS=ON; windows-msvc-release now pins the option OFF; new
+        windows-msvc-release-symbols, windows-msvc-tests-* build presets; windows-ci extended
+        with the symbols step; new windows-tests-quality workflow preset.
+    - path: cmake/CvfOptions.cmake
+      role: >-
+        Pinned CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=ProgramDatabase for MSVC so the Release PDB
+        exists for the separate symbols archive (PDB never enters the package ZIP).
+    - path: cmake/CvfFormat.cmake
+      role: "format-check now also covers examples/c_host/*.c (83 files instead of 82)."
+    - path: cmake/CvfPackage.cmake
+      role: >-
+        QE-1: refusal targets use a helper with a metacharacter-free message and cmake -E false.
+        F3: package and package-verify receive CVF_CONFIG=$<CONFIG> plus genex-resolved
+        CVF_DLL/CVF_IMPORT_LIB; dumpbin is resolved next to the linker or on PATH. Added the
+        package-symbols target and the verify wiring.
+    - path: cmake/CvfPackage.cmake.in
+      role: >-
+        F3: resolves outputs through the passed CVF_CONFIG with the explicit path preferred;
+        no generator expression appears in the script body. Strict required-input checks;
+        layout-preserving copies of config/examples, docs, and LICENSES (fixed a real bug where
+        file(COPY) had flattened them); creates the upload ZIP.
+    - path: cmake/CvfPackageVerify.cmake.in
+      role: >-
+        F4: implemented contents, notices, exactly-one-DLL, SHA256 packaged-vs-built equality,
+        exact five exports parsed from src/c_api/cvforwin.def, dumpbin runtime dependency
+        allowlist with PATH/vswhere fallback and hard failure when dumpbin is absent, and upload
+        archive presence. Failure aggregation uses a macro because a CMake function scope
+        silently discarded the hash-check failure (caught by the harness).
+
+packaging_fixes:
+  F3:
+    description: >-
+      Script-mode configuration expansion: CvfPackage.cmake passes the concrete
+      CVF_CONFIG=$<CONFIG> and the generator-expression-resolved output paths into the -P body;
+      CvfPackage.cmake.in locates bin[/<config>]/cvforwin.dll and lib[/<config>]/cvforwin.lib
+      from that configuration and fails with a clear message otherwise. No script body contains
+      a literal generator expression (asserted by the harness).
+    evidence: "harness 09: package script resolves build outputs through CVF_CONFIG=Release (exit 0, staged layout + ZIP)."
+  F4:
+    description: >-
+      package-verify is implemented: DLL/import library/header/example config/recipes/docs/
+      notices presence, exactly one runtime DLL in bin/, packaged-vs-built SHA256 equality,
+      exactly the five cvf_* exports from cvforwin.def, system-only runtime dependency
+      allowlist, and upload ZIP presence. dumpbin comes from the caller, then PATH, then vswhere;
+      absence is a hard failure, never a silent pass.
+    evidence: >-
+      harness 09: 17/17 probes (good path accepted; extra export, vcruntime140 dependency,
+      tampered DLL, missing notices, and missing dumpbin all rejected with non-zero).
+    caveat: "Harness dumpbin output is simulated; the real export/dependency checks require windows-2022 MSVC."
+  QE-1:
+    description: >-
+      Portable refusal-path quoting: the refusal message contains no parentheses or other shell
+      metacharacters and the target ends with cmake -E false, so the refusal exits non-zero
+      through the intended command.
+    evidence: >-
+      Ninja: package/package-verify exit 1 with 'package[-verify] is Windows-only - run the
+      windows-msvc-release preset on windows-2022 CI' and no Syntax error (logs 07, 08).
+      Unix Makefiles scratch tree: make exit 2, same message, no /bin/sh syntax error (log 16).
+
+f1_presets:
+  windows_msvc_release: "CVFORWIN_BUILD_TEST_BACKENDS=OFF explicitly pinned; release package stays uvc-only."
+  windows_msvc_tests: >-
+    Visual Studio 17 2022 x64, x64-windows-static, CVFORWIN_BUILD_TESTS=ON,
+    CVFORWIN_BUILD_TEST_BACKENDS=ON, warnings as errors ON; runs the camera/ABI/lifecycle
+    suites and produces the test-enabled package variant required by the clean consumer kit.
+  workflows: >-
+    windows-ci (release full quality + symbols) and windows-tests-quality (test-enabled suite +
+    test-enabled package + package-verify). Both validated with cmake --list-presets.
+
+fresh_commands:
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    counts: "configure OK (GNU 13.3.0, Debug); log .ai/validation/cvf008-developer/01-configure.log"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    counts: >-
+      clean build, 0 compiler warnings; examples/c_host/cvf_c_host_example built; log
+      .ai/validation/cvf008-developer/02-build.log
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "100% tests passed, 0 failed out of 263; no delta; log .ai/validation/cvf008-developer/03-ctest.log"
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    counts: "format-check passed: 83 file(s) conform (82 pre-existing + examples/c_host/main.c); log .ai/validation/cvf008-developer/04-format-check.log"
+  - command: "cmake --preset wsl-clang-analysis && cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+    exit_code: 0
+    counts: "static-analysis passed: 21 file(s) clean; logs 06-static-analysis-configure.log, 06-static-analysis.log"
+  - command: "examples/c_host/run_example.sh"
+    exit_code: 0
+    counts: >-
+      PASS lifecycle, failures=0; excerpt below; log .ai/validation/cvf008-developer/05-example-run.log
+  - command: "cmake --build --preset wsl-gcc-debug --target package"
+    exit_code: 1
+    counts: >-
+      EXPECTED portable refusal: 'package is Windows-only - run the windows-msvc-release preset
+      on windows-2022 CI', no shell syntax error; log .ai/validation/cvf008-developer/07-package-refusal.log
+  - command: "cmake --build --preset wsl-gcc-debug --target package-verify"
+    exit_code: 1
+    counts: >-
+      EXPECTED portable refusal with the package-verify message, no shell syntax error; log
+      .ai/validation/cvf008-developer/08-package-verify-refusal.log
+  - command: "bash .ai/validation/cvf008-developer/verify-package-scripts.sh"
+    exit_code: 0
+    counts: >-
+      pass=17 fail=0; simulated-dumpbin harness, explicitly NOT Windows evidence; log
+      .ai/validation/cvf008-developer/09-package-script-harness.log
+  - command: "cmake --preset wsl-gcc-asan && cmake --build --preset wsl-gcc-asan --parallel && ctest --preset wsl-gcc-asan --output-on-failure"
+    exit_code: 0
+    counts: "263/263 passed under ASan/UBSan, 0 sanitizer findings; logs 10, 11, 12"
+  - command: "build/wsl-gcc-asan/examples/c_host/cvf_c_host_example <config> <tmp>"
+    exit_code: 0
+    counts: "ASan example run PASS, no sanitizer report; log .ai/validation/cvf008-developer/13-asan-example-run.log"
+  - command: "build/wsl-gcc-debug/examples/c_host/cvf_c_host_example  (no arguments)"
+    exit_code: 2
+    counts: "usage error path; log .ai/validation/cvf008-developer/14-example-negative-paths.log"
+  - command: "build/wsl-gcc-debug/examples/c_host/cvf_c_host_example /nonexistent-config-root <tmp>"
+    exit_code: 1
+    counts: "cvf_initialize failed: status=5 CVF_STATUS_CONFIG_ERROR error_code=1600 'cvforwin.json is missing'; same log"
+  - command: "build/wsl-gcc-debug/examples/c_host/cvf_c_host_example config/examples <tmp>"
+    exit_code: 1
+    counts: >-
+      deployment template parses and its recipes validate; fails only because the uvc backend is
+      unavailable on a portable host (status=7 CVF_STATUS_CAMERA_NOT_FOUND, error_code=1400);
+      log .ai/validation/cvf008-developer/15-deployment-config-parse.log
+  - command: "make -o cvforwin -o cvforwin_core package  (scratch cmake -G 'Unix Makefiles' tree)"
+    exit_code: 2
+    counts: >-
+      EXPECTED refusal, same clean message, no /bin/sh 'Syntax error'; logs
+      .ai/validation/cvf008-developer/16-makefiles-package-refusal.log and
+      16-makefiles-generated-command.txt
+  - command: "python3 -m json.tool <each example/preset JSON>; python3 -c 'yaml.safe_load(windows.yml)'; bash -n run_example.sh"
+    exit_code: 0
+    counts: "all JSON documents, the workflow YAML, and the shell scripts parse cleanly"
+
+example_run_evidence:
+  command: "examples/c_host/run_example.sh  (build/wsl-gcc-debug/examples/c_host/cvf_c_host_example examples/c_host/config <tmp>)"
+  exit_code: 0
+  excerpt:
+    - "cvforwin native C host example (template; not a production inspection)"
+    - "cvf_get_abi_version()=1 (expected 1)"
+    - "cvf_initialize: OK"
+    - "cycle 1: recipe=\"example.pass\" request=\"example-cycle-1\""
+    - "  status=0 (CVF_STATUS_OK) verdict=PASS elapsed_ms=19 error_code=0 warning_flags=0x00000000"
+    - "  output_json: {\"pass_ratio\":0.06803385416666667,\"total_pixels\":3072,\"white_pixels\":209}"
+    - "  image_path: /tmp/cvf-c-host-example.K9mUSX/captures/20260915T070931-291_example.pass_example-cycle-1_0.png"
+    - "cvf_reload_recipes: OK"
+    - "cvf_shutdown: OK"
+    - "cvforwin C host example: PASS (failures=0)"
+
+defects_found_and_fixed:
+  - id: D1
+    description: >-
+      examples/c_host/main.c failed the canonical build with -Werror=comment because a block
+      comment contained the 'recipes/*.json' path; reworded to 'the recipes directory'.
+    evidence: "02-build.log (final build exit 0)."
+  - id: D2
+    description: >-
+      cmake/CvfPackage.cmake.in used file(COPY <dir> DESTINATION <root>), which copies directory
+      contents and flattened config/examples, docs, and LICENSES into the package root; the
+      staged layout required by the package-consumer kit was produced incorrectly. Fixed with
+      explicit per-tree destinations.
+    evidence: "harness 09 (staged layout check) after the fix."
+  - id: D3
+    description: >-
+      The packaged-vs-built hash check in CvfPackageVerify.cmake.in ran inside a CMake function,
+      so a failure was appended to a function-local list and lost, letting the script report
+      'all checks passed' despite a mismatch. Converted to a macro operating on the file-scope
+      failure list.
+    evidence: "harness 09 tampered-DLL probe (rejected with exit 1 only after the fix)."
+
+test_ownership:
+  untouched:
+    - "tests/package/** (read-only kit; wired into CI only)"
+    - "tests/abi/**, tests/camera/**, tests/unit/cvf00*_* (hash-pinned test-owner files)"
+    - "src/**, include/** (no production source or ABI change)"
+  note: "No test-owner file was modified; .ai/test-ownership.yaml was not touched."
+
+windows_deferred:
+  - "windows-msvc-release and windows-msvc-tests configure/build/ctest on MSVC v143 (the new preset and the camera/ABI/lifecycle suites)."
+  - "package and package-verify execution on windows-2022 with the real dumpbin /exports and /dependents output."
+  - "Real export-set check (exactly the five approved symbols) and the real runtime dependency allowlist against the built DLL."
+  - "Real notices/content verification inside a Windows-produced package."
+  - "package-symbols PDB archive generation and the two artifact uploads."
+  - "The clean package-consumer kit run (tests/package/package_checks.cmake with CVF_PACKAGE_ROOT pointing at build/windows-msvc-tests/package/cvforwin-1.0.0)."
+  - "The windows-ci and windows-tests-quality workflow executions themselves."
+  - "Known static-analysis coverage gap: 21 files are reported clean, but the Windows-only TU src/camera/uvc_windows/uvc_backend.cpp has no Linux compile command and is not analyzed on this host (unchanged from the CVF-007 quality note)."
+
+non_evidence_statement: >-
+  All portable results above were produced on WSL GCC 13.3.0 with the canonical presets. The
+  package-script harness uses a simulated dumpbin and is explicitly not Windows evidence, and no
+  Windows MSVC build, DLL load, dumpbin check, package artifact, or consumer run is claimed.
+
+blockers: []

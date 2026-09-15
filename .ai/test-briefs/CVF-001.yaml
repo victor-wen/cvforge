@@ -1,0 +1,109 @@
+schema_version: 1
+change_id: CVF-001
+target: "Public C ABI v1 surface of the cvforwin DLL: header contract and stateless validation boundary"
+in_scope:
+  - C11 compile compatibility and complete public-surface usage from a C translation unit
+  - ABI version reporting
+  - exact numeric status constants, verdict values, and limit constants
+  - exact function signatures proven at compile time
+  - precondition rejection: null pointers, wrong struct_size, wrong abi_version, nonzero reserved fields, unknown flags, missing context
+  - error buffer reporting rules for cvf_error_info_v1
+  - no-crash and no-fake-OK behavior for operations that cannot complete in this build
+out_of_scope:
+  - successful initialize lifecycle, camera acquisition, inspect evaluation, recipe reload success paths (later changes)
+  - Windows binary export verification (windows-2022 CI evidence, later)
+  - performance characteristics
+public_surface_reference:
+  header: include/cvforwin/cvf_api.h
+  language: "C11, self-contained, extern \"C\" guard for C++ inclusion, includes only <stdint.h> and <stddef.h>"
+  scalar_types:
+    - "typedef uint32_t cvf_status_t;"
+    - "typedef uint32_t cvf_verdict_t;"
+    - "typedef struct cvf_context cvf_context; (opaque, incomplete)"
+  constants:
+    CVF_ABI_VERSION_V1: 1
+    CVF_RECIPE_ID_MAX_UTF8_BYTES: 128
+    CVF_REQUEST_ID_MAX_UTF8_BYTES: 128
+    CVF_INPUT_JSON_MAX_UTF8_BYTES: 65536
+    CVF_RESULT_JSON_REQUIRED_CAPACITY: 65536
+    CVF_ERROR_MESSAGE_REQUIRED_CAPACITY: 1024
+    CVF_IMAGE_PATH_REQUIRED_CAPACITY: 4096
+  status_constants: "CVF_STATUS_OK=0, CVF_STATUS_INVALID_ARGUMENT=1, CVF_STATUS_ABI_MISMATCH=2, CVF_STATUS_CONTEXT_LIMIT=3, CVF_STATUS_INVALID_CONTEXT=4, CVF_STATUS_CONFIG_ERROR=5, CVF_STATUS_RECIPE_NOT_FOUND=6, CVF_STATUS_CAMERA_NOT_FOUND=7, CVF_STATUS_CAMERA_IO=8, CVF_STATUS_TIMEOUT=9, CVF_STATUS_BUFFER_TOO_SMALL=10, CVF_STATUS_ALGORITHM_ERROR=11, CVF_STATUS_REQUIRED_ARTIFACT_ERROR=12, CVF_STATUS_INTERNAL_ERROR=13"
+  verdict_constants: "CVF_VERDICT_NOT_EVALUATED=0, CVF_VERDICT_PASS=1, CVF_VERDICT_FAIL=2"
+  init_flags: "CVF_INIT_FLAG_FILE_LOGGING = 1u<<0, CVF_INIT_FLAG_CALLBACK_LOGGING = 1u<<1"
+  callback_type: "cvf_log_callback: void (CVF_CALL*)(uint32_t level, const char* message_utf8, void* user_data)"
+  functions:
+    - "uint32_t cvf_get_abi_version(void);"
+    - "cvf_status_t cvf_initialize(const cvf_init_options_v1* options, cvf_context** out_context, cvf_error_info_v1* error);"
+    - "cvf_status_t cvf_reload_recipes(cvf_context* context, cvf_error_info_v1* error);"
+    - "cvf_status_t cvf_inspect(cvf_context* context, const cvf_inspection_request_v1* request, cvf_inspection_result_v1* result);"
+    - "cvf_status_t cvf_shutdown(cvf_context* context);"
+  struct_fields:
+    cvf_init_options_v1: "struct_size:u32, abi_version:u32, config_root_utf8:const char*, config_root_utf8_bytes:u32, output_root_utf8:const char*, output_root_utf8_bytes:u32, flags:u32, log_callback:cvf_log_callback, user_data:void*, reserved:u32[8]"
+    cvf_error_info_v1: "struct_size:u32, error_code:u32, message_utf8:char*, message_capacity:u32, message_bytes_written:u32, message_bytes_required:u32, reserved:u32[4]"
+    cvf_inspection_request_v1: "struct_size:u32, abi_version:u32, recipe_id_utf8:const char*, recipe_id_utf8_bytes:u32, request_id_utf8:const char*, request_id_utf8_bytes:u32, timeout_ms:u32, input_json_utf8:const char*, input_json_utf8_bytes:u32, reserved:u32[8]"
+    cvf_inspection_result_v1: "struct_size:u32, status:cvf_status_t, verdict:cvf_verdict_t, error_code:u32, warning_flags:u32, elapsed_ms:u32, output_json:char*, output_json_capacity:u32, output_json_bytes_written:u32, output_json_bytes_required:u32, image_path:char*, image_path_capacity:u32, image_path_bytes_written:u32, image_path_bytes_required:u32, error_message:char*, error_message_capacity:u32, error_message_bytes_written:u32, error_message_bytes_required:u32, reserved:u32[8]"
+  buffer_rules: "bytes_written = content bytes excluding trailing NUL (buffer NUL-terminated when capacity >= 1); bytes_required = buffer size needed including trailing NUL; NULL buffer legal only with capacity 0."
+  validation_semantics: "struct_size must equal the exact v1 struct size (else INVALID_ARGUMENT); abi_version must equal 1 (else ABI_MISMATCH); reserved must be zero; unknown flag bits or CALLBACK_LOGGING without callback are INVALID_ARGUMENT; null/invalid context yields INVALID_CONTEXT; validation precedes side effects."
+observable_behaviors:
+  - id: B1
+    behavior: "A C11 translation unit that includes <cvforwin/cvf_api.h> and names every documented function, struct, field, constant, and callback type compiles with -std=c11 -Wall -Wextra -Werror."
+  - id: B2
+    behavior: "cvf_get_abi_version() returns 1 and requires no context or prior initialization."
+  - id: B3
+    behavior: "Status constants equal exactly 0..13 in documented order; verdict constants equal 0/1/2; limit constants equal 128/128/65536/65536/1024/4096."
+  - id: B4
+    behavior: "Each of the five functions can be assigned to a function pointer of its documented signature; any signature deviation is a compile error. The header also compiles when included from C++20."
+  - id: B5
+    behavior: "Struct size zero or size-1 yields CVF_STATUS_INVALID_ARGUMENT; abi_version 0 or 2 yields CVF_STATUS_ABI_MISMATCH; nonzero reserved bytes yield a documented non-OK status; unknown flag bits and CALLBACK_LOGGING with null callback yield CVF_STATUS_INVALID_ARGUMENT."
+  - id: B6
+    behavior: "When cvf_initialize reports an error into cvf_error_info_v1: bytes_written counts content bytes excluding the trailing NUL, the written message is NUL-terminated, bytes_required reports at least the needed size including NUL even when the buffer is too small (capacity 0 or 1)."
+  - id: B7
+    behavior: "cvf_inspect, cvf_reload_recipes, and cvf_shutdown called with a null context return CVF_STATUS_INVALID_CONTEXT and do not crash (inspect is given otherwise well-formed request/result structures)."
+  - id: B8
+    behavior: "cvf_initialize with well-formed options pointing at a nonexistent absolute configuration root returns a documented non-OK status, does not crash, and leaves out_context NULL."
+  - id: B9
+    behavior: "The header requires no C++ standard-library, OpenCV, vendor, or Windows headers to compile as C11."
+boundary_cases:
+  - "struct_size = 0 and struct_size = size-1 for each v1 struct passed to a function."
+  - "abi_version = 0 and abi_version = 2."
+  - "Error message buffer capacity 0 and capacity 1 with a message that needs more."
+  - "unknown flag bit 0x80000000; CALLBACK_LOGGING without callback."
+negative_cases:
+  - "Null options / null out_context / null error pointer for cvf_initialize and cvf_reload_recipes."
+  - "Null context for inspect, reload, shutdown."
+  - "Nonzero reserved byte in a v1 struct."
+compatibility_requirements:
+  - "Header must compile as C11 (-std=c11) and as C++20 when included from C++."
+  - "No forbidden ABI types: bool, wchar_t, size_t, compiler-sized enum as an ABI type, packed struct, flexible array, variadic."
+  - "Exactly five public functions; no extra public names are required or asserted."
+acceptance_criteria:
+  - "After implementation, canonical WSL commands (configure, build, ctest, format-check) exit 0, and the independent ABI tests execute within ctest."
+  - "The public header remains consumable by a strict C11 compiler without third-party headers."
+allowed_context:
+  - .ai/project-contract.yaml
+  - .ai/test-briefs/CVF-001.yaml
+  - include/cvforwin/cvf_api.h
+  - tests/**
+  - CMakeLists.txt
+  - CMakePresets.json
+  - ~/.config/opencode/skills/black-box-testing/SKILL.md
+forbidden_context:
+  - src/**
+  - .ai/changes/**
+  - .ai/reports/**
+  - any diff, changed-file list, developer notes, or root-cause description
+allowed_test_paths:
+  - tests/abi/**
+ownership_manifest: .ai/test-ownership.yaml
+evidence:
+  red_report: .ai/reports/CVF-001-test-red.yaml
+  verify_report: .ai/reports/CVF-001-test-verify.yaml
+suggested_red_commands:
+  - "gcc -std=c11 -Wall -Wextra -Werror -I include -fsyntax-only tests/abi/<test>.c"
+  - "cmake --preset wsl-gcc-debug"
+notes: >-
+  Expect RED because include/cvforwin/cvf_api.h and the build wiring do not exist yet. RED
+  must fail for exactly that reason (missing header/symbol or absent preset), not because
+  of test bugs. After implementation, verification runs in a fresh session with no
+  implementation context.

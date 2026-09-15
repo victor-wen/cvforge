@@ -1,0 +1,86 @@
+# cvforwin Windows release workflow (windows-2022).
+#
+# Contract-pinned properties (project-contract sensitive_paths
+# .github/workflows/windows.yml):
+#   - runner: windows-2022 with Visual Studio 2022 v143 and x64 tools;
+#   - immutable action references (full commit SHAs with version comments);
+#   - least permissions (contents: read) and no secrets anywhere;
+#   - the canonical windows commands only: the release job runs
+#     `cmake --workflow --preset windows-ci` (windows_full_quality), which
+#     chains configure/build/test/abi-check/package/package-verify plus the
+#     separate symbols archive;
+#   - the test-enabled job runs the frozen test-enabled workflow preset so the
+#     camera/ABI/lifecycle suites execute with CVFORWIN_BUILD_TEST_BACKENDS=ON,
+#     then drives the independent clean package-consumer kit
+#     (tests/package/package_checks.cmake) against the installed package;
+#   - only the verified release package ZIP and the separate symbols ZIP are
+#     uploaded as artifacts. The test-enabled package variant and the consumer
+#     scratch tree are never uploaded.
+
+name: windows-ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # The windows-2022 image ships vcpkg at C:\vcpkg; the presets read
+  # $env{VCPKG_ROOT} and the manifest baseline is pinned in vcpkg-configuration.json.
+  VCPKG_ROOT: C:\vcpkg
+
+jobs:
+  windows-release:
+    name: Release build, tests, abi-check, package
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      # windows_full_quality: configure windows-msvc-release, build, ctest,
+      # abi-check, package, package-verify, package-symbols.
+      - name: Windows full quality (cmake --workflow --preset windows-ci)
+        run: cmake --workflow --preset windows-ci
+
+      - name: Upload verified release package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cvforwin-1.0.0-package
+          path: build/windows-msvc-release/package/cvforwin-1.0.0.zip
+          if-no-files-found: error
+
+      - name: Upload release symbols archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cvforwin-1.0.0-symbols
+          path: build/windows-msvc-release/symbols/cvforwin-1.0.0-symbols.zip
+          if-no-files-found: error
+
+  windows-tests-consumer:
+    name: Test-enabled suite and clean package consumer
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      # configure windows-msvc-tests (CVFORWIN_BUILD_TEST_BACKENDS=ON), build,
+      # ctest (camera/ABI/lifecycle suites), abi-check, then build and verify
+      # the test-enabled package variant consumed by the kit below.
+      - name: Windows test-enabled quality (cmake --workflow --preset windows-tests-quality)
+        run: cmake --workflow --preset windows-tests-quality
+
+      # Independent test-owner kit: content checks, exactly five exports,
+      # system-only runtime dependencies, notices, and a clean C11 consumer
+      # configure/build/run against the installed test-enabled package. The
+      # kit never reads the build or source tree and is not edited here.
+      - name: Clean package consumer (tests/package/package_checks.cmake)
+        run: cmake -DCVF_PACKAGE_ROOT="${{ github.workspace }}/build/windows-msvc-tests/package/cvforwin-1.0.0" -P tests/package/package_checks.cmake

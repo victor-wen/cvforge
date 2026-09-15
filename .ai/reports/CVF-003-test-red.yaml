@@ -1,0 +1,215 @@
+schema_version: 1
+change_id: CVF-003
+phase: AUTHOR
+author: test-engineer
+recorded_at: 2026-09-15
+target: "Inspection algorithm contract + registry + deterministic example algorithm"
+
+interface_headers:
+  required_by_tests:
+    - src/inspection/algorithm.h
+    - src/inspection/registry.h
+    - src/algorithms/example_threshold.h
+    - src/algorithms/compiled_algorithms.h
+  present_and_compiled_against:
+    - src/core/status.h
+    - src/core/error.h
+    - src/core/result.h
+    - src/core/deadline.h
+    - src/camera/captured_frame.h
+  missing_before_implementation:
+    - src/inspection/algorithm.h
+    - src/inspection/registry.h
+    - src/algorithms/example_threshold.h
+    - src/algorithms/compiled_algorithms.h
+
+independent_test_files:
+  - path: tests/unit/cvf003_test_support.h
+    role: >-
+      shared aliases, deterministic run-time frame builders, request holder, JSON
+      helpers, and the StubAlgorithm IInspectionAlgorithm test double used by the
+      dispatch containment checks.
+  - path: tests/unit/cvf003_registry_test.cpp
+    role: "B1 registry semantics and B2 compiled-algorithm registration."
+  - path: tests/unit/cvf003_dispatch_test.cpp
+    role: "B8 dispatch containment, B9 end-to-end example dispatch, B10 exact outcomes."
+  - path: tests/unit/cvf003_example_threshold_test.cpp
+    role: "B3 parameter validation, B4 uniform outcomes, B5 invert, B6 input_json, B7 deadline."
+
+commands:
+  - command: >-
+      g++ -std=c++20 -Wall -Wextra -Werror -I src -I include
+      -isystem /home/administrator/c_cpp_project/cvforwin/build/wsl-gcc-debug/vcpkg_installed/x64-linux/include
+      -isystem /home/administrator/c_cpp_project/cvforwin/build/wsl-gcc-debug/vcpkg_installed/x64-linux/include/opencv4
+      -fsyntax-only tests/unit/cvf003_registry_test.cpp
+    exit_code: 1
+    counts: "passed=0 failed=1 skipped=0 (compile unit; Catch2 cases did not execute)"
+    red_tests:
+      - tests/unit/cvf003_registry_test.cpp
+  - command: >-
+      g++ -std=c++20 -Wall -Wextra -Werror -I src -I include
+      -isystem /home/administrator/c_cpp_project/cvforwin/build/wsl-gcc-debug/vcpkg_installed/x64-linux/include
+      -isystem /home/administrator/c_cpp_project/cvforwin/build/wsl-gcc-debug/vcpkg_installed/x64-linux/include/opencv4
+      -fsyntax-only tests/unit/cvf003_dispatch_test.cpp
+    exit_code: 1
+    counts: "passed=0 failed=1 skipped=0 (compile unit; Catch2 cases did not execute)"
+    red_tests:
+      - tests/unit/cvf003_dispatch_test.cpp
+  - command: >-
+      g++ -std=c++20 -Wall -Wextra -Werror -I src -I include
+      -isystem /home/administrator/c_cpp_project/cvforwin/build/wsl-gcc-debug/vcpkg_installed/x64-linux/include
+      -isystem /home/administrator/c_cpp_project/cvforwin/build/wsl-gcc-debug/vcpkg_installed/x64-linux/include/opencv4
+      -fsyntax-only tests/unit/cvf003_example_threshold_test.cpp
+    exit_code: 1
+    counts: "passed=0 failed=1 skipped=0 (compile unit; Catch2 cases did not execute)"
+    red_tests:
+      - tests/unit/cvf003_example_threshold_test.cpp
+  - command: "bash .ai/validation/cvf003_format.sh (clang-format -i, then clang-format --dry-run --Werror on tests/unit/cvf003_*)"
+    exit_code: 0
+    counts: "format_in_exit=0 format_check_exit=0 (clang-format 18.1.3)"
+    red_tests: []
+
+failures:
+  - test: tests/unit/cvf003_registry_test.cpp
+    expected: >-
+      compiles against the frozen inspection/algorithms headers and then exercises
+      B1/B2 under Catch2.
+    observed: >-
+      tests/unit/cvf003_test_support.h:21:10: fatal error: inspection/algorithm.h: No
+      such file or directory; compilation terminated; exit 1.
+  - test: tests/unit/cvf003_dispatch_test.cpp
+    expected: >-
+      compiles against the frozen inspection/algorithms headers and then exercises
+      B8/B9/B10 under Catch2.
+    observed: >-
+      tests/unit/cvf003_test_support.h:21:10: fatal error: inspection/algorithm.h: No
+      such file or directory; compilation terminated; exit 1.
+  - test: tests/unit/cvf003_example_threshold_test.cpp
+    expected: >-
+      compiles against the frozen inspection/algorithms headers and then exercises
+      B3-B7 under Catch2.
+    observed: >-
+      tests/unit/cvf003_test_support.h:21:10: fatal error: inspection/algorithm.h: No
+      such file or directory; compilation terminated; exit 1.
+
+red_reason: >-
+  Expected RED per the brief notes: the inspection/algorithms interface headers do not
+  exist yet. All three test translation units fail for exactly that reason (the first
+  missing include is inspection/algorithm.h at cvf003_test_support.h line 21, included
+  before any other inspection/algorithms header), with no other diagnostics. Full
+  compiler output is stored under .ai/validation/logs/syntax_cvf003_*.log.
+
+case_traceability:
+  B1: >-
+    tests/unit/cvf003_registry_test.cpp: fresh registry empty/size 0/keys empty; valid
+    add + find returns the exact added instance; keys() in registration order;
+    add(nullptr) -> invalid_argument/algorithm_key_invalid; empty/uppercase/space/65-char
+    keys rejected with the same code; 64-char key accepted (boundary); [a-z0-9._-]
+    alphabet accepted; duplicate key -> algorithm_error/algorithm_duplicate_key with the
+    original retained (pointer identity + keys unchanged); find(unknown) ->
+    algorithm_error/algorithm_not_found; size/empty reflect adds.
+  B2: >-
+    tests/unit/cvf003_registry_test.cpp: register_compiled_algorithms succeeds on a fresh
+    registry and example.threshold is findable via find() with key() "example.threshold";
+    a second call fails algorithm_error/algorithm_duplicate_key and the original entry is
+    retained (size remains 1).
+  B3: >-
+    tests/unit/cvf003_example_threshold_test.cpp: default and explicit valid parameters
+    accepted; threshold 0/255 and min_pass_ratio 0.0/1.0 accepted (boundary); unknown
+    key, wrong types (threshold 12.5 / "128", min_pass_ratio "0.5"), and out-of-range
+    values (threshold -1/256, min_pass_ratio -0.01/1.01) all rejected with
+    config_error/algorithm_parameters_invalid.
+  B4: >-
+    tests/unit/cvf003_example_threshold_test.cpp: all-white 4x3 -> white_pixels 12,
+    total_pixels 12, pass_ratio 1.0, verdict PASS; all-black 4x3 -> 0, 12, 0.0, verdict
+    FAIL; measurements is an object, defects is an empty array, diagnostics is non-empty,
+    verdict is never NOT_EVALUATED on success.
+  B5: >-
+    tests/unit/cvf003_example_threshold_test.cpp: input_json {invert:true} flips an
+    all-white 2x2 frame to 0 white pixels / 0.0 / FAIL and an all-black 2x2 frame to 4/4
+    / 1.0 / PASS with min_pass_ratio 0.0.
+  B6: >-
+    tests/unit/cvf003_example_threshold_test.cpp: absent input_json is accepted; array,
+    number, and string inputs; object with unsupported key; non-boolean invert (number
+    1, string "true") all fail invalid_argument/algorithm_input_invalid; boolean invert
+    accepted.
+  B7: >-
+    tests/unit/cvf003_example_threshold_test.cpp: immediate() and from_timeout_ms(0)
+    both fail timeout/algorithm_deadline_exceeded.
+  B8: >-
+    tests/unit/cvf003_dispatch_test.cpp: expired deadline and empty frame (empty pixels)
+    fail without invoking inspect (StubAlgorithm counter 0); a throwing algorithm is
+    converted to algorithm_error/algorithm_exception (counter 1); a result above 65536
+    serialized bytes fails algorithm_error/algorithm_output_too_large; a near-limit
+    result below the bound and a normal successful result are returned unchanged
+    (verdict/measurements/defects/diagnostics preserved, counter 1).
+  B9: >-
+    tests/unit/cvf003_dispatch_test.cpp: dispatch end-to-end with the example algorithm
+    returns OK + PASS on a white 4x3 frame with threshold 200 and OK + FAIL on a black
+    4x3 frame (technical OK, product FAIL); the registered example is also dispatched
+    through registry find().
+  B10: >-
+    tests/unit/cvf003_dispatch_test.cpp: 1x1 white -> 1/1/1.0 PASS and 1x1 black ->
+    0/1/0.0 FAIL; a half-white 2x1 frame with min_pass_ratio 0.5 yields PASS (exact
+    greater-or-equal boundary) with a 0.6 FAIL control; all-black with min_pass_ratio 0.0
+    and all-white with min_pass_ratio 1.0 both PASS.
+
+author_assumptions:
+  - >-
+    Interface spellings, method signatures, member names, and member order are taken
+    verbatim from the CVF-003 brief interface_reference: AlgorithmRequest
+    {frame, parameters, input_json, deadline}; AlgorithmResult
+    {verdict, measurements, defects, diagnostics}; IInspectionAlgorithm
+    {key() const noexcept, validate_parameters(...) const, inspect(...)};
+    AlgorithmRegistry {add, find, keys, size, empty}; inspection::dispatch and
+    inspection::k_max_result_json_bytes; cvforwin::algorithms::ExampleThresholdAlgorithm
+    and cvforwin::algorithms::register_compiled_algorithms.
+  - >-
+    core::Verdict enumerators not_evaluated/pass/fail were confirmed by compiling a probe
+    against the real src/core/status.h; core::Status algorithm_error/invalid_argument/
+    config_error/timeout already exist. The new core::ErrorCode members 1500-1508 are
+    not present yet and must be added by the developer with the brief's exact names.
+  - >-
+    CapturedFrame{} (default-constructed, empty cv::Mat pixels) is treated as the
+    empty-frame input for the B8 containment check.
+  - >-
+    The JSON output-bound tests use a ~1 KB guard band around 65536 because the exact
+    serialization metric (measurements+defects: per-value dump vs combined compact form)
+    is not pinned by the brief: the under case measures ~1012 bytes below the bound under
+    a measurements.dump()+defects.dump() metric, and the over case exceeds 65536 under
+    any single or combined compact metric.
+  - >-
+    VCPKG_ROOT was unset in the sandbox, so the RED include root is the project-local
+    manifest install tree used by the canonical preset build
+    (build/wsl-gcc-debug/vcpkg_installed/x64-linux/include plus /opencv4); the canonical
+    build remains vcpkg-toolchain driven.
+  - >-
+    TestRequest owns the frame/parameters/input_json/deadline so AlgorithmRequest's
+    reference members stay valid; designated initializers assume aggregate request/result
+    types, consistent with the existing CVF-002 contract style.
+
+probes:
+  - command: "bash .ai/validation/cvf003_probe.sh"
+    exit_code: 1
+    observed: >-
+      inspection/algorithm.h, inspection/registry.h, example_threshold.h, and
+      compiled_algorithms.h MISSING (expected RED root cause); Verdict and CapturedFrame
+      probes OK against the real headers; the nine brief error codes are not yet members
+      of core::ErrorCode (expected; developer adds them).
+  - command: "bash .ai/validation/cvf003_shadow_selfcheck.sh (authoring self-check only; shadow interface later deleted)"
+    exit_code: 1
+    observed: >-
+      Before cleanup, all three translation units compiled against a brief-derived shadow
+      interface except for the nine brief-specified core::ErrorCode enumerators that do
+      not exist yet. The shadow probe files under .ai/validation/probes/shadow/ have been
+      deleted (overwritten with a deletion marker) and are not evidence.
+
+ownership:
+  manifest: .ai/test-ownership.yaml
+  files_checked: 4
+  mismatches: []
+
+blockers:
+  - >-
+    None. RED is the expected pre-implementation state; wiring the new test files into
+    the unit-test target (CMake) is the developer's responsibility and was not touched.

@@ -1,0 +1,318 @@
+schema_version: 1
+change_id: CVF-005
+phase: AUTHOR
+date: 2026-09-15
+target: >-
+  Diagnostics (rotating file + C callback + warning flags) and managed capture
+  persistence with retention.
+brief: .ai/test-briefs/CVF-005.yaml
+owner: test-engineer
+
+commands:
+  - command: >-
+      g++ -std=c++20 -Wall -Wextra -Werror -I src -I include -I tests/unit
+      -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include
+      -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include/opencv4
+      -fsyntax-only .ai/validation/cvf005/selfcheck_support_tu.cpp
+    exit_code: 1
+    counts: "passed=0, failed=1, skipped=0"
+    red_tests:
+      - "translation unit including tests/unit/cvf005_test_support.h"
+    observed: >-
+      tests/unit/cvf005_test_support.h:22:10: fatal error: core/warnings.h: No such
+      file or directory; compilation terminated.
+
+  - command: >-
+      g++ -std=c++20 -Wall -Wextra -Werror -I src -I include -I tests/unit
+      -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include
+      -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include/opencv4
+      -fsyntax-only tests/unit/cvf005_error_codes_test.cpp
+    exit_code: 1
+    counts: "passed=0, failed=4, skipped=0 (4 test cases did not compile/execute)"
+    red_tests:
+      - "CVF-005 error codes use the frozen 1700/1800 numbering"
+      - "CVF-005 error codes map to the frozen broad statuses"
+      - "CVF-005 error codes have stable symbolic names"
+      - "CVF-005 error code values are unique within the frozen numbering"
+    observed: >-
+      error: 'diagnostics_invalid_config' is not a member of 'cvforwin::core::ErrorCode'
+      (and log_write_error / artifacts_root_error / image_encode_error / image_write_error /
+      retention_error); the 17xx/18xx enumerators do not exist yet.
+
+  - command: >-
+      g++ -std=c++20 -Wall -Wextra -Werror -I src -I include -I tests/unit
+      -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include
+      -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include/opencv4
+      -fsyntax-only tests/unit/cvf005_diagnostics_config_test.cpp
+    exit_code: 1
+    counts: "passed=0, failed=6, skipped=0 (6 test cases did not compile/execute)"
+    red_tests:
+      - "CVF-005 warning flags keep the frozen bit values"
+      - "CVF-005 B1 negative: a relative log_dir is rejected as path_not_absolute"
+      - "CVF-005 B1 negative: invalid size bounds report diagnostics_invalid_config before side effects"
+      - "CVF-005 B1 boundary: exactly 1024 bytes and one file are accepted"
+      - "CVF-005 B1: a valid config creates log_dir and cvforwin.log without warnings"
+      - "CVF-005 B5: an uncreatable log directory degrades to a warning and keeps working"
+    observed: >-
+      fatal error: core/warnings.h: No such file or directory (via the independent support
+      header); src/diagnostics/ does not exist.
+
+  - command: >-
+      g++ -std=c++20 -Wall -Wextra -Werror -I src -I include -I tests/unit
+      -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include
+      -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include/opencv4
+      -fsyntax-only tests/unit/cvf005_diagnostics_logging_test.cpp
+    exit_code: 1
+    counts: "passed=0, failed=7, skipped=0 (7 test cases did not compile/execute)"
+    red_tests:
+      - "CVF-005 B2: entries below the configured level are dropped without callback or file growth"
+      - "CVF-005 B2 boundary: a trace level delivers every entry"
+      - "CVF-005 B3: callback delivery is synchronous, exact, numeric, and NUL-terminated"
+      - "CVF-005 B3 boundary: long messages are truncated to a UTF-8-safe prefix of at most 4096 bytes"
+      - "CVF-005 B4: written entries appear in cvforwin.log"
+      - "CVF-005 B4: rolling files stay within max_files"
+      - "CVF-005 B6: a throwing callback is contained and sets warning_log_sink_failed"
+    observed: >-
+      fatal error: core/warnings.h: No such file or directory (via the independent support
+      header); src/diagnostics/ does not exist.
+
+  - command: >-
+      g++ -std=c++20 -Wall -Wextra -Werror -I src -I include -I tests/unit
+      -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include
+      -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include/opencv4
+      -fsyntax-only tests/unit/cvf005_capture_store_test.cpp
+    exit_code: 1
+    counts: "passed=0, failed=9, skipped=0 (9 test cases did not compile/execute)"
+    red_tests:
+      - "CVF-005 B7 negative: a relative captures root is rejected as path_not_absolute"
+      - "CVF-005 B7: a missing absolute root is created"
+      - "CVF-005 B7 negative: a root that cannot be created reports artifacts_root_error"
+      - "CVF-005 B8: save writes a decodable PNG directly inside the managed root"
+      - "CVF-005 B8 negative: path-like identifiers cannot escape the managed root"
+      - "CVF-005 B8 boundary: empty identifiers become unnamed"
+      - "CVF-005 B8 boundary: identifiers longer than 64 bytes are truncated"
+      - "CVF-005 B8: two saves produce two distinct files"
+      - "CVF-005 B9 negative: an empty frame reports image_encode_error"
+    observed: >-
+      fatal error: core/warnings.h: No such file or directory (via the independent support
+      header); src/artifacts/ does not exist.
+
+  - command: >-
+      g++ -std=c++20 -Wall -Wextra -Werror -I src -I include -I tests/unit
+      -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include
+      -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include/opencv4
+      -fsyntax-only tests/unit/cvf005_save_policy_test.cpp
+    exit_code: 1
+    counts: "passed=0, failed=1, skipped=0 (1 test case did not compile/execute)"
+    red_tests:
+      - "CVF-005 B10: decide_capture_save follows the frozen policy table"
+    observed: >-
+      fatal error: core/warnings.h: No such file or directory (via the independent support
+      header); src/artifacts/ does not exist.
+
+  - command: >-
+      g++ -std=c++20 -Wall -Wextra -Werror -I src -I include -I tests/unit
+      -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include
+      -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include/opencv4
+      -fsyntax-only tests/unit/cvf005_retention_test.cpp
+    exit_code: 1
+    counts: "passed=0, failed=7, skipped=0 (7 test cases did not compile/execute)"
+    red_tests:
+      - "CVF-005 B11: retention deletes files older than max_age and reports the count"
+      - "CVF-005 B11 boundary: an age inside max_age is kept and an age outside it is deleted"
+      - "CVF-005 B12: retention deletes the oldest files until the total fits"
+      - "CVF-005 B12 boundary: a limit exactly equal to the total deletes nothing"
+      - "CVF-005 B13: retention never follows or deletes symlinks (POSIX-only)"
+      - "CVF-005 B13: a directory symlink is not walked into the outside tree (POSIX-only)"
+      - "CVF-005 B14 negative: retention on a non-existent root reports retention_error"
+    observed: >-
+      fatal error: core/warnings.h: No such file or directory (via the independent support
+      header); src/artifacts/ does not exist.
+
+  - command: "clang-format --dry-run --Werror tests/unit/cvf005_test_support.h tests/unit/cvf005_error_codes_test.cpp tests/unit/cvf005_diagnostics_config_test.cpp tests/unit/cvf005_diagnostics_logging_test.cpp tests/unit/cvf005_capture_store_test.cpp tests/unit/cvf005_save_policy_test.cpp tests/unit/cvf005_retention_test.cpp"
+    exit_code: 0
+    counts: "passed=7, failed=0, skipped=0 (formatting clean after clang-format -i)"
+
+  - command: "sha256sum tests/unit/cvf005_test_support.h tests/unit/cvf005_error_codes_test.cpp tests/unit/cvf005_diagnostics_config_test.cpp tests/unit/cvf005_diagnostics_logging_test.cpp tests/unit/cvf005_capture_store_test.cpp tests/unit/cvf005_save_policy_test.cpp tests/unit/cvf005_retention_test.cpp"
+    exit_code: 0
+    counts: "passed=7, failed=0, skipped=0 (all hashes match the recorded ownership values)"
+
+command_notes:
+  - >-
+    The brief's suggested command uses "$VCPKG_ROOT/installed/x64-linux/include" but
+    VCPKG_ROOT is unset in this environment; the preset-local vcpkg tree
+    build/wsl-gcc-debug/vcpkg_installed/x64-linux/include was used instead, with
+    include/opencv4 added for OpenCV headers and -I tests/unit added for the independent
+    support header. All other flags are unchanged (-std=c++20 -Wall -Wextra -Werror
+    -fsyntax-only).
+  - >-
+    All failures are compile-stage RED from the intentionally absent CVF-005 frozen
+    headers/enumerators; no test executed and no assertion was weakened or skipped.
+
+author_self_check:
+  note: >-
+    Not acceptance evidence. Before the RED run, the test sources were syntax-checked
+    (-fsyntax-only, same flags) against test-owner self-check stub declarations of the
+    brief's interface shape in .ai/validation/cvf005/stub_include/, with the not-yet-existing
+    error-code enumerators masked by an existing spelling in scratch copies under
+    .ai/validation/cvf005/selfcheck/. All seven sources exited 0, proving the test code
+    parses and name-resolves against the brief's declared shape. The stubs are harness-only
+    and are not part of any test target, manifest, or acceptance claim.
+  command: "bash .ai/validation/cvf005/selfcheck.sh"
+  exit_code: 0
+
+failures:
+  - test: "tests/unit/cvf005_test_support.h (and every test file that includes it)"
+    expected: "compiles against the frozen CVF-005 interface headers"
+    observed: "fatal error: core/warnings.h: No such file or directory; src/diagnostics/ and src/artifacts/ directories do not exist"
+  - test: "tests/unit/cvf005_error_codes_test.cpp"
+    expected: "core::ErrorCode exposes diagnostics_invalid_config=1700, log_write_error=1701, artifacts_root_error=1800, image_encode_error=1801, image_write_error=1802, retention_error=1803"
+    observed: "error: 'diagnostics_invalid_config' is not a member of 'cvforwin::core::ErrorCode' (same for the other five enumerators); all other files additionally fail on the missing core/warnings.h"
+
+test_inventory:
+  files: 7
+  test_cases: 34
+  per_file:
+    - path: tests/unit/cvf005_test_support.h
+      kind: support header (helpers only, no TEST_CASE)
+    - path: tests/unit/cvf005_error_codes_test.cpp
+      test_cases: 4
+    - path: tests/unit/cvf005_diagnostics_config_test.cpp
+      test_cases: 6
+    - path: tests/unit/cvf005_diagnostics_logging_test.cpp
+      test_cases: 7
+    - path: tests/unit/cvf005_capture_store_test.cpp
+      test_cases: 9
+    - path: tests/unit/cvf005_save_policy_test.cpp
+      test_cases: 1
+    - path: tests/unit/cvf005_retention_test.cpp
+      test_cases: 7
+  behavior_coverage: [B1, B2, B3, B4, B5, B6, B7, B8, B9, B10, B11, B12, B13, B14]
+  categories: [acceptance, boundary, negative, contract]
+
+ownership:
+  manifest: .ai/test-ownership.yaml
+  manifest_section: CVF-005
+  files_checked: 7
+  mismatches: []
+  hashes:
+    - path: tests/unit/cvf005_test_support.h
+      sha256: 07abf0edce77e3d4b3ee0a7b5a0e9a78c63af1680892e1991bc589bc9cf98124
+    - path: tests/unit/cvf005_error_codes_test.cpp
+      sha256: abd938bd7c61aa931c077b4d0a922e44b03e123069c14f0f9c63cecc2c4f5e58
+    - path: tests/unit/cvf005_diagnostics_config_test.cpp
+      sha256: bffd7a751158a2e98ae057096b0ce0d0f961a08aef3e40aa31ea8487027ff07a
+    - path: tests/unit/cvf005_diagnostics_logging_test.cpp
+      sha256: c98bf03fed27006530a0e4b5eb0138849641718a385f48067ca211c1f49cff21
+    - path: tests/unit/cvf005_capture_store_test.cpp
+      sha256: 392b0d3b5b8689b5a4689f111b6d606a005997a473f70ddafcee1713f24daa66
+    - path: tests/unit/cvf005_save_policy_test.cpp
+      sha256: 1d60adda8553a906cb88db3b21c1dd012cd12d9d730a889e0e4df4bb835b49bb
+    - path: tests/unit/cvf005_retention_test.cpp
+      sha256: 936a86e7abd26926a4e5d26575ace32490b59c0b2fecf860b63b44facf10889e
+  sha256_recheck: "recomputed after clang-format -i and after the RED runs; all 7 match the manifest values byte-exact"
+
+blockers: []
+
+author_assumptions:
+  - id: A1
+    area: callback level parameter type
+    assumption: >-
+      The brief fixes the numeric level value (trace=0 .. critical=5, matching
+      core::to_public_log_level) but not the exact integral parameter type. The callback
+      probes are captureless generic closures, so they convert to any numeric-level
+      callback signature; the tests assert the values, not the parameter's C++ type.
+  - id: A2
+    area: DiagnosticsConfig spelling
+    assumption: >-
+      DiagnosticsConfig fields are level (core::LogLevel), max_file_bytes (unsigned,
+      64-bit on this platform), max_files (unsigned), log_dir (std::filesystem::path),
+      initialized with designated initializers in that order.
+  - id: A3
+    area: CallbackBinding
+    assumption: >-
+      CallbackBinding{fn, user_data} where fn accepts a captureless closure/function
+      pointer and user_data is passed through unchanged; the tests always bind a callback.
+  - id: A4
+    area: Diagnostics surface
+    assumption: >-
+      Diagnostics::create(const DiagnosticsConfig&, const CallbackBinding&) returns
+      Result<std::unique_ptr<Diagnostics>>; log(LogLevel, message) is noexcept;
+      warnings() returns a value static_cast-able to std::uint32_t; clear_warnings() resets
+      the flags; log_file_path() is wrapped in std::filesystem::path{...} so either a path
+      or string return type works.
+  - id: A5
+    area: CaptureStore surface
+    assumption: >-
+      CaptureStore::create(const std::filesystem::path&) returns
+      Result<std::unique_ptr<CaptureStore>>; save(const CaptureSaveRequest&) returns
+      Result<std::filesystem::path>; enforce_retention(root, std::chrono::seconds,
+      std::uint64_t) is static and returns Result<std::uint32_t> (count of deleted files).
+  - id: A6
+    area: CaptureSaveRequest spelling
+    assumption: >-
+      Fields pixels (cv::Mat), recipe_id (std::string), request_id (std::string),
+      sequence (std::uint64_t), designated-initialized in that order.
+  - id: A7
+    area: save-policy primitive
+    assumption: >-
+      artifacts::decide_capture_save(std::string_view save_policy, core::Verdict,
+      bool execution_ok) is a free function returning SaveDecision with distinguishable
+      skip/save enumerators; unknown tokens (including wrong case, empty, trailing space)
+      map to skip.
+  - id: A8
+    area: error-code enumerators
+    assumption: >-
+      The 17xx/18xx codes are added to core::ErrorCode with the exact identifier spellings
+      in the brief (diagnostics_invalid_config, log_write_error, artifacts_root_error,
+      image_encode_error, image_write_error, retention_error) and reuse the existing
+      core::to_public_error_code / core::status_for / core::error_code_name functions.
+  - id: A9
+    area: warning flags
+    assumption: >-
+      core::WarningFlags exposes warning_none=0, warning_log_sink_failed=1,
+      warning_image_save_failed=2 and the returned flags value can be bit-tested against
+      those enumerators via static_cast to std::uint32_t.
+  - id: A10
+    area: rotation file counting
+    assumption: >-
+      The B4 bound is read as "the rotating-log family stays within max_files"; the tests
+      count regular files in log_dir whose filename starts with "cvforwin" (covering
+      cvforwin.log and rotated variants such as cvforwin_1.log) and require <= max_files.
+  - id: A11
+    area: exact-age boundary proxy
+    assumption: >-
+      An instant exactly equal to the age boundary cannot be produced deterministically
+      without controlling the implementation clock; the inclusive "not expired" direction
+      is probed one full minute inside a two-minute window (and one minute outside for the
+      delete direction).
+  - id: A12
+    area: save filename observables
+    assumption: >-
+      Only structural filename properties are asserted: absolute path, direct child of the
+      managed root, .png extension, the "_<recipe>_<request>_<sequence>.png" suffix
+      structure, absence of '/', '\\' and space in the filename component, empty ids ->
+      literal "unnamed", >64-byte ids truncated to exactly the first 64 bytes, and two
+      saves distinct via distinct sequence values. The utcstamp encoding is not asserted.
+  - id: A13
+    area: degraded sink construction
+    assumption: >-
+      "log directory cannot be created" is induced by placing the configured absolute
+      log_dir beneath a regular file (mkdir must fail); create() must still succeed and
+      the callback must still deliver entries.
+  - id: A14
+    area: save failure side effects
+    assumption: >-
+      After an empty-frame encode failure no .png file remains in the managed root.
+  - id: A15
+    area: message truncation boundary
+    assumption: >-
+      Delivered length semantics follow the brief plus the frozen core::utf8_safe_prefix
+      behaviour: exactly 4096 bytes is unchanged, 4097 ASCII bytes collapse to 4096, and
+      4095 ASCII bytes followed by a four-byte code point collapse to 4095.
+  - id: A16
+    area: test-target wiring (developer-owned)
+    assumption: >-
+      The suite expects a Catch2 v3 test target that links the diagnostics and artifacts
+      libraries plus OpenCV core/imgcodecs and Catch2; no CMake file was modified by the
+      test owner.

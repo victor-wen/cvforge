@@ -1,0 +1,305 @@
+schema_version: 1
+change_id: CVF-005
+role: developer
+status: COMPLETE
+date: 2026-09-15
+program: cvforwin-implementation-1.0.0
+baseline: 1.0.0
+risk: R2
+title: >-
+  Diagnostics (rotating log, synchronous C callback, warning flags) and managed
+  capture persistence (sanitized in-root PNG paths, save policy, bounded
+  symlink-safe retention).
+
+deliverables:
+  core:
+    - path: src/core/warnings.h
+      state: created
+      note: >-
+        Frozen enum WarningFlags : std::uint32_t { warning_none = 0,
+        warning_log_sink_failed = 1u << 0, warning_image_save_failed = 1u << 1 }.
+        Public C header untouched; runtime/c_api maps these bits later.
+    - path: src/core/error.h
+      state: modified
+      note: >-
+        Added diagnostics_invalid_config=1700, log_write_error=1701,
+        artifacts_root_error=1800, image_encode_error=1801, image_write_error=1802,
+        retention_error=1803 with the frozen spellings.
+    - path: src/core/error.cpp
+      state: modified
+      note: >-
+        status_for(): 1700 -> invalid_argument; 1701/1801-1803 -> internal_error;
+        1800 -> config_error. error_code_name(): exact symbolic names.
+  diagnostics:
+    - path: src/diagnostics/diagnostics.h
+      state: created
+      note: >-
+        Frozen CallbackBinding (Fn = void(*)(uint32_t, const char*, void*)),
+        DiagnosticsConfig {level, max_file_bytes, max_files, log_dir},
+        Diagnostics::create/log noexcept/warnings/clear_warnings/log_file_path/
+        ~Diagnostics; pimpl keeps spdlog out of the header.
+    - path: src/diagnostics/diagnostics.cpp
+      state: created
+      note: >-
+        Absolute-path and bound validation before side effects; directory creation;
+        spdlog rotating_file_sink_mt at <log_dir>/cvforwin.log; degraded mode sets
+        warning_log_sink_failed and keeps callback delivery; level filtering before
+        both sinks; UTF-8-safe <= 4096-byte truncation via core::utf8_safe_prefix;
+        file-write and callback exceptions contained; log() never throws.
+  artifacts:
+    - path: src/artifacts/capture_store.h
+      state: created
+      note: >-
+        Frozen CaptureSaveRequest {pixels, recipe_id string_view, request_id
+        string_view, sequence}; enum class SaveDecision {skip, save};
+        CaptureStore::create/save/static enforce_retention/~CaptureStore;
+        free function decide_capture_save.
+    - path: src/artifacts/capture_store.cpp
+      state: created
+      note: >-
+        create: absolute-path check, directory creation, artifacts_root_error on
+        failure, trailing-separator normalization. save: sanitizer to [A-Za-z0-9._-]
+        (other bytes -> '_'), 64-byte truncation, empty -> "unnamed", UTC
+        yyyymmddThhmmss-mmm stamp, separate imencode (image_encode_error) and
+        ofstream write (image_write_error) paths, partial file removed on write
+        failure. enforce_retention: non-recursive directory_iterator, entries
+        classified with symlink_status (links and other non-regular entries skipped
+        and never followed), age deletions oldest-first then size deletions
+        oldest-first, count returned, retention_error on scan/delete failure.
+  build:
+    - path: CMakeLists.txt
+      state: modified
+      note: >-
+        Added cvforwin_diagnostics STATIC (cvforwin_core PUBLIC, spdlog::spdlog
+        PRIVATE, warnings-as-errors + sanitizers) and cvforwin_artifacts STATIC
+        (cvforwin_core + opencv_core PUBLIC, opencv_imgcodecs PRIVATE); added the
+        cvf005_tests target (six independent TUs, tests/unit + include dirs,
+        diagnostics + artifacts + opencv_core/imgcodecs + Catch2WithMain,
+        catch_discover_tests); linked the two new libraries and the new developer
+        test into cvf_unit_tests.
+  developer_tests:
+    - path: tests/unit/test_diagnostics_artifacts.cpp
+      state: created
+      note: >-
+        Developer-owned focus tests for paths the independent suite does not cover:
+        image_write_error when the managed root disappears, non-recursive retention
+        (nested directory untouched), degraded log_file_path + sticky warning, and
+        trailing-separator root normalization. 4 test cases / 33 assertions, all
+        passing in the debug and ASan runs and in ctest.
+  evidence_harness:
+    - path: .ai/validation/cvf005-developer/red.sh
+      state: created
+      note: developer RED evidence script; never touches test files.
+    - path: .ai/validation/cvf005-developer/evidence_probe.cpp
+      state: created
+      note: >-
+        Developer evidence harness for the two failing independent expectations
+        (bound check + rotation with an accepted size, both-empty filename).
+    - path: .ai/validation/cvf005-developer/logs/**
+      state: created
+      note: raw command logs referenced by the table below.
+
+commands:
+  - command: "bash .ai/validation/cvf005-developer/red.sh"
+    phase: RED
+    exit_code: 0
+    counts: "6/6 independent TUs fail to compile (missing src/core/warnings.h, src/diagnostics/**, src/artifacts/**, 17xx/18xx enumerators)"
+    log: .ai/validation/cvf005-developer/logs/red_summary.txt
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    log: .ai/validation/cvf005-developer/logs/configure_wsl-gcc-debug.log
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    counts: "60/60 targets linked"
+    log: .ai/validation/cvf005-developer/logs/build_wsl-gcc-debug.log
+    note: >-
+      First attempt exited 1 with two real compile errors (missing core::
+      qualification for warning_none in diagnostics.h and -Werror=redundant-move);
+      both fixed in source, then this clean rebuild.
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    counts: "69 file(s) conform to .clang-format"
+    log: .ai/validation/cvf005-developer/logs/format-check.log
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 8
+    counts: "242 registered: 240 passed, 2 failed (204 pre-existing all pass; 38 new = 34 cvf005 + 4 developer; 36 new pass)"
+    log: .ai/validation/cvf005-developer/logs/ctest_wsl-gcc-debug_final.log
+    failures:
+      - "221 - CVF-005 B4: rolling files stay within max_files (test defect TD-1)"
+      - "228 - CVF-005 B8 boundary: empty identifiers become unnamed (test defect TD-2)"
+  - command: "build/wsl-gcc-debug/cvf005_tests"
+    exit_code: 42
+    counts: "cvf005 suite: 34 test cases | 32 passed | 2 failed; assert on 383 | 380 passed | 3 failed"
+    note: "standalone run for case/assertion counts"
+  - command: "build/wsl-gcc-debug/cvf_unit_tests \"[cvf-005]\""
+    exit_code: 0
+    counts: "All tests passed (33 assertions in 4 test cases) - developer-owned cases"
+  - command: "cmake --preset wsl-clang-analysis"
+    exit_code: 0
+    log: .ai/validation/cvf005-developer/logs/configure_wsl-clang-analysis.log
+  - command: "cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+    exit_code: 0
+    counts: "19 file(s) clean under .clang-tidy"
+    log: .ai/validation/cvf005-developer/logs/static-analysis_after_fix.log
+    note: >-
+      First run exited 1 on one finding: readability-redundant-member-init for
+      ScannedFile::write_time{} (clang-tidy considers the value-init redundant).
+      Fixed by aggregate-initializing ScannedFile at the construction site; rerun clean.
+  - command: "cmake --preset wsl-gcc-asan"
+    exit_code: 0
+    log: .ai/validation/cvf005-developer/logs/configure_wsl-gcc-asan.log
+  - command: "cmake --build --preset wsl-gcc-asan --parallel"
+    exit_code: 0
+    log: .ai/validation/cvf005-developer/logs/build_wsl-gcc-asan.log
+  - command: "ctest --preset wsl-gcc-asan --output-on-failure"
+    exit_code: 8
+    counts: "242 tests: 240 passed, 2 failed; identical TD-1/TD-2; no ASan/UBSan findings"
+    log: .ai/validation/cvf005-developer/logs/ctest_wsl-gcc-asan.log
+  - command: >-
+      .ai/validation/cvf005-developer/evidence_probe (g++ -std=c++20 against the built
+      cvforwin_diagnostics/cvforwin_artifacts/cvforwin_core libraries)
+    exit_code: 0
+    counts: "evidence probe output recorded"
+    log: .ai/validation/cvf005-developer/logs/evidence_probe.txt
+    observed:
+      - "Diagnostics::create(max_file_bytes=128) -> failure status=1 code=1700 diagnostics_invalid_config"
+      - "Diagnostics::create(max_file_bytes=1023) -> failure status=1 code=1700 diagnostics_invalid_config"
+      - "Diagnostics::create(max_file_bytes=1024) -> ok"
+      - "rotation(max_file_bytes=1024, max_files=1) -> cvforwin* files=1"
+      - "rotation(max_file_bytes=1024, max_files=2) -> cvforwin* files=2"
+      - "both-empty filename: 20260915T024706-274_unnamed_unnamed_0.png; contains _unnamed_unnamed_=yes; contains _unnamed__unnamed_=no"
+  - command: >-
+      sha256 re-verification of the 7 tests/unit/cvf005_* files against the
+      CVF-005 section of .ai/test-ownership.yaml
+    exit_code: 0
+    counts: "7/7 MATCH (manifest amended by the test owner for A6)"
+    log: .ai/validation/cvf005-developer/logs/hash_verification.txt
+
+decisions:
+  - id: D1
+    topic: spdlog rotating sink bound
+    decision: >-
+      The frozen rule is "the rotating-log family stays within max_files". spdlog's
+      rotating_file_sink keeps max_files + 1 files (current file + max_files rotated;
+      verified empirically: max_files=1 -> 2 files, max_files=2 -> 3 files with the
+      installed spdlog 1.17.0). The store therefore constructs the sink with
+      max_files - 1 rotated files (0 when max_files == 1, which truncates on
+      rotation). Probe evidence: cvforwin* regular files = 1 for max_files=1 and
+      2 for max_files=2 with max_file_bytes=1024 and 40 entries.
+  - id: D2
+    topic: encode vs write failure split
+    decision: >-
+      cv::imencode into a buffer (image_encode_error on empty pixels, exception, or
+      false return), then std::ofstream binary write (image_write_error on open or
+      write/flush failure). A failed write removes any partial file, so no .png
+      artifact remains after a failure (matches author assumption A14).
+  - id: D3
+    topic: degraded diagnostics
+    decision: >-
+      Directory creation or sink open failure does not fail create(): the instance
+      keeps warning_log_sink_failed, log_file_path() still reports
+      <log_dir>/cvforwin.log, callback delivery continues, and log() stays noexcept.
+  - id: D4
+    topic: path validation and root normalization
+    decision: >-
+      std::filesystem::path::is_absolute() is used (matching the recipe-store
+      precedent for filesystem roots). CaptureStore normalizes a trailing separator
+      so the returned path's parent is the configured root and returned paths are
+      always direct children.
+  - id: D5
+    topic: retention classification
+    decision: >-
+      Entries are classified with directory_entry::symlink_status, so symlinks and
+      all other non-regular entries are skipped and never followed; age deletions
+      run first, then size deletions over the survivors, both oldest-last_write_time
+      first with a path tie-break for determinism.
+
+assumption_outcomes:
+  - id: A6
+    topic: CaptureSaveRequest identifier lifetime
+    outcome: resolved_by_test_owner
+    detail: >-
+      The developer reported that the original save_request() helper moved
+      std::string parameters into the frozen string_view fields, leaving dangling
+      views. The test owner replaced it with SaveRequestHolder (owns identifier
+      storage; lvalue-qualified request(); rvalue overload deleted) and amended
+      .ai/test-ownership.yaml with new hashes
+      (cvf005_test_support.h 41d4009c..., cvf005_capture_store_test.cpp b9cb8cce...).
+      All 7 current hashes match the amended manifest; the developer did not modify
+      any test file. All capture-store test cases now pass.
+  - id: A10
+    topic: rotating log file count bound
+    outcome: confirmed_and_handled
+    detail: >-
+      spdlog keeps max_files + 1 files; the implementation passes max_files - 1 so
+      the frozen "<= max_files" bound holds (see D1). Directly verified for
+      max_files = 1 and 2.
+
+test_defects:
+  - id: TD-1
+    test: "tests/unit/cvf005_diagnostics_logging_test.cpp - CVF-005 B4: rolling files stay within max_files"
+    ctest: 221
+    classification: test_defect_irreconcilable_with_frozen_spec
+    summary: >-
+      Both B4 sections call create_diagnostics(..., 128u, {1,2}u) and REQUIRE
+      create() to succeed, but the frozen rule says "max_file_bytes < 1024 or
+      max_files < 1 -> invalid_argument/diagnostics_invalid_config" and the same
+      suite's B1 test explicitly requires 1023 to be rejected as
+      diagnostics_invalid_config. 128 < 1023, so no implementation can satisfy both;
+      production follows the frozen rule and B1.
+    evidence: >-
+      evidence_probe: create(128) -> invalid_argument/1700; create(1023) ->
+      invalid_argument/1700; create(1024) -> ok; rotation at 1024 with max_files=1
+      and 2 keeps exactly 1 and 2 cvforwin* files, so B4's assertions pass once the
+      test uses an accepted size.
+    suggested_test_fix: >-
+      Use max_file_bytes = 1024u in both B4 sections (entries are ~90 bytes each and
+      40 entries exceed 1024, so rotation is still exercised) or raise the bound via
+      an approved contract revision. No production change is warranted.
+    note: >-
+      The change contract notes contain "Use small bounds in tests (e.g.
+      max_file_bytes=128, max_files=2...)", which conflicts with the normative
+      interface_v1 rule (minimum 1024). This is a contract-internal inconsistency the
+      architect may want to reconcile; the developer implemented the normative rule.
+  - id: TD-2
+    test: "tests/unit/cvf005_capture_store_test.cpp - CVF-005 B8 boundary: empty identifiers become unnamed"
+    ctest: 228
+    classification: test_expectation_typo
+    summary: >-
+      The both-empty section checks name.find("_unnamed__unnamed_") (double
+      underscore) while the frozen filename grammar
+      <utcstamp>_<recipe>_<request>_<sequence>.png with empty -> "unnamed" yields a
+      single underscore between the two tokens. The other 10 assertions of the test
+      case pass, including the single-empty sections.
+    evidence: >-
+      evidence_probe: both-empty filename 20260915T024706-274_unnamed_unnamed_0.png;
+      contains _unnamed_unnamed_ = yes; contains _unnamed__unnamed_ = no.
+    suggested_test_fix: >-
+      Expect "_unnamed_unnamed_" (single underscore) instead of
+      "_unnamed__unnamed_". No production change is warranted; changing the
+      filename grammar would contradict interface_v1.
+
+verification_scope:
+  production_defects_found: 0
+  test_defects_found: 2
+  spec_mismatches: 1
+  spec_mismatch_detail: >-
+    CVF-005 notes suggest max_file_bytes=128 for tests while interface_v1.rules fix
+    the minimum at 1024 (TD-1). Implementation follows the normative rule.
+  independent_suite_status: >-
+    32/34 independent cvf005 test cases pass; the two failures are TD-1 and TD-2 and
+    are not production defects.
+  existing_suite_status: "all 204 pre-existing tests pass in both debug and ASan runs"
+  canonical_command_status: >-
+    configure/build/format-check/static-analysis/ASan-build all exit 0; ctest exits 8
+    solely because of TD-1 and TD-2.
+  test_ownership: "7/7 cvf005 hashes match the amended manifest; no test file was modified by the developer"
+
+deviations_from_spec: []
+
+blockers: []
+
+reporting:
+  developer_report: .ai/reports/CVF-005-implementation.yaml
+  test_red_report: .ai/reports/CVF-005-test-red.yaml
+  test_red_amendment: .ai/reports/CVF-005-test-red-amendment.yaml

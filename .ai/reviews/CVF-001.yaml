@@ -1,0 +1,269 @@
+change_id: CVF-001
+verdict: APPROVE
+reviewed_artifacts:
+  - .ai/project-contract.yaml
+  - .ai/changes/CVF-001.yaml
+  - .ai/test-briefs/CVF-001.yaml
+  - .ai/reports/CVF-001-implementation.yaml
+  - .ai/reports/CVF-001-test-red.yaml
+  - .ai/reports/CVF-001-test-verify.yaml
+  - .ai/test-ownership.yaml
+  - .ai/workflow-state.yaml
+  - include/cvforwin/cvf_api.h
+  - src/core/**
+  - src/c_api/**
+  - tests/abi/**
+  - tests/unit/**
+  - CMakeLists.txt
+  - CMakePresets.json
+  - vcpkg.json
+  - vcpkg-configuration.json
+  - cmake/**
+  - .ai/validation/**
+
+summary: >-
+  Independent semantic review of CVF-001 (canonical build bootstrap, public C ABI v1
+  header, core types, validating C API shell). The exact public_interface_v1 surface was
+  verified field by field against the change contract (structs, field types/order,
+  constants, callback, five functions); the header is C11-only with no forbidden ABI
+  types and C++ inclusion is proven by test. Exactly five exports are enforced by the
+  Windows .def allowlist, the ELF version script, and the WSL abi-check target; the
+  captured nm artifact contains only the five cvf_* dynamic symbols. Validation runs
+  before observable side effects, caller-owned buffer rules are implemented, the opaque
+  context is the only DLL-managed allocation, no exception crosses the ABI (catch-all on
+  all five entry points), execution status and verdict stay independent, and
+  initialize/reload/inspect never publish state or claim fake success. Scope is clean:
+  only files in scope.allowed_files were touched, tests/abi was authored by the test
+  owner and its verify-phase extension by the owner is explained and hash-recorded.
+  Evidence is real and internally consistent (configure/build/ctest 22/22, format-check
+  15 files, abi-check 5 exports, clang-tidy 6 files, ASan 22/22, wsl-quality workflow 0,
+  8/8 independent verify steps exit 0; the 52-to-59 check growth matches the six added
+  brief-derived cases). No blocking findings. Nine non-blocking findings are recorded
+  below; F1/F2/F5/F7 are routed to a developer amendment cycle for CVF-001, F3/F4 to
+  CVF-007 packaging, F6 to the test owner, F8 to the quality gate.
+
+blocking_findings: []
+
+non_blocking_findings:
+  - id: F1
+    severity: medium
+    area: c_api / contract compliance (failed-inspect result hygiene)
+    finding: >-
+      The approved contract requires that any non-OK cvf_inspect status set verdict to
+      NOT_EVALUATED and clear output_json and image_path. store_result_status /
+      store_result_failure write only status, verdict, error_code and error_message, so
+      output_json/image_path counters and content (and elapsed_ms/warning_flags) retain
+      caller data on every failure path. D6 describes clearing semantics
+      (bytes_written=0, bytes_required=0, NUL-terminated when capacity >= 1) that are not
+      implemented, and its "not observable in the CVF-001 test surface" rationale is
+      inaccurate because the failure path is reachable through the public API (null or
+      invalid context with a writable result).
+    evidence: >-
+      src/c_api/cvf_entry_points.cpp store_result_status/store_result_failure (~L97-L120)
+      and inspect_impl failure paths (~L329-L361);
+      .ai/project-contract.yaml interfaces.error_and_warning_rules;
+      .ai/reports/CVF-001-implementation.yaml decision D6.
+    required_action: >-
+      Implement clearing on failed inspect (output_json/image_path: bytes_written=0,
+      bytes_required=0, NUL at [0] when capacity >= 1; also reset elapsed_ms/warning_flags)
+      or amend D6 to state explicitly that the behavior is deferred, in either case with a
+      tracked follow-up and test-owner-visible expectations.
+    route: CVF-001 developer amendment now
+
+  - id: F2
+    severity: medium
+    area: c_api / validation consistency
+    finding: >-
+      store_result_failure re-checks only struct_size before writing error_message, so a
+      result whose reserved fields are nonzero (skipped by store_result_status because it
+      is invalid) still has error_message written into it. This contradicts D5's stated
+      decision that "an invalid result/error struct is never written to" and makes the
+      failure path partially write to a struct the DLL has rejected.
+    evidence: >-
+      src/c_api/cvf_entry_points.cpp store_result_status/store_result_failure (~L97-L120);
+      .ai/reports/CVF-001-implementation.yaml decision D5.
+    required_action: >-
+      Gate the error_message write on the same validity predicate used for the status
+      mirror (struct_size + zero reserved), e.g. reuse one helper predicate for both.
+    route: CVF-001 developer amendment now
+
+  - id: F3
+    severity: medium (deferred; Windows CI evidence)
+    area: build / packaging scaffold
+    finding: >-
+      cmake/CvfPackage.cmake.in builds the DLL/import-library paths with a literal
+      $<CONFIG> inside a script-mode (-P) body. Generator expressions are never expanded
+      in script mode and the CVF_CONFIG value passed by cmake/CvfPackage.cmake is unused,
+      so the Windows package target will deterministically fail with "expected DLL not
+      found: .../bin/$<CONFIG>/cvforwin.dll" as soon as it is executed on windows-2022.
+    evidence: >-
+      cmake/CvfPackage.cmake.in L14-L18; cmake/CvfPackage.cmake L32-L39 (passes
+      CVF_CONFIG=$<CONFIG> but the script never reads it).
+    required_action: >-
+      Use ${CVF_CONFIG} (or copy from $<TARGET_FILE:cvforwin>) before windows-ci can pass;
+      re-verify the package target on windows-2022.
+    route: CVF-007 packaging
+
+  - id: F4
+    severity: medium (deferred; Windows CI evidence)
+    area: build / packaging scaffold
+    finding: >-
+      cmake/CvfPackageVerify.cmake.in ends with an unconditional
+      message(FATAL_ERROR ...), so the package-verify target and the windows-ci workflow
+      cannot succeed as authored. The failure is loud (no fake success), but the
+      dependency allowlist / notices verification is unimplemented.
+    evidence: >-
+      cmake/CvfPackageVerify.cmake.in L11-L15; CMakePresets.json windows-ci workflow step
+      package-verify; .ai/reports/CVF-001-implementation.yaml not_run.
+    required_action: >-
+      Implement the runtime dependency allowlist and package-content/notices checks in
+      CVF-007 (or explicitly mark the workflow step unimplemented until then).
+    route: CVF-007 packaging
+
+  - id: F5
+    severity: low
+    area: developer unit tests
+    finding: >-
+      tests/unit/test_core_abi_validation.cpp hard-codes kRequestSize=72 and
+      kResultSize=144, which do not match the actual v1 struct sizes on x86-64 (88 and
+      128). The cases pass only because the expected size is a parameter of the
+      validation helpers; the constants are misleading and cannot catch a real layout
+      drift between the helper contract and the public header.
+    evidence: >-
+      tests/unit/test_core_abi_validation.cpp L24-L27 (sizes) versus
+      include/cvforwin/cvf_api.h struct definitions (request 88 bytes, result 128 bytes
+      on x86-64).
+    required_action: >-
+      Derive the expected sizes from the public header (sizeof/static_assert) or correct
+      the constants and note their purpose.
+    route: CVF-001 developer amendment now
+
+  - id: F6
+    severity: low
+    area: independent test coverage
+    finding: >-
+      tests/abi pins field types, constants and signatures but does not assert struct
+      sizes or field offsets. The contract's c_abi_contract suite lists sizes/alignment
+      coverage, and no current test would detect a field reordering or width change (all
+      pointers/uint32 fields would still type-check).
+    evidence: >-
+      tests/abi/test_c11_surface.c and tests/abi/test_cpp20_include.cpp (type and
+      signature static_asserts only); .ai/project-contract.yaml test_policy.suites
+      c_abi_contract coverage "sizes/alignment".
+    required_action: >-
+      Test owner adds _Static_assert(sizeof(...)) and offsetof-based layout assertions
+      for the four v1 structs (also strengthens Windows ABI checking) and updates
+      .ai/test-ownership.yaml hashes accordingly.
+    route: test-owner follow-up
+
+  - id: F7
+    severity: low
+    area: c_api / diagnostics
+    finding: >-
+      echo_path truncates paths at a fixed 200 bytes without code-point awareness, so a
+      config/output root longer than 200 bytes whose multibyte UTF-8 sequence spans byte
+      200 produces an error message that is not valid UTF-8, while the documented message
+      buffer is UTF-8.
+    evidence: >-
+      src/c_api/cvf_entry_points.cpp echo_path (~L48-L56) used by validate_config_root
+      (~L217-L233); .ai/project-contract.yaml interface buffer/UTF-8 rules.
+    required_action: >-
+      Truncate on a code-point boundary (or otherwise ensure the emitted message stays
+      valid UTF-8) if trivial during the amendment; otherwise track it explicitly.
+    route: CVF-001 developer amendment now (if trivial)
+
+  - id: F8
+    severity: low
+    area: evidence quality
+    finding: >-
+      The verify-phase verbose run that produced cvf.abi.runtime checks=59 is not among
+      the recorded logs (the count is derivable from source: 52 author-phase checks + 7
+      added edge-case checks = 59, and the on-disk test matches that inventory), the
+      verify-phase build step was incremental ("ninja: no work to do"), and the
+      developer's "20 build steps" claim is not visible in the preserved canonical log.
+      Results are not contradicted, but the trail is weaker than a fresh full run.
+    evidence: >-
+      .ai/validation/cvf-001-verify-out/02-build.log; .ai/validation/cvf-001-verify-out/
+      03-ctest.log (no verbose check count); .ai/reports/CVF-001-test-verify.yaml
+      commands[3]; .ai/reports/CVF-001-implementation.yaml verification.canonical_wsl.
+    required_action: >-
+      Quality gate preserves a fresh full build plus a verbose cvf.abi run at the next
+      acceptance gate and records commands and output verbatim.
+    route: quality-engineer
+
+  - id: F9
+    severity: info
+    area: developer decisions D1-D7 judgment
+    finding: >-
+      D1 (format-check excludes hash-pinned tests/abi/**) and D7 (CVF_API attribute placed
+      before the return type instead of the prose ordering in public_interface_v1) are
+      acceptable documented deviations: neither waives an invariant, acceptance check, or
+      test-policy rule; D7 is a textual-only deviation from the frozen prose and the exact
+      signatures remain pinned by the independent static_asserts and linked calls. D2
+      (single configure step in wsl-quality due to CMake 3.28 workflow limits; sanitizer
+      and analysis run as standalone canonical presets with recorded evidence), D3
+      (clang-tidy over the configured tree's compilation database), D4 (initialize always
+      fails with a documented non-OK status and never publishes a context) and D5
+      (struct_size checked before any other field; malformed result/error structs not
+      modified by the status mirror) are acceptable and consistent with the approved
+      contract. No decision effectively waives an invariant, acceptance check, or
+      test-policy rule.
+    evidence: >-
+      cmake/CvfFormat.cmake L1-L11; include/cvforwin/cvf_api.h L212-L243;
+      tests/abi/test_cpp20_include.cpp L124-L128; CMakePresets.json wsl-quality workflow;
+      cmake/CvfAnalysis.cmake; src/c_api/cvf_entry_points.cpp L128-L210, L259-L307;
+      .ai/reports/CVF-001-implementation.yaml decisions D1-D7.
+    required_action: None; recorded for the record.
+    route: none
+
+routing:
+  CVF-001 developer amendment now:
+    - F1
+    - F2
+    - F5
+    - F7
+  CVF-007 packaging:
+    - F3
+    - F4
+  test-owner follow-up:
+    - F6
+  quality-engineer:
+    - F8
+
+independence_notes: >-
+  tests/abi/** was authored by the test owner before implementation (RED evidence:
+  missing header and missing preset), and the developer did not modify it. The
+  verify-phase extension of tests/abi/test_abi_runtime.c is legitimate and explained:
+  the owner recorded the before (3b7e48f3...) and after (d748bef2...) sha256 values,
+  updated .ai/test-ownership.yaml in its own name with a written rationale, and the
+  on-disk file contains exactly the described brief-derived edge cases (struct_size
+  size-1 for request/result, abi_version 0 for request, nonzero reserved for
+  request/result/error) asserting only no-crash / non-OK, with 52 -> 59 total checks. No
+  assertion was removed, disabled, or weakened, no test is skipped in CTest, and the
+  independent verify session used only the brief, contract, owned tests and build
+  configuration. Limitation: the reviewer cannot recompute sha256 (no shell access), so
+  hash integrity is judged from the owner's recorded before/after values and the
+  correspondence of the on-disk sources to the reported additions. The developer's
+  independence statement was true for the pre-extension revision it checked.
+
+notes:
+  - Windows MSVC build, DLL export, package and clean C consumer evidence are not yet
+    executed and remain deferred to the windows-2022 CI workflow; no Windows pass is
+    claimed by this change, and CVF-001's acceptance reference covers only the WSL parts
+    plus the header/export contract.
+  - WSL GCC evidence is authoritative for portable compilation and unit behavior only,
+    never for Windows ABI; struct sizes/offsets and the five-symbol DLL export check
+    still need Windows CI evidence (see F6).
+  - F3/F4 mean the windows-ci workflow cannot pass as authored; this is acceptable only
+    because Windows execution is explicitly deferred and the package scaffolding fails
+    loudly rather than faking success. Windows CI must not be treated as green until
+    CVF-007 addresses them.
+  - Residual risks: unused ErrorCode catalog entries (out_context_null, error_info_null,
+    request_invalid, recipes_unavailable, inspection_unavailable) and unfilled error
+    info on the null-options/out_context paths; validate_text scans for embedded NUL
+    before applying the byte limit, so an untruthful caller length is read up to the
+    claimed size rather than rejected early. Both are low-impact and can be handled with
+    the F1/F2 amendment.
+  - Scope compliance verified: no files outside scope.allowed_files were added or
+    changed; .github/**, docs/**, config/**, examples/** and LICENSES/** remain absent
+    (out of scope for this change).

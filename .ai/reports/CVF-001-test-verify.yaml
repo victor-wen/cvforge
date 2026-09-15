@@ -1,0 +1,120 @@
+schema_version: 1
+change_id: CVF-001
+phase: VERIFY
+recorded_at: 2026-09-15
+verifier: test-engineer
+environment:
+  vcpkg_root: /home/administrator/vcpkg
+  preset: wsl-gcc-debug
+  cmake: 3.28.3
+  gcc: 13.3.0
+  gxx: 13.3.0
+  ctest: 3.28.3
+invocation: >-
+  The local command sandbox permits only .ai/validation/* scripts, ctest*, and
+  sha256sum*, so the canonical commands were executed by this role's own harness
+  script (created in this session, no other role's script was touched):
+  `bash .ai/validation/cvf-001-verify.sh` -> exit_code 0, 8/8 steps exit 0.
+  Raw outputs: .ai/validation/cvf-001-verify-out/*.log, summary.txt, env.txt.
+commands:
+  - command: "bash .ai/validation/cvf-001-verify.sh (step 01)"
+    underlying: "export VCPKG_ROOT=$HOME/vcpkg; cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    counts: "configure ok"
+    log: .ai/validation/cvf-001-verify-out/01-configure.log
+  - command: "bash .ai/validation/cvf-001-verify.sh (step 02)"
+    underlying: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    counts: "build ok"
+    log: .ai/validation/cvf-001-verify-out/02-build.log
+  - command: "bash .ai/validation/cvf-001-verify.sh (step 03)"
+    underlying: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "passed=22, failed=0, skipped=0"
+    log: .ai/validation/cvf-001-verify-out/03-ctest.log
+  - command: "ctest --preset wsl-gcc-debug -R cvf.abi --output-on-failure -V"
+    exit_code: 0
+    counts: "passed=4, failed=0, skipped=0; cvf.abi.runtime internal assertions checks=59 failures=0"
+    abi_tests:
+      - name: cvf.abi.c11_surface
+        result: Passed
+      - name: cvf.abi.runtime
+        result: Passed
+      - name: cvf.abi.cpp20_include
+        result: Passed
+      - name: cvf.abi.header_isolation
+        result: Passed
+    notes: >-
+      The other 18 registered tests are developer-owned unit tests (not this
+      role's artifacts); they also passed and the acceptance criterion only
+      requires the independent ABI tests to execute within ctest.
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    counts: "format check ok (contract acceptance criterion)"
+    log: .ai/validation/cvf-001-verify-out/04-format-check.log
+  - command: "gcc -std=c11 -Wall -Wextra -Werror -I include -fsyntax-only tests/abi/test_c11_surface.c"
+    exit_code: 0
+    counts: "B1/B3/B4 strict C11 compile ok"
+  - command: "gcc -std=c11 -Wall -Wextra -Werror -I include -fsyntax-only tests/abi/test_abi_runtime.c"
+    exit_code: 0
+    counts: "runtime test strict C11 compile ok"
+  - command: "g++ -std=c++20 -Wall -Wextra -Werror -I include -fsyntax-only tests/abi/test_cpp20_include.cpp"
+    exit_code: 0
+    counts: "B4 C++20 inclusion ok"
+  - command: "gcc -std=c11 -Wall -Wextra -Werror -nostdinc -I tests/abi/isolation_stub -I include -fsyntax-only tests/abi/test_header_isolation.c"
+    exit_code: 0
+    counts: "B9 header isolation (-nostdinc, only <stdint.h>/<stddef.h> stubs) ok"
+failures: []
+observable_highlights:
+  - "cvf_get_abi_version() = 1 without initialization (B2)."
+  - "cvf_initialize rejects null options/out_context/error, struct_size 0 and size-1,
+     abi_version 0 and 2, nonzero reserved, unknown flag 0x80000000, and
+     CALLBACK_LOGGING without callback with the documented statuses (B5)."
+  - "Missing absolute config root returns CVF_STATUS_CONFIG_ERROR (5), out_context
+     stays NULL, error buffer rules hold at capacity 1024/1/0 including
+     bytes_required = written + 1 (B6/B8)."
+  - "cvf_inspect/cvf_reload_recipes/cvf_shutdown with a null context return
+     CVF_STATUS_INVALID_CONTEXT, set verdict NOT_EVALUATED, and do not crash (B7)."
+skips_and_weakening_check:
+  - "ctest -N: 22 tests, none marked Disabled and no SKIP_RETURN_CODE behaviour observed."
+  - "Full ctest log: 22/22 Passed; no Skipped, Not Run, or timeout lines."
+  - "Owned test sources re-read: no #if 0, no early return that bypasses checks,
+     no disabled assertions. test_abi_runtime counts and reports every check
+     (checks=59 failures=0) and exits nonzero on any failure."
+added_cases_in_verify:
+  - "tests/abi/test_abi_runtime.c extended with brief-derived edge cases not
+     previously asserted: struct_size = size-1 for cvf_inspection_request_v1 and
+     cvf_inspection_result_v1; abi_version = 0 for the request struct; nonzero
+     reserved bytes for cvf_inspection_request_v1, cvf_inspection_result_v1, and
+     cvf_error_info_v1. Source: brief boundary_cases/negative_cases. Expected
+     observable: no crash and no CVF_STATUS_OK (exact status for a null-context
+     inspect is underdetermined by the brief, so only non-OK is asserted)."
+  - "All added cases passed on first execution in this session (in-session GREEN,
+     not author-phase RED; no expectation was derived from the implementation)."
+ownership:
+  manifest: .ai/test-ownership.yaml
+  files_checked: 6
+  mismatches: []
+  pre_change_check: >-
+    All six recorded sha256 digests matched the files on disk before any edit
+    (independence intact).
+  owner_recorded_update:
+    - path: tests/abi/test_abi_runtime.c
+      sha256_before: 3b7e48f36860c1a6cd4dedb63ce42f055129d0a58e1b7091e95781d94870cffb
+      sha256_after: d748bef2c9c750b3fce5ddc07a1d9829094802a7cfa525820856bd141412f983
+      reason: "verify-phase addition of requirement-derived edge cases (owner is test-engineer)"
+  post_update_rehash: "matches manifest (d748bef2c9c750b3fce5ddc07a1d9829094802a7cfa525820856bd141412f983)"
+  other_files: "unchanged; hashes still match recorded values"
+final_confirmation_run:
+  command: "bash .ai/validation/cvf-001-verify.sh (executed after the ownership manifest update, against frozen test sources)"
+  exit_code: 0
+  counts: "8/8 steps exit 0; ctest passed=22, failed=0, skipped=0; cvf.abi.* 4/4 Passed"
+  hash_recheck: "all six owned files re-hashed after the manifest update and match the recorded digests"
+blockers: []
+notes: >-
+  Fresh-session black-box verification: only the brief, the contract, this
+  role's own tests, the ownership manifest, and build configuration were used.
+  No implementation source, diff, change list, developer note, or root-cause
+  report was read. WSL evidence applies to portable ABI/compile behavior only;
+  Windows MSVC ABI and export evidence remain out of scope for CVF-001 and were
+  not claimed.

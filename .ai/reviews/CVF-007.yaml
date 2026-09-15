@@ -1,0 +1,174 @@
+change_id: CVF-007
+verdict: APPROVE
+reviewed_artifacts:
+  - .ai/project-contract.yaml
+  - .ai/changes/CVF-007.yaml
+  - .ai/reports/CVF-007-implementation.yaml
+  - .ai/reports/CVF-007-test-red.yaml
+  - .ai/reports/CVF-007-test-verify.yaml
+  - .ai/test-ownership.yaml
+  - .ai/test-briefs/CVF-007.yaml
+  - src/camera/uvc_windows/uvc_backend.h
+  - src/camera/uvc_windows/uvc_backend.cpp
+  - src/runtime/context.cpp
+  - CMakeLists.txt
+  - cmake/CvfOptions.cmake
+  - tests/unit/test_uvc_runtime_factory.cpp
+  - tests/hardware/uvc_smoke.cpp
+  - .ai/validation/cvf007-developer/logs/**
+  - .ai/workflow-state.yaml
+summary: >-
+  Re-review after the developer amendment: F1 and F2 are fixed correctly and without
+  new defects, and the five non-blocking observations are resolved or recorded. F1:
+  wide_to_utf8 now scans the UTF-16 source only up to the reported character count,
+  stops at the first NUL, and additionally truncates the UTF-8 result at the first
+  NUL byte, so descriptor device_path/friendly_name can never carry an embedded or
+  trailing NUL under either GetAllocatedString length convention. F2: the planar
+  4:2:0 path now uses the documented Media Foundation layout (chroma pitch S/2,
+  chroma plane height H/2, W/2 chroma samples, offsets H*S and H*S + (H/2)*(S/2)),
+  re-orders YV12 into canonical Y,U,V and converts both I420 and YV12 with
+  COLOR_YUV2BGR_I420; a new required_extent_bytes() computes the exact addressed
+  extent including stride padding and every sample is validated against the locked
+  buffer length, with explicit rejection of zero-length buffers, odd stride, and
+  odd/zero dimensions on planar paths. The extent arithmetic was re-derived against
+  every memcpy the converter performs and is exact and in-bounds. The non-blocking
+  items are also closed: the flush wait is min(k_flush_grace, remaining deadline)
+  with needs_reconnect_ and late-completion clearing when the budget is spent,
+  activation/negotiation now thread the deadline through with expiry checks,
+  the unused timestamp member is removed, the layout assumptions are documented,
+  and the planar coverage gap is recorded in the station checklist. Portable
+  evidence remains consistent (263/263 debug and ASan, format 82, static 21,
+  ownership 42/0, hardware hash untouched); Windows compilation and hardware
+  execution remain contract-sanctioned deferrals with no fabricated evidence.
+  No blocking findings remain.
+blocking_findings: []
+resolved_findings:
+  - id: F1
+    severity: high
+    area: correctness / device identity (Media Foundation attribute extraction)
+    file: src/camera/uvc_windows/uvc_backend.cpp
+    location: "wide_to_utf8 (lines 184-220) and attribute_string (222-235)"
+    original_defect: >-
+      attribute_string passed GetAllocatedString's reported character count unchanged
+      into wide_to_utf8, so descriptor device_path and friendly_name carried an
+      embedded trailing NUL byte under the include-terminator length convention.
+    fix_verified: >-
+      wide_to_utf8 now computes content_length by scanning text[0..length) and
+      stopping at the first L'\0' (lines 197-203), converts only that content
+      (204-214), and truncates the UTF-8 result at the first NUL byte as a second
+      guard (215-218). The scan is bounded by the reported length, so it cannot read
+      past the MF-allocated buffer; an all-NUL or empty value yields an empty string.
+      The descriptor fields are therefore NUL-free under either length convention.
+    residual_risk: >-
+      None identified. The Windows path is still locally unverified compilation-wise
+      (deferred); the forced -D_WIN32 strict probe exits 0.
+  - id: F2
+    severity: medium
+    area: security / memory safety (planar frame conversion)
+    file: src/camera/uvc_windows/uvc_backend.cpp
+    location: "required_extent_bytes (416-452), copy_planar_rows (509-544), convert_video_buffer (570-648), convert_sample (1409-1458)"
+    original_defect: >-
+      I420/YV12 chroma was addressed with the full luma stride and only the packed
+      plane size was validated, so padded-stride planar samples could drive reads
+      past the locked buffer.
+    fix_verified: >-
+      Chroma pitch is now stride/2 and each chroma plane has height/2 rows carrying
+      width/2 samples (copy_planar_rows 511-541); plane offsets are H*S and
+      H*S + (H/2)*(S/2). required_extent_bytes computes the exact last-addressed
+      byte for every supported subtype and pitch, and convert_video_buffer rejects
+      any sample whose locked length is smaller than that extent (581-590), with
+      zero-length, odd-stride, and odd-dimension planar samples rejected explicitly
+      (616-638). I re-derived the I420/YV12 extent
+      (H*S + (H/2 - 1)*(S/2) + W/2) and the NV12 extent ((H + H/2 - 1)*S + W) against
+      each memcpy: the copies stay inside the validated extent, and the luma-only
+      minimum-check defect is gone. YV12 is re-ordered so COLOR_YUV2BGR_I420 sees
+      canonical Y,U,V.
+    residual_risk: >-
+      The MF chroma pitch is assumed to be exactly luma-stride/2 (the documented
+      planar layout and the amendment's cited reference); a driver using a different
+      chroma pitch would now fail the extent check or read within the validated
+      extent rather than overrun it. The RGB32 primary path (advanced video
+      processing) remains unaffected.
+non_blocking_findings:
+  - id: NF-3a
+    severity: low
+    area: MSVC /W4 hygiene (Windows compile deferred; no MSVC evidence exists)
+    file: src/camera/uvc_windows/uvc_backend.cpp
+    location: "lines 1168-1174 (frame-rate rational: `4294967.0`, `clamped + 0.5`, cast to UINT32)"
+    finding: >-
+      Residual from the original NF-3: the unused read_timestamp_ member is gone
+      (verified: OnReadSample's timestamp parameter is now intentionally unnamed and
+      no store remains), but the two double-arithmetic spots in the frame-rate
+      rational construction are unchanged. Clang with the project warning set accepts
+      them; MSVC /W4 /WX may emit C4244/C4305. This is a flagged risk for the
+      deferred windows-2022 build, not a defect.
+    required_action: >-
+      During the windows-2022 build, resolve any narrowing warnings here (use integer
+      arithmetic or an explicit static_cast with a comment). No local change required.
+  - id: NF-1a
+    severity: info
+    area: amendment report wording
+    file: .ai/reports/CVF-007-implementation.yaml
+    location: "review_amendment.findings_addressed F2 fix text"
+    finding: >-
+      The amendment states "a locked buffer that reports zero bytes is rejected as an
+      empty sample" and "convert_video_buffer() rejects any sample ... zero-length
+      buffers rejected". In the code the zero-length rejection happens in
+      convert_sample (1430-1432 for the IMF2DBuffer path, 1452-1453 for the
+      IMFMediaBuffer path), while convert_video_buffer treats available_bytes == 0 as
+      "length unknown" and falls back to structural checks (586-590). The behavior is
+      correct and conservative; the report wording is slightly imprecise about which
+      layer rejects.
+    required_action: None (documentation nuance only).
+  - id: NF-5a
+    severity: low
+    area: test coverage note (still open by design)
+    file: .ai/reports/CVF-007-implementation.yaml
+    location: "windows_deferred.checklist, planar-conversion coverage item"
+    finding: >-
+      The planar fallback conversion and the F1 identity cleanliness still have no
+      executable local or current-hardware assertion. The amendment records the
+      station obligations: confirm clean single-line identity strings in
+      `uvc_smoke --list`, record the negotiated media subtype, and prefer a
+      planar-YUV-capable device to hardware-verify the F2 path.
+    required_action: >-
+      Discharged on the designated station before FCT deployment; not a local
+      blocker.
+  - id: NF-6
+    severity: info
+    area: portability note for MSVC
+    file: src/camera/uvc_windows/uvc_backend.cpp
+    location: "wide_to_utf8 (203-204), required_extent_bytes (422-423)"
+    finding: >-
+      Two new integer conversions (content_length/size_t -> int; negative LONG stride
+      via long long -> size_t) are width-safe for the supported values (content
+      lengths and frame dimensions are far below INT_MAX; LONG magnitude <= 2^31
+      fits a 64-bit size_t). MSVC /W4 may flag the size_t -> int conversion; the
+      real values are bounded by the 16384 frame-dimension guard and MF string sizes.
+    required_action: Advisory only; resolve during the deferred MSVC build if warned.
+notes:
+  - Re-review scope of the amendment: only src/camera/uvc_windows/uvc_backend.cpp
+    changed plus the implementation report's review_amendment section; the header,
+    runtime factory, CMake wiring, developer test, and test-owner files are untouched.
+  - F1/F2 resolution evidence is structural (source read + re-derived bounds
+    arithmetic) because the Windows path has no local compile/run; the amendment's
+    forced -D_WIN32 strict syntax probe reports exit 0 (empty log = no diagnostics)
+    and is correctly labelled non-evidence. Windows MSVC compile/link/ABI and the
+    hardware smoke execution remain contract-sanctioned deferrals.
+  - WSL evidence remains consistent: ctest 263/263 debug and ASan with test #258 the
+    CVF-007 developer regression, format-check 82 files, static-analysis 21 files
+    (uvc_backend.cpp has no Linux compile command and is skipped by clang-tidy), and
+    the ownership checker reports 42 pinned files / 0 mismatches, so the hardware
+    suite hash is still clean.
+  - Independence is intact: no test-owner or hardware file was edited by the
+    amendment, no assertion was weakened or skipped, and the developer regression
+    stays in the permitted tests/unit developer namespace.
+  - Scope and architecture compliance are unchanged from the first review: allowed
+    files only, system MF libraries only, no vendor SDK, no first-device fallback,
+    exactly-one identity resolution, bounded reconnect/recapture, and one-DLL
+    dependency policy preserved.
+  - Approval is for the local state of this change. The release-blocking prerequisites
+    recorded in the contract remain outstanding and are not waived by this verdict:
+    windows-2022 MSVC build/ABI/package evidence and a PASS of the opt-in hardware
+    suite (including the F1 identity check and, where available, planar YUV
+    coverage) on representative hardware before FCT deployment.

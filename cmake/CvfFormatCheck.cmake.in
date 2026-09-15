@@ -1,0 +1,29 @@
+# Scripted body of the format-check target. Generates CvfFormatCheck.cmake via
+# configure_file so the file list is embedded verbatim.
+
+set(drifted "")
+foreach(file IN LISTS CVF_FILES)
+    if(NOT EXISTS "${file}")
+        continue()
+    endif()
+    execute_process(
+        COMMAND "${CVF_CLANG_FORMAT}" "--style=file:${CVF_SOURCE_DIR}/.clang-format" "--dry-run" "--Werror" "${file}"
+        WORKING_DIRECTORY "${CVF_SOURCE_DIR}"
+        RESULT_VARIABLE result
+        OUTPUT_VARIABLE output
+        ERROR_VARIABLE error_output
+    )
+    if(NOT result EQUAL 0)
+        list(APPEND drifted "${file}")
+        message(STATUS "clang-format drift reported for ${file}")
+        message(STATUS "${output}${error_output}")
+    endif()
+endforeach()
+
+if(drifted)
+    list(LENGTH drifted count)
+    message(FATAL_ERROR "format-check failed: ${count} file(s) drift from .clang-format")
+endif()
+
+list(LENGTH CVF_FILES count)
+message(STATUS "format-check passed: ${count} file(s) conform to .clang-format")

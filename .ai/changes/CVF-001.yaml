@@ -1,0 +1,204 @@
+schema_version: 1
+change_id: CVF-001
+program: cvforwin-implementation-1.0.0
+title: "Canonical build bootstrap, public C ABI v1 header, core types, validating C API shell"
+risk: R2
+risk_justification: >-
+  Spans build_test_and_delivery, public_c_api, and core_model modules. Content is fully
+  specified by approved contract 1.0.0; no public symbol, layout, dependency direction,
+  schema, or invariant deviates. Any discovered deviation must stop the pipeline for R3.
+intent: >-
+  Make the greenfield repository buildable and independently testable under the canonical
+  WSL presets, and establish the exact v1 public C ABI plus the stateless validation
+  boundary of the C API. Lifecycle and inspection behavior are intentionally out of scope;
+  unimplemented stages must fail deterministically with documented statuses, never crash,
+  and never report fake success.
+deliverables:
+  build:
+    - "CMakeLists.txt (root): cvforwin_core static library, cvforwin shared library/DLL target, tests/abi C11/C++ executables, tests/unit Catch2 executables, format-check target, warnings-as-errors policy, install-rule scaffold."
+    - "CMakePresets.json: wsl-gcc-debug (configure/build/test), wsl-gcc-asan, wsl-clang-analysis, wsl-quality workflow; windows-msvc-release (configure/build/test/abi-check/package/package-verify), windows-ci workflow; vcpkg toolchain wired via VCPKG_ROOT."
+    - "vcpkg.json + vcpkg-configuration.json: immutable builtin-baseline a1cae005c39be7b18ba319fced856b68d7276271 (verified against local checkout HEAD); dependencies per contract (opencv4 with minimal core/imgproc/imgcodecs features, nlohmann-json, spdlog; catch2 as test feature)."
+    - "cmake/** helper modules plus .clang-format, .clang-tidy, .gitignore."
+  public_c_api:
+    - "include/cvforwin/cvf_api.h: C11 header implementing public_interface_v1 below exactly."
+    - "src/c_api/**: every exported entry point implemented as a validating boundary per validation_rules; cvf_get_abi_version returns 1; catch-all exception containment; caller-owned buffers respected; unimplemented stages return documented stable errors."
+    - "src/c_api/cvforwin.def: exact five-symbol export allowlist."
+  core_model:
+    - "src/core/**: internal status/verdict/error-code enums with public mapping, ABI validation helpers, UTF-8/byte-length validation helpers; C++ standard library only; no camera/ABI/OpenCV dependencies."
+  tests:
+    - "tests/abi/**: independent C11 ABI tests (test-engineer owned, authored before implementation)."
+    - "tests/unit/**: developer focused unit tests for mapping/validation (Catch2 v3)."
+public_interface_v1:
+  authority_note: >-
+    This section freezes the exact v1 public spellings and stateless semantics for
+    include/cvforwin/cvf_api.h. It implements the contract's cvforwin_c_abi_v1 interface
+    without changing any approved semantic. Any later rename or semantic change is R3.
+  header: include/cvforwin/cvf_api.h
+  includes:
+    - "<stdint.h>"
+    - "<stddef.h>"
+  language_rules:
+    - "Self-contained C11; extern \"C\" guard for C++ inclusion; no C++ library, OpenCV, vendor, or Windows headers."
+    - "No forbidden ABI types: bool, wchar_t, size_t, compiler-sized enum as an ABI type, packed struct, flexible array, variadic."
+  macros:
+    CVF_API: "export/import visibility macro: __declspec(dllexport) when _WIN32 and CVF_BUILD_SHARED are defined, __declspec(dllimport) for other Windows consumers, default-visibility attribute otherwise."
+    CVF_CALL: "calling convention macro: __cdecl on _WIN32, empty elsewhere."
+  constants:
+    CVF_ABI_VERSION_V1: 1
+    CVF_RECIPE_ID_MAX_UTF8_BYTES: 128
+    CVF_REQUEST_ID_MAX_UTF8_BYTES: 128
+    CVF_INPUT_JSON_MAX_UTF8_BYTES: 65536
+    CVF_RESULT_JSON_REQUIRED_CAPACITY: 65536
+    CVF_ERROR_MESSAGE_REQUIRED_CAPACITY: 1024
+    CVF_IMAGE_PATH_REQUIRED_CAPACITY: 4096
+  scalar_types:
+    - "typedef uint32_t cvf_status_t;"
+    - "typedef uint32_t cvf_verdict_t;"
+    - "typedef struct cvf_context cvf_context; (incomplete, opaque)"
+  enums:
+    status: "CVF_STATUS_OK=0, CVF_STATUS_INVALID_ARGUMENT=1, CVF_STATUS_ABI_MISMATCH=2, CVF_STATUS_CONTEXT_LIMIT=3, CVF_STATUS_INVALID_CONTEXT=4, CVF_STATUS_CONFIG_ERROR=5, CVF_STATUS_RECIPE_NOT_FOUND=6, CVF_STATUS_CAMERA_NOT_FOUND=7, CVF_STATUS_CAMERA_IO=8, CVF_STATUS_TIMEOUT=9, CVF_STATUS_BUFFER_TOO_SMALL=10, CVF_STATUS_ALGORITHM_ERROR=11, CVF_STATUS_REQUIRED_ARTIFACT_ERROR=12, CVF_STATUS_INTERNAL_ERROR=13"
+    verdict: "CVF_VERDICT_NOT_EVALUATED=0, CVF_VERDICT_PASS=1, CVF_VERDICT_FAIL=2"
+    log_level: "CVF_LOG_LEVEL_TRACE=0, CVF_LOG_LEVEL_DEBUG=1, CVF_LOG_LEVEL_INFO=2, CVF_LOG_LEVEL_WARN=3, CVF_LOG_LEVEL_ERROR=4, CVF_LOG_LEVEL_CRITICAL=5"
+    init_flags: "CVF_INIT_FLAG_FILE_LOGGING = 1u<<0, CVF_INIT_FLAG_CALLBACK_LOGGING = 1u<<1; other bits are invalid"
+  callback: "typedef void (CVF_CALL *cvf_log_callback)(uint32_t level, const char* message_utf8, void* user_data);"
+  structs:
+    cvf_init_options_v1:
+      - "uint32_t struct_size"
+      - "uint32_t abi_version"
+      - "const char* config_root_utf8"
+      - "uint32_t config_root_utf8_bytes"
+      - "const char* output_root_utf8"
+      - "uint32_t output_root_utf8_bytes"
+      - "uint32_t flags"
+      - "cvf_log_callback log_callback"
+      - "void* user_data"
+      - "uint32_t reserved[8]"
+    cvf_error_info_v1:
+      - "uint32_t struct_size"
+      - "uint32_t error_code"
+      - "char* message_utf8"
+      - "uint32_t message_capacity"
+      - "uint32_t message_bytes_written"
+      - "uint32_t message_bytes_required"
+      - "uint32_t reserved[4]"
+    cvf_inspection_request_v1:
+      - "uint32_t struct_size"
+      - "uint32_t abi_version"
+      - "const char* recipe_id_utf8"
+      - "uint32_t recipe_id_utf8_bytes"
+      - "const char* request_id_utf8"
+      - "uint32_t request_id_utf8_bytes"
+      - "uint32_t timeout_ms"
+      - "const char* input_json_utf8"
+      - "uint32_t input_json_utf8_bytes"
+      - "uint32_t reserved[8]"
+    cvf_inspection_result_v1:
+      - "uint32_t struct_size"
+      - "cvf_status_t status"
+      - "cvf_verdict_t verdict"
+      - "uint32_t error_code"
+      - "uint32_t warning_flags"
+      - "uint32_t elapsed_ms"
+      - "char* output_json"
+      - "uint32_t output_json_capacity"
+      - "uint32_t output_json_bytes_written"
+      - "uint32_t output_json_bytes_required"
+      - "char* image_path"
+      - "uint32_t image_path_capacity"
+      - "uint32_t image_path_bytes_written"
+      - "uint32_t image_path_bytes_required"
+      - "char* error_message"
+      - "uint32_t error_message_capacity"
+      - "uint32_t error_message_bytes_written"
+      - "uint32_t error_message_bytes_required"
+      - "uint32_t reserved[8]"
+  functions:
+    - "uint32_t CVF_API CVF_CALL cvf_get_abi_version(void);"
+    - "cvf_status_t CVF_API CVF_CALL cvf_initialize(const cvf_init_options_v1* options, cvf_context** out_context, cvf_error_info_v1* error);"
+    - "cvf_status_t CVF_API CVF_CALL cvf_reload_recipes(cvf_context* context, cvf_error_info_v1* error);"
+    - "cvf_status_t CVF_API CVF_CALL cvf_inspect(cvf_context* context, const cvf_inspection_request_v1* request, cvf_inspection_result_v1* result);"
+    - "cvf_status_t CVF_API CVF_CALL cvf_shutdown(cvf_context* context);"
+  textual_buffer_rules:
+    - "capacity is the caller buffer size in bytes."
+    - "bytes_written counts UTF-8 content bytes written, excluding the trailing NUL; the written buffer is NUL-terminated whenever capacity >= 1."
+    - "bytes_required reports the buffer size needed including the trailing NUL (consistent with the documented required capacities)."
+    - "A NULL buffer pointer is legal only with capacity 0; NULL with capacity > 0 is CVF_STATUS_INVALID_ARGUMENT."
+    - "Input byte lengths exclude the terminating NUL; embedded NUL in identifiers is rejected."
+  validation_rules:
+    - "struct_size must equal the exact v1 size of that struct; otherwise CVF_STATUS_INVALID_ARGUMENT."
+    - "abi_version must equal CVF_ABI_VERSION_V1; otherwise CVF_STATUS_ABI_MISMATCH."
+    - "reserved fields must be zero; nonzero reserved is CVF_STATUS_INVALID_ARGUMENT."
+    - "flags must not contain unknown bits; CVF_INIT_FLAG_CALLBACK_LOGGING requires non-null log_callback."
+    - "The error parameter is required (non-null) for cvf_initialize and cvf_reload_recipes; out_context, request, and result pointers are required."
+    - "A NULL or invalid context yields CVF_STATUS_INVALID_CONTEXT before other work (cvf_get_abi_version excepted)."
+    - "All validation occurs before any observable side effect."
+  unimplemented_stage_behavior: >-
+    Operations whose backing subsystem is not implemented yet return a documented non-OK
+    status (e.g., CVF_STATUS_CONFIG_ERROR when configuration cannot be loaded), never
+    CVF_STATUS_OK, and never publish partial state or a context.
+scope:
+  allowed_files:
+    production_and_build:
+      - CMakeLists.txt
+      - CMakePresets.json
+      - vcpkg.json
+      - vcpkg-configuration.json
+      - cmake/**
+      - .clang-format
+      - .clang-tidy
+      - .gitignore
+      - include/cvforwin/cvf_api.h
+      - src/core/**
+      - src/c_api/**
+    independent_tests:
+      - tests/abi/**
+    developer_tests:
+      - tests/unit/**
+    evidence_harness:
+      - .ai/validation/**
+  out_of_scope_modules:
+    - src/camera/**
+    - src/recipes/**
+    - src/inspection/**
+    - src/algorithms/**
+    - src/diagnostics/**
+    - src/artifacts/**
+    - src/runtime/**
+    - examples/**
+    - config/examples/**
+    - docs/**
+    - LICENSES/**
+    - .github/**
+    - .ai/project-contract.yaml
+invariants:
+  - "Public header is C11-only; no C++/OpenCV/vendor/system headers required; forbidden ABI types absent."
+  - "Exactly five exported symbols with __cdecl mapping; status numeric values exactly 0..13."
+  - "Validation happens before any observable side effect; caller memory owns all buffers; only the opaque context is DLL-managed."
+  - "No exception crosses the ABI; execution status and product verdict stay independent."
+  - "Machine-independent: no hard-coded paths, no dependence on the current working directory."
+verification:
+  canonical_wsl:
+    - "cmake --preset wsl-gcc-debug"
+    - "cmake --build --preset wsl-gcc-debug --parallel"
+    - "ctest --preset wsl-gcc-debug --output-on-failure"
+    - "cmake --build --preset wsl-gcc-debug --target format-check"
+  task_specific:
+    - "gcc -std=c11 -Wall -Wextra -Werror -I include -fsyntax-only tests/abi/*.c"
+    - "nm -D --defined-only on the built shared library filtered to cvf_ symbols compared against the five-name allowlist (local sanity only; authoritative export evidence remains the Windows abi-check)."
+acceptance_reference: >-
+  Contract acceptance_checks 2, 4, and the WSL parts of 10: header free of forbidden ABI
+  types; exactly five exports; WSL build/tests/format/static-analysis pass with zero exit
+  codes.
+rollback: >-
+  Greenfield repository: delete the added files and build directories; no persisted data,
+  published artifact, or ABI compatibility obligation exists yet.
+reporting:
+  developer_report: .ai/reports/CVF-001-implementation.yaml
+  test_red_report: .ai/reports/CVF-001-test-red.yaml
+  test_verify_report: .ai/reports/CVF-001-test-verify.yaml
+  review_report: .ai/reviews/CVF-001.yaml
+notes:
+  - "The local command sandbox may only execute scripts under .ai/validation/**; workers may add their own harness scripts there (never modify another role's harness) and must record real command output only."
+  - "Requires VCPKG_ROOT (x64-linux) for canonical configure; first configure builds OpenCV from source (long; cap concurrency to avoid OOM on a 7 GiB host)."
+  - "windows-msvc-release presets are authored now but only verifiable on windows-2022 CI."
+  - "Do not fake lifecycle success: initialize/inspect/reload must not create or claim a real context in this change."

@@ -1,0 +1,232 @@
+schema_version: 1
+change_id: CVF-003
+role: developer
+status: COMPLETE
+recorded_at: 2026-09-15
+implemented_against:
+  change_contract: .ai/changes/CVF-003.yaml
+  architecture_baseline: .ai/project-contract.yaml (1.0.0, APPROVED)
+  frozen_interface: interface_v1 (inspection algorithm contract, registry, dispatch, example algorithm, algorithm error codes 1500-1508)
+
+changed_files:
+  core_model:
+    - path: src/core/error.h
+      change: modified
+      notes: "Added algorithm_not_found=1500 .. algorithm_input_invalid=1508 exactly per interface_v1."
+    - path: src/core/error.cpp
+      change: modified
+      notes: >-
+        Frozen broad-status mapping (1500/1501/1504/1506/1507 -> algorithm_error,
+        1502/1508 -> invalid_argument, 1503 -> config_error, 1505 -> timeout) and
+        stable error_code_name entries. selector_empty and the two
+        invalid_argument algorithm codes share one case group to keep
+        bugprone-branch-clone clean (see verification note).
+  inspection_contract_and_registry:
+    - path: src/inspection/algorithm.h
+      change: new
+      notes: >-
+        AlgorithmRequest {frame, parameters, input_json, deadline} reference
+        members in frozen order, AlgorithmResult {verdict, measurements(object),
+        defects(array), diagnostics}, IInspectionAlgorithm
+        {key() const noexcept, validate_parameters(...) const, inspect(...)}.
+    - path: src/inspection/registry.h
+      change: new
+      notes: >-
+        AlgorithmRegistry {add, find, keys, size, empty}; constexpr
+        k_max_result_json_bytes = 65536; free dispatch() declaration exactly per
+        interface_v1.
+    - path: src/inspection/registry.cpp
+      change: new
+      notes: >-
+        add(nullptr) -> invalid_argument/algorithm_key_invalid; key validation
+        [a-z0-9._-]{1,64}; duplicate -> algorithm_error/algorithm_duplicate_key with
+        the original entry retained; find(unknown) ->
+        algorithm_error/algorithm_not_found; keys() in registration order.
+        dispatch(): deadline check first, empty-frame rejection second, algorithm
+        Failure propagated unchanged, exception conversion to
+        algorithm_error/algorithm_exception, measurements.dump()+defects.dump()
+        bound check.
+  compiled_algorithms:
+    - path: src/algorithms/example_threshold.h
+      change: new
+      notes: >-
+        ExampleThresholdAlgorithm final : public inspection::IInspectionAlgorithm;
+        k_key "example.threshold", default threshold 128, default min_pass_ratio 0.5.
+    - path: src/algorithms/example_threshold.cpp
+      change: new
+      notes: >-
+        Strict parameter/input validation and deterministic cv2-style inspect:
+        BGR8 (or mono8) -> grayscale -> mask = gray > threshold (strict) -> optional
+        invert via bitwise_not -> countNonZero/total -> PASS iff
+        pass_ratio >= min_pass_ratio. Measurements {white_pixels, total_pixels,
+        pass_ratio}, defects [], non-empty bounded diagnostics.
+    - path: src/algorithms/compiled_algorithms.h
+      change: new
+      notes: "register_compiled_algorithms(registry) declaration."
+    - path: src/algorithms/compiled_algorithms.cpp
+      change: new
+      notes: "Adds ExampleThresholdAlgorithm via registry.add and propagates the first failure."
+  build:
+    - path: CMakeLists.txt
+      change: modified
+      notes: >-
+        New cvforwin_inspection (src/inspection/registry.cpp; PUBLIC cvforwin_core,
+        cvforwin_camera, nlohmann_json) and cvforwin_algorithms
+        (compiled_algorithms.cpp + example_threshold.cpp; PUBLIC
+        cvforwin_inspection + nlohmann_json, PRIVATE opencv_imgproc) static
+        libraries; new cvf003_tests executable registering the three
+        test-owner cvf003_* sources via catch_discover_tests; cvf_unit_tests
+        extended with the two developer test sources and linked to
+        cvforwin_algorithms. find_package(nlohmann_json CONFIG REQUIRED) added.
+  developer_tests:
+    - path: tests/unit/test_inspection_error_codes.cpp
+      change: new
+      notes: "3 cases: 1500-1508 numbering, broad-status mapping, stable names."
+    - path: tests/unit/test_inspection_contract.cpp
+      change: new
+      notes: >-
+        9 cases: dispatch failure propagation, result exactly at the JSON bound,
+        invalid-character/unknown-key registry rules, non-object parameters, strict
+        gray > threshold boundary, integer min_pass_ratio bounds, direct empty-frame
+        rejection, bounded non-empty diagnostics with invert.
+  evidence_harness:
+    - path: .ai/validation/cvf003-developer/
+      change: new
+      notes: "Raw canonical-command logs (baseline 86, final 135) plus first-failing static-analysis log."
+
+out_of_scope_paths_not_touched:
+  - include/cvforwin/**, src/c_api/**, src/camera/**, src/recipes/**, src/diagnostics/**, src/artifacts/**, src/runtime/**
+  - tests/unit/cvf003_* (read-only; hashes verified unchanged)
+  - tests/camera/** (read-only; hashes verified unchanged)
+  - tests/abi/**
+  - CMakePresets.json, cmake/** (no preset/module change needed; format-check glob already covers src and tests/unit)
+  - .ai/project-contract.yaml, .ai/changes/**, .ai/test-briefs/**, .ai/reviews/**, .ai/test-ownership.yaml, .ai/reports/CVF-003-test-red.yaml
+
+verification:
+  canonical_wsl:
+    - command: "cmake --preset wsl-gcc-debug"
+      exit_code: 0
+      counts: "configured with vcpkg x64-linux; OpenCV 4.12.0 (core imgcodecs imgproc) and nlohmann_json found"
+    - command: "cmake --build --preset wsl-gcc-debug --parallel"
+      exit_code: 0
+      counts: "cvforwin_inspection, cvforwin_algorithms, cvf003_tests, cvf_unit_tests, ABI and camera targets built; zero warnings (-Werror)"
+    - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+      exit_code: 0
+      counts: "100% tests passed, 0 failed out of 135 = 86 pre-existing + 37 CVF-003 independent (B1-B10) + 12 developer (3 error-code + 9 contract)"
+    - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+      exit_code: 0
+      counts: "format-check passed: 43 file(s) conform to .clang-format (no new exclusions)"
+    - command: "cmake --preset wsl-clang-analysis"
+      exit_code: 0
+      counts: "analysis tree configured with compile_commands.json"
+    - command: "cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+      exit_code: 0
+      counts: "static-analysis passed: 14 file(s) clean under .clang-tidy (first run failed on bugprone-branch-clone in the new error.cpp mapping; fixed by merging the identical invalid_argument case group, then green)"
+    - command: "cmake --preset wsl-gcc-asan"
+      exit_code: 0
+      counts: "sanitizer tree configured"
+    - command: "cmake --build --preset wsl-gcc-asan --parallel"
+      exit_code: 0
+      counts: "all targets built with AddressSanitizer/UndefinedBehaviorSanitizer"
+    - command: "ctest --preset wsl-gcc-asan --output-on-failure"
+      exit_code: 0
+      counts: "100% tests passed, 0 failed out of 135"
+    - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+      exit_code: 0
+      counts: "final run: 100% tests passed, 0 failed out of 135 (tree left green)"
+  notes:
+    - "All command output logs are stored under .ai/validation/cvf003-developer/ (baseline configure/build/ctest 86/86, final configure/build/ctest 135/135, format-check, static-analysis first-fail and passing runs, ASan configure/build/ctest)."
+    - "Test counts were confirmed with ctest -N: 37 test names begin with 'CVF-003'."
+
+independent_tests_integrity:
+  manifest: .ai/test-ownership.yaml
+  cvf003_files_unchanged:
+    - path: tests/unit/cvf003_test_support.h
+      sha256: db9b17fcbf1f36abeff72e2be3976fa694b0d5f1eb82045bda6889bff0ec0485
+      matches_manifest: true
+    - path: tests/unit/cvf003_registry_test.cpp
+      sha256: d43c2ec1b75848e3bcfb8d2b7dc09cd67234f3a8072975bfc385fee8c2186937
+      matches_manifest: true
+    - path: tests/unit/cvf003_dispatch_test.cpp
+      sha256: 9ffd09e1d22a1e0b385ec5b4cda092d5311e719415caa18ddfe54f858301f306
+      matches_manifest: true
+    - path: tests/unit/cvf003_example_threshold_test.cpp
+      sha256: 0b40a3a77134661520bf54e741dfca84a07cc1a2ebe2a2f9acc7238cef5d5c5f
+      matches_manifest: true
+  cvf002_camera_files_unchanged:
+    - path: tests/camera/camera_test_support.h
+      sha256: dcd26a9c20557f19cba31fff527cfa6312bc4d7ca90fd63f5f435a82f0984f82
+      matches_manifest: true
+    - path: tests/camera/camera_frame_fixtures.h
+      sha256: 18a04ec51bf392183817bbe3b8f3e4784019098815cb9f0e617eed3eb323d56e
+      matches_manifest: true
+    - path: tests/camera/test_core_result_deadline.cpp
+      sha256: 739a68cc357aa88176e9f38dd0d0e763380c84974f211667c8debee38a89807d
+      matches_manifest: true
+    - path: tests/camera/test_camera_identity_resolution.cpp
+      sha256: 9216dba9462c36dce7c8dea45e89d3b62b92c213530b64fcf041d916106bd825
+      matches_manifest: true
+    - path: tests/camera/test_file_camera_backend.cpp
+      sha256: 1ffc03d2948954f6e56503088aba8344a6a0826358d87f13ab846d4657e96202
+      matches_manifest: true
+    - path: tests/camera/test_synthetic_camera_backend.cpp
+      sha256: e5c6fd057310b647b19f82842dee31ecdba3f2bf3cedef046a3367fbc190b74f
+      matches_manifest: true
+    - path: tests/camera/test_camera_fault_injection.cpp
+      sha256: 7d3a08682e08e1c815106b5675cbf03f2d982e3736fe7ada58d7be728992a89f
+      matches_manifest: true
+    - path: tests/camera/test_capture_with_one_retry.cpp
+      sha256: 1a2051c2a9fc293bd7386148b8999e037f1cde693da5a2b7be40170f13aa7cd5
+      matches_manifest: true
+
+deviations:
+  - id: a
+    area: inspection target dependency
+    severity: documented-clarification
+    detail: >-
+      the project contract module table lists core_model, camera_contract, and
+      OpenCV core for inspection_contract_and_registry, but the frozen
+      AlgorithmRequest/AlgorithmResult expose nlohmann::json references, so the
+      cvforwin_inspection target must publish the nlohmann-json include paths.
+      nlohmann-json is an already approved project dependency and the algorithm
+      module keeps it PUBLIC as well; no dependency direction changes.
+  - id: b
+    area: dispatch const bridge
+    severity: frozen-interface-necessary
+    detail: >-
+      interface_v1 fixes dispatch(const IInspectionAlgorithm&, ...) while
+      IInspectionAlgorithm::inspect is non-const (the independent test double
+      overrides it as non-const). dispatch therefore const_casts the reference
+      before the single inspect call. The registry only ever stores non-const
+      algorithm objects, so the cast is well-defined; a comment in registry.cpp
+      documents the rationale.
+  - id: c
+    area: example algorithm defensive validation
+    severity: fail-closed
+    detail: >-
+      inspect() re-validates parameters, input_json, and a non-empty supported
+      pixel type (BGR8/mono8) before OpenCV work instead of trusting the caller
+      alone. validate_parameters() remains the recipe-time contract; the extra
+      checks only substitute stable failures for exceptions inside dispatch.
+      Direct inspect is exercised by the independent B6/B7 tests and by the
+      developer empty-frame test.
+  - id: d
+    area: developer test wiring
+    severity: benign
+    detail: >-
+      The 12 developer test cases were added to the existing cvf_unit_tests
+      executable (which now links cvforwin_algorithms) rather than a separate
+      binary; tests/unit/cvf003_* stay exclusive to cvf003_tests and remain
+      test-owner owned.
+
+implementation_notes:
+  - "Dispatch order is deadline -> empty frame -> invoke -> bound, matching the contract ordering; a Failure returned by the algorithm is propagated byte-for-byte (status, code, message)."
+  - "The bound metric is measurements.dump().size() + defects.dump().size() compared with '>'; a result exactly at 65536 bytes succeeds (developer test pins this)."
+  - "Key validation is applied to the algorithm's own key() at add time; find() treats any unmatched string (including malformed keys) as algorithm_not_found."
+  - "Example parameter strictness: threshold must be a JSON integer in 0..255 (floats and strings rejected), min_pass_ratio a JSON number in 0.0..1.0 (booleans rejected), unknown keys rejected; input_json must be an object whose only optional key invert is boolean."
+  - "Threshold comparison is strict gray > threshold (cv::THRESH_BINARY), invert is bitwise_not, pass_ratio is white/total with 0.0 for a zero-pixel mask."
+  - "No camera, C ABI, filesystem, logging, or global mutable state is used by src/inspection/** or src/algorithms/**."
+  - "clang-format was applied to all new/changed owned C++ files; format-check needs no new exclusions because tests/unit/cvf003_* were already formatted and hash-pinned by the test owner."
+
+blockers: []
+next_phase: independent verification (test-engineer verify run, then reviewer/quality)

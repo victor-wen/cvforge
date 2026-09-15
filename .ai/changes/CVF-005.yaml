@@ -1,0 +1,126 @@
+schema_version: 1
+change_id: CVF-005
+program: cvforwin-implementation-1.0.0
+title: "Diagnostics and artifacts: rotating logs, C callback, warning flags, capture persistence, retention"
+risk: R2
+risk_justification: >-
+  Implements the approved diagnostics_and_artifacts module inside the baseline using
+  approved dependencies (core_model, OpenCV imgcodecs, spdlog, C++ filesystem). No public
+  ABI, schema, dependency-family, or invariant change; warning-flag bits remain internal
+  (the public cvf_api.h is untouched) and are mapped by the runtime/c_api change later.
+intent: >-
+  Provide production diagnostics (filtered level, rotating file sink, synchronous callback
+  sink, contained failures recorded as internal warning flags) and managed capture
+  persistence (sanitized in-root paths, PNG encoding, bounded retention that never follows
+  links), plus the save-policy decision primitive used by the runtime.
+scope:
+  allowed_files:
+    production:
+      - src/core/warnings.h
+      - src/core/error.h
+      - src/core/error.cpp
+      - src/diagnostics/**
+      - src/artifacts/**
+      - CMakeLists.txt
+      - cmake/**
+    independent_tests:
+      - tests/unit/cvf005_*.cpp
+      - tests/unit/cvf005_*.h
+    developer_tests:
+      - tests/unit/** (files not matching cvf005_*)
+    fixtures:
+      - tests/fixtures/artifacts/**
+    evidence_harness:
+      - .ai/validation/**
+  out_of_scope:
+    - include/cvforwin/**
+    - src/c_api/**
+    - src/camera/**
+    - src/recipes/**
+    - src/inspection/**
+    - src/algorithms/**
+    - src/runtime/**
+    - examples/**
+    - docs/**
+    - .github/**
+    - .ai/project-contract.yaml
+interface_v1:
+  authority_note: >-
+    Frozen internal interface for tests and implementation in this change. Namespaces
+    cvforwin::core, cvforwin::diagnostics, cvforwin::artifacts. Header paths and spellings
+    are exact. The public header stays untouched.
+  headers:
+    - "src/core/warnings.h"
+    - "src/diagnostics/diagnostics.h"
+    - "src/artifacts/capture_store.h"
+  warnings:
+    header: "src/core/warnings.h"
+    api: "enum WarningFlags : std::uint32_t { warning_none = 0, warning_log_sink_failed = 1u << 0, warning_image_save_failed = 1u << 1 };"
+    note: "Bit values are the documented public cvf_inspection_result_v1.warning_flags mapping; the c_api/runtime change copies them into the public field."
+  error_codes_new:
+    - "diagnostics_invalid_config = 1700 -> Status::invalid_argument"
+    - "log_write_error = 1701 -> Status::internal_error"
+    - "artifacts_root_error = 1800 -> Status::config_error"
+    - "image_encode_error = 1801 -> Status::internal_error"
+    - "image_write_error = 1802 -> Status::internal_error"
+    - "retention_error = 1803 -> Status::internal_error"
+  diagnostics:
+    header: "src/diagnostics/diagnostics.h"
+    types: >-
+      struct CallbackBinding { using Fn = void (*)(std::uint32_t level, const char* message_utf8, void* user_data);
+      Fn fn = nullptr; void* user_data = nullptr; }; struct DiagnosticsConfig { core::LogLevel level = core::LogLevel::info;
+      std::uint64_t max_file_bytes = 10485760; std::uint32_t max_files = 5; std::filesystem::path log_dir; };
+      class Diagnostics { static core::Result<std::unique_ptr<Diagnostics>> create(const DiagnosticsConfig&, CallbackBinding);
+      void log(core::LogLevel, std::string_view) noexcept; std::uint32_t warnings() const noexcept;
+      void clear_warnings() noexcept; std::filesystem::path log_file_path() const; ~Diagnostics(); };
+    rules:
+      - "create: log_dir must be absolute -> else invalid_argument/path_not_absolute (1011); max_file_bytes < 1024 or max_files < 1 -> invalid_argument/diagnostics_invalid_config."
+      - "create attempts to create log_dir and open a size-rotating file sink at <log_dir>/cvforwin.log with max_file_bytes/max_files. On any file-sink failure the call still succeeds with a degraded Diagnostics whose warnings() already contains warning_log_sink_failed (optional-sink semantics; no throw)."
+      - "log(level, message) noexcept: entries below the configured level are dropped; otherwise the message is truncated UTF-8-safely to <= 4096 bytes and written to the file sink (when active) and to the callback sink (when fn != nullptr), synchronously on the caller thread."
+      - "Callback receives level as the public numeric value (0..5) and a NUL-terminated message pointer valid only for the call. Callback exceptions are caught; file write failures and callback failures set warning_log_sink_failed once; log() never throws."
+      - "warnings()/clear_warnings() manage accumulated internal bits; log_file_path() returns <log_dir>/cvforwin.log."
+  artifacts:
+    header: "src/artifacts/capture_store.h"
+    types: >-
+      struct CaptureSaveRequest { const cv::Mat& pixels; std::string_view recipe_id; std::string_view request_id;
+      std::uint64_t sequence; }; enum class SaveDecision { skip, save }; class CaptureStore {
+      static core::Result<std::unique_ptr<CaptureStore>> create(const std::filesystem::path& captures_root);
+      core::Result<std::filesystem::path> save(const CaptureSaveRequest&);
+      static core::Result<std::uint32_t> enforce_retention(const std::filesystem::path& captures_root,
+      std::chrono::seconds max_age, std::uint64_t max_total_bytes); ~CaptureStore(); };
+      SaveDecision decide_capture_save(std::string_view save_policy, core::Verdict verdict, bool execution_ok);
+    rules:
+      - "create: captures_root must be absolute -> else invalid_argument/path_not_absolute; directory creation failure -> config_error/artifacts_root_error."
+      - "save: encodes pixels as PNG to <root>/<utcstamp>_<recipe>_<request>_<sequence>.png, where utcstamp is UTC yyyymmddThhmmss-mmm and recipe/request are sanitized to [A-Za-z0-9._-], truncated to 64 bytes, empty -> \"unnamed\". The returned absolute path is always lexically inside the root; encode failure -> image_encode_error; write failure -> image_write_error."
+      - "decide_capture_save: \"never\" -> skip; \"always\" -> save; \"fail_or_error\" -> save iff !execution_ok or verdict == FAIL; any other token -> skip."
+      - "enforce_retention: non-recursive scan of captures_root; regular files only (symlinks and other entry types are skipped and never followed); deletes files older than max_age first (oldest last_write_time first), then oldest files until the total size of remaining files is <= max_total_bytes; returns the number of deleted files; scan/delete failure -> internal_error/retention_error (partial deletions may have occurred)."
+invariants:
+  - "Optional diagnostic sink failure sets warnings without changing a valid verdict; a required artifact failure remains the runtime's explicit technical-error rule."
+  - "Retention deletes only library-created files beneath the managed captures root and never follows a link or junction outside it."
+  - "Generated filenames are sanitized and cannot escape the configured output root; identifiers cannot form paths."
+  - "No logging sink or artifact code touches recipes, cameras, or the public C ABI."
+  - "log() and callback dispatch never throw across their boundary."
+verification:
+  canonical_wsl:
+    - "cmake --preset wsl-gcc-debug"
+    - "cmake --build --preset wsl-gcc-debug --parallel"
+    - "ctest --preset wsl-gcc-debug --output-on-failure"
+    - "cmake --build --preset wsl-gcc-debug --target format-check"
+    - "cmake --preset wsl-clang-analysis && cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+    - "cmake --preset wsl-gcc-asan && cmake --build --preset wsl-gcc-asan --parallel && ctest --preset wsl-gcc-asan --output-on-failure"
+acceptance_reference: >-
+  Contract acceptance_checks 5/6 (warnings observable; required vs optional artifact behavior)
+  and 12 (rolling logs and managed capture retention remain bounded and cannot affect a valid
+  verdict except when a recipe explicitly requires persistence), plus portable_unit coverage for
+  logging warnings and retention safety.
+rollback: "Remove src/diagnostics/**, src/artifacts/**, the new core warning/error additions, and the CVF-005 tests."
+reporting:
+  developer_report: .ai/reports/CVF-005-implementation.yaml
+  test_red_report: .ai/reports/CVF-005-test-red.yaml
+  test_verify_report: .ai/reports/CVF-005-test-verify.yaml
+  review_report: .ai/reviews/CVF-005.yaml
+  quality_report: .ai/reports/CVF-005-quality.yaml
+notes:
+  - "Independent tests use the cvf005_ prefix under tests/unit/ and must be clang-format clean before hashing."
+  - "Use small bounds in tests (e.g. max_file_bytes=128, max_files=2, tiny PNG frames) to keep runtime fast; retention tests set last_write_time explicitly instead of sleeping."
+  - "The public header and c_api remain untouched; warning bits are internal until the runtime change maps them."

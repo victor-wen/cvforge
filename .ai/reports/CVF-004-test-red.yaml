@@ -1,0 +1,166 @@
+schema_version: 1
+change_id: CVF-004
+phase: AUTHOR
+owner: test-engineer
+recorded_at: 2026-09-15
+target: >-
+  Recipe store: strict global config + versioned recipes + immutable catalog +
+  atomic holder.
+suite:
+  framework: Catch2 v3 / C++20, -Wall -Wextra -Werror
+  files:
+    - tests/unit/cvf004_test_support.h
+    - tests/unit/cvf004_error_codes_test.cpp
+    - tests/unit/cvf004_config_test.cpp
+    - tests/unit/cvf004_recipe_test.cpp
+    - tests/unit/cvf004_catalog_test.cpp
+    - tests/unit/cvf004_holder_test.cpp
+  behaviors_covered:
+    - B1 valid config/recipe parsing, field preservation, optional capture defaults
+    - B2 config errors (1600-1605, 1607, 1011) plus token, selector, type, UTF-8, bounds
+    - B3 recipe errors (1610-1621, 1623) plus algorithm-aware parameter delegation
+    - B4 catalog load, sorted ids, empty/missing dir, filtering, all-or-nothing, duplicates
+    - B5 find known/unknown, recipe_ids and size
+    - B6 RecipeHolder default, swap, bounded concurrent readers
+    - B7 failed candidate load preserves the published catalog
+  contract_checks:
+    - frozen error-code numbering 1600-1623 and broad-status mapping (1622 -> recipe_not_found)
+    - path_not_absolute keeps 1011 -> invalid_argument
+commands:
+  - command: >-
+      clang-format -i tests/unit/cvf004_test_support.h
+      tests/unit/cvf004_error_codes_test.cpp tests/unit/cvf004_config_test.cpp
+      tests/unit/cvf004_recipe_test.cpp tests/unit/cvf004_catalog_test.cpp
+      tests/unit/cvf004_holder_test.cpp
+    exit_code: 0
+    counts: "n/a (formatting applied)"
+  - command: >-
+      clang-format --dry-run --Werror tests/unit/cvf004_test_support.h
+      tests/unit/cvf004_error_codes_test.cpp tests/unit/cvf004_config_test.cpp
+      tests/unit/cvf004_recipe_test.cpp tests/unit/cvf004_catalog_test.cpp
+      tests/unit/cvf004_holder_test.cpp
+    exit_code: 0
+    counts: "n/a (no format drift)"
+  - command: >-
+      VCPKG_ROOT=/home/administrator/vcpkg g++ -std=c++20 -Wall -Wextra -Werror
+      -I src -I include -isystem "$VCPKG_ROOT/installed/x64-linux/include"
+      -fsyntax-only tests/unit/cvf004_<test>.cpp
+      (run per test TU; brief-suggested form)
+    exit_code: 1
+    counts: "compiled=0, failed=6"
+    red_tests:
+      - tests/unit/cvf004_error_codes_test.cpp
+      - tests/unit/cvf004_config_test.cpp
+      - tests/unit/cvf004_recipe_test.cpp
+      - tests/unit/cvf004_catalog_test.cpp
+      - tests/unit/cvf004_holder_test.cpp
+  - command: >-
+      g++ -std=c++20 -Wall -Wextra -Werror -I src -I include
+      -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include
+      -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include/opencv4
+      -fsyntax-only tests/unit/cvf004_<test>.cpp
+      (run per test TU; real project-local include roots)
+    exit_code: 1
+    counts: "compiled=0, failed=6"
+    red_tests:
+      - tests/unit/cvf004_error_codes_test.cpp
+      - tests/unit/cvf004_config_test.cpp
+      - tests/unit/cvf004_recipe_test.cpp
+      - tests/unit/cvf004_catalog_test.cpp
+      - tests/unit/cvf004_holder_test.cpp
+  - command: >-
+      sha256sum tests/unit/cvf004_test_support.h
+      tests/unit/cvf004_error_codes_test.cpp tests/unit/cvf004_config_test.cpp
+      tests/unit/cvf004_recipe_test.cpp tests/unit/cvf004_catalog_test.cpp
+      tests/unit/cvf004_holder_test.cpp
+    exit_code: 0
+    counts: "6 hashes recorded in .ai/test-ownership.yaml"
+failures:
+  - test: "all six CVF-004 test translation units"
+    expected: >-
+      Each TU compiles against the frozen src/recipes/{config,recipe,recipe_catalog}.h
+      headers and the tests execute.
+    observed: >-
+      fatal error: recipes/config.h: No such file or directory (included from
+      tests/unit/cvf004_test_support.h); src/recipes/** does not exist yet, so no test
+      binary can be produced.
+  - test: "brief-suggested include environment"
+    expected: >-
+      The brief's -isystem "$VCPKG_ROOT/installed/x64-linux/include" resolves OpenCV,
+      Catch2 and nlohmann so the missing recipes headers are the first diagnostic.
+    observed: >-
+      fatal error: opencv2/core.hpp: No such file or directory in this WSL checkout:
+      VCPKG_ROOT (/home/administrator/vcpkg) has no installed/x64-linux/include tree;
+      the presets install dependencies per build directory. The real-root variant of
+      the same command then fails exactly at recipes/config.h, which is the intended RED
+      reason.
+expected_red:
+  reason: "The CVF-004 frozen recipes headers do not exist; RED is compilation failure, not assertion failure."
+  premature_pass_check: >-
+    No test executed, so no test can pass before implementation. The only non-RED
+    compilation errors observed in the author-phase scaffold check are the CVF-004
+    error-code enumerators that the implementation must add.
+ownership:
+  manifest: .ai/test-ownership.yaml
+  section: CVF-004
+  files_checked: 6
+  mismatches: []
+  preservation: "CVF-001, CVF-002 and CVF-003 sections untouched"
+author_phase_scaffold_check:
+  path: .ai/validation/cvf004_mock/include/recipes/**
+  purpose: >-
+    Author-phase-only mock of the assumed recipe interface used to syntax-check the
+    test code for internal consistency against src/core, src/inspection and
+    src/algorithms. Not a deliverable, not linked, and not RED evidence.
+  result: >-
+    All test files compile cleanly against the scaffold; the only remaining errors are
+    the not-yet-existing CVF-004 core::ErrorCode enumerators (expected).
+author_assumptions:
+  - id: A1
+    assumption: >-
+      Text fields: camera.backend, base_capture.pixel_format, logging.level,
+      recipe.capture.pixel_format (optional) and artifacts.save_policy are treated as
+      text values; roots are std::filesystem::path; capture overrides are
+      std::optional<int/double/std::string>.
+    source: "brief interface_reference wording (quoted tokens, no enum type names given)"
+  - id: A2
+    assumption: >-
+      Non-object parameters -> 1619, non-object capture -> 1620, non-object artifacts
+      -> 1621 (section-level codes); a missing recipe top-level key -> 1614.
+    source: "brief B3 sentence structure; section codes cover section-level errors"
+  - id: A3
+    assumption: >-
+      Invalid UTF-8 in a string value may classify as parse error or value-invalid
+      (config 1601|1604, recipe 1611|1614|1616|1618); the test requires rejection with
+      config_error status and accepts either classification because nlohmann validates
+      UTF-8 during parsing.
+    source: "brief negative_cases; code not pinned by B2/B3"
+  - id: A4
+    assumption: >-
+      Unreadable-file cases (1607, 1623) are platform-guarded: compiled only on
+      non-Windows and skipped when running as root, because permission bits are not
+      portable/enforced there.
+    source: "brief B2/B3 plus portability policy"
+  - id: A5
+    assumption: >-
+      Recipe capture numeric bounds mirror the documented base_capture bounds
+      (width/height 1..16384, frame_rate (0,1000]); settle_frames 0..1000.
+    source: "brief config_bounds and recipe_rules"
+  - id: A6
+    assumption: >-
+      register_compiled_algorithms is used from algorithms/compiled_algorithms.h, which
+      is now allowed for CVF-004; example.threshold is the compiled algorithm.
+    source: "brief note; CVF-003 frozen interface"
+notes:
+  developer_wiring:
+    - >-
+      The holder concurrency case uses std::thread; the cvf004 test target needs thread
+      support (e.g. Threads::Threads or the toolchain default) and the tests/unit include
+      directory.
+    - >-
+      Tests create temp trees under std::filesystem::temp_directory_path() and remove
+      them in RAII destructors; no fixture files are checked in.
+  evidence_logs:
+    - .ai/validation/logs/red_brief_*.log
+    - .ai/validation/logs/red_full_*.log
+blockers: []

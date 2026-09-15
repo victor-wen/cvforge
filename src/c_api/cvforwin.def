@@ -1,0 +1,13 @@
+; cvforwin.def - Windows export allowlist for the v1 public C ABI.
+;
+; This file is the authoritative Windows export surface. It must list exactly
+; the five cvf_* functions and nothing else; adding, removing, or renaming an
+; export is an R3 change. Names are unmangled because the entry points are
+; declared extern "C" with the __cdecl calling convention.
+
+EXPORTS
+    cvf_get_abi_version
+    cvf_initialize
+    cvf_reload_recipes
+    cvf_inspect
+    cvf_shutdown

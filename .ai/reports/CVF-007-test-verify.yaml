@@ -1,0 +1,145 @@
+schema_version: 1
+change_id: CVF-007
+phase: VERIFY
+role: test-engineer
+verdict:
+  wsl_portable_suite: GREEN
+  owned_hardware_suite_execution: DEFERRED (NOT PASS)
+  overall: PARTIAL - only the WSL portable suite was executable in this environment
+
+session_context:
+  fresh_session: true
+  inputs_used:
+    - .ai/test-briefs/CVF-007.yaml
+    - .ai/project-contract.yaml
+    - tests/hardware/uvc_smoke.cpp (owned independent test)
+    - .ai/test-ownership.yaml
+    - CMakeLists.txt, CMakePresets.json, cmake/CvfOptions.cmake (runner configuration)
+    - /home/administrator/.config/opencode/skills/black-box-testing/SKILL.md
+  forbidden_inputs_read: none
+  implementation_blindness: >-
+    No src/** implementation file, no .ai/changes/**, no .ai/reports/** read, no diff or
+    changed-file list or developer note requested or accepted. Runner-configuration reads that the
+    interactive sandbox denied (CMakePresets.json, cmake/**) were produced through the role's own
+    harness under .ai/validation/ as the task instructed.
+
+commands:
+  - command: "sha256sum tests/hardware/uvc_smoke.cpp"
+    exit_code: 0
+    counts: "actual=02141468189556cae2f71985f65a6009b63d37aeb148c2faf3eeb3feeb5ff69c expected=02141468189556cae2f71985f65a6009b63d37aeb148c2faf3eeb3feeb5ff69c match=yes"
+  - command: "clang-format --dry-run --Werror tests/hardware/uvc_smoke.cpp"
+    exit_code: 0
+    counts: "format clean"
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    counts: "GNU 13.3.0, Debug; configuring done in 28.6 s"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    counts: "incremental; 'ninja: no work to do' (no source newer than the developer build)"
+  - command: "ctest --preset wsl-gcc-debug -N"
+    exit_code: 0
+    counts: "registered=263; lines mentioning uvc_smoke/cvf_hw/hardware=0; disabled lines=0"
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "passed=263, failed=0; skipped/disabled/not-run lines=0; total test time 5.86 s"
+  - command: "g++ -std=c++20 -Wall -Wextra -Werror -fsyntax-only -I src -I include tests/hardware/uvc_smoke.cpp"
+    exit_code: 0
+    counts: "empty TU on Linux; preprocessed code lines after the guard=0 (entire body inside #if defined(_WIN32))"
+  note: >-
+    Direct cmake invocation is sandbox-denied for this role, so the canonical commands above were
+    executed by .ai/validation/cvf007-test-engineer-verify.sh and its readback companion, with each
+    command's exit code captured individually. All results are from this session; no previous-run
+    claim is reused.
+
+hardware_suite_registration:
+  option: CVFORWIN_BUILD_HARDWARE_TESTS
+  declared_default: OFF
+  declaration: "cmake/CvfOptions.cmake:47 option(CVFORWIN_BUILD_HARDWARE_TESTS ... OFF); CMakePresets.json contains no override reference"
+  resolved_cache_value: "CVFORWIN_BUILD_HARDWARE_TESTS:BOOL=OFF"
+  registered_in_ctest: false
+  build_tree_artifacts_matching_hw_uvc_smoke: 0
+  build_log_references_to_uvc_smoke: 0
+  configure_log_hardware_messages: none
+  cmakelists_registration: "add_executable(cvf_hw_uvc_smoke ...) only under if(CVFORWIN_BUILD_HARDWARE_TESTS) AND WIN32; no add_test for it anywhere"
+  conclusion: >-
+    The opt-in hardware suite is neither built nor registered on WSL; the portable suite ran without
+    it, as the brief and contract test policy require.
+
+verification_results:
+  portable_wsl_suite: "GREEN: 263/263 ctest tests passed, exit code 0, executed this session"
+  owned_hardware_file_compilation_windows: DEFERRED
+  owned_hardware_file_execution_windows: DEFERRED
+
+deferred_evidence:
+  - item: "Windows 10/11 x64 build and run of tests/hardware/uvc_smoke.cpp (H1-H6 UVC hardware smoke suite)"
+    status: DEFERRED (explicitly NOT PASS)
+    reason: >-
+      The translation unit is entirely inside #if defined(_WIN32) and its CMake target exists only on
+      WIN32 with CVFORWIN_BUILD_HARDWARE_TESTS=ON (default OFF). This WSL host has no Windows toolchain
+      and no UVC camera, and the contract states WSL is never Windows ABI or hardware evidence. The
+      brief defers execution to a designated Windows 10/11 x64 station.
+    unverified_compile_time_assumptions:
+      - "src/camera/uvc_windows/uvc_backend.h declares a default-constructible cvforwin::camera::UvcCameraBackend implementing ICameraBackend and reporting backend_key() == \"uvc\""
+      - "camera-contract spellings used by the suite: CameraDescriptor (backend_key/device_path/vendor_id/product_id/friendly_name), CameraSelector, CameraSettings, CapturedFrame{metadata,pixels}, resolve_identity(), capture_with_one_retry(), core::Deadline::from_timeout_ms()/immediate(), core::Status/core::ErrorCode names, core::status_name()/core::error_code_name()"
+    unverified_runtime_cases:
+      - "H1 enumerate: backend_key \"uvc\", non-empty device_path, VID/PID empty or 4 lowercase hex"
+      - "H2 resolve: empty selector rejected; zero match -> camera_not_found/camera_not_found; multi-match -> camera_not_found/camera_identity_ambiguous; friendly_name-only boundary; exact-name match; no first-device fallback"
+      - "H3 open/configure/capture/close: owned BGR8 pixels, configured dimensions, incrementing sequence, two idempotent closes, capture-after-close camera_io, reopen"
+      - "H4 repeated captures (default 50, CVF_HW_CYCLES) with no invalid frame, then device still usable and still enumerated"
+      - "H5 already-expired deadline -> timeout/capture_timed_out, then recovery"
+      - "H6 env-gated manual unplug/replug (CVF_HW_UNPLUG_TEST=1): first capture after unplug camera_io, bounded retry fails while absent within deadline, one bounded reconnect+recapture recovers, at most one retry; skipped automatically when the env gate is unset"
+      - "negative: capture before open -> camera_io; open with stale descriptor -> camera_not_found; close on never-opened backend without crash"
+    operator_procedure: >-
+      Documented in the file header: run 'uvc_smoke --list' to print identity fields, then configure
+      CVF_HW_UVC_DEVICE_PATH or CVF_HW_UVC_VID/PID/NAME; optional CVF_HW_WIDTH/HEIGHT/FPS/CYCLES;
+      CVF_HW_EXPECT_ZERO_DEVICES=1 for the camera-less boundary; CVF_HW_UNPLUG_TEST=1 for the manual
+      unplug/replug step. Exit code 0 = all executed checks passed, 1 = at least one failure.
+
+ownership:
+  manifest: .ai/test-ownership.yaml
+  files_checked: 1
+  mismatches: []
+  hash:
+    path: tests/hardware/uvc_smoke.cpp
+    expected: 02141468189556cae2f71985f65a6009b63d37aeb148c2faf3eeb3feeb5ff69c
+    actual: 02141468189556cae2f71985f65a6009b63d37aeb148c2faf3eeb3feeb5ff69c
+  test_file_modified_by_verifier: false
+  coverage_extension: "not required by the brief; the test file was left byte-identical, so no manifest update was needed"
+
+skips_weakening_review:
+  ctest_run_skip_scan: >-
+    No skipped/disabled/not-run entries. The only textual 'skip' match is the test name
+    'CVF-006 B9: fail_or_error skips persistence on PASS', which asserts that no file is written,
+    not that a test was skipped.
+  ctest_list_disabled_entries: 0
+  hidden_test_caveat: >-
+    ctest only reports discovered tests; hidden Catch2 tags ([.]) would not be enumerated. The
+    registered total (263 = known 262 portable baseline + 1 developer CVF-007 factory regression)
+    shows no drop in registered coverage.
+  owned_file_assertion_review: >-
+    Full read of tests/hardware/uvc_smoke.cpp (797 lines): every failure access is short-circuit
+    guarded by !has_value(); the no-device path calls check(false) instead of passing silently; the
+    ambiguity case uses a synthetic twin pair and never the first enumerated real device; no
+    assertion is disabled, weakened, or short-circuited around; H6 is env-gated and reported skipped
+    when unset.
+  hardware_suite_presence_in_run: "0 registered tests, 0 build artifacts, 0 build-log references"
+
+observations:
+  - >-
+    The brief's acceptance text says 262/262; the current registration is 263/263 because the
+    developer-owned CVF-007 portable factory regression (tests/unit/test_uvc_runtime_factory.cpp,
+    ctest #258 'CVF-007 developer: a uvc config fails with camera_not_found on portable builds') is
+    included. The independent hardware module remains excluded and no portable regression appeared.
+  - >-
+    The build step was incremental ('ninja: no work to do'); all 263 tests were nevertheless executed
+    from their binaries in this session (5.86 s), which is the executed evidence.
+  - >-
+    This WSL result is not Windows ABI or hardware evidence and cannot substitute for the designated
+    station run required before FCT deployment.
+
+artifacts:
+  - tests/hardware/uvc_smoke.cpp (unchanged, hash-verified)
+  - .ai/validation/cvf007-test-engineer-verify.sh
+  - .ai/validation/cvf007-test-engineer-verify-readback.sh
+
+blockers: []

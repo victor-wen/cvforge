@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "recipe_id": "example",
+  "algorithm": "example.threshold",
+  "parameters": {
+    "threshold": 128,
+    "min_pass_ratio": 0.0
+  },
+  "capture": {
+    "width": 16,
+    "height": 12,
+    "frame_rate": 15.0,
+    "pixel_format": "bgr8",
+    "settle_frames": 0
+  },
+  "artifacts": {
+    "save_policy": "never",
+    "required": false
+  }
+}

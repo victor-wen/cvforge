@@ -1,0 +1,310 @@
+schema_version: 1
+program: cvforwin-implementation-1.0.0
+report: release-review
+role: release-reviewer
+recorded_at: 2026-09-15
+baseline:
+  path: .ai/project-contract.yaml
+  contract_version: 1.0.0
+  status: APPROVED
+risk: R2
+verdict: BLOCKED-pending-external-evidence
+verdict_rationale: >-
+  All five review passes have zero blocking findings, and every development gate for
+  CVF-001..CVF-008 is present, valid, and mutually consistent (reviewer APPROVE x8,
+  quality-engineer PASS x8, fresh real exit codes throughout, 47/47 ownership hashes
+  matched on the frozen final state). The portable (WSL) scope is certifiable today.
+  Production release cannot be certified because the contract's own acceptance checks
+  11, 12, and 14 (windows-2022 MSVC build/ABI/package/clean-consumer evidence, verified
+  package contents, and the representative UVC hardware run) are contract-sanctioned
+  deferrals that no role can execute in this environment (no Windows host, no git
+  remote, no camera). REQUEST_CHANGES would be wrong: there is no local rework to
+  request. APPROVE would overstate: NFR-009 makes Windows CI authoritative for DLL,
+  exports, dependencies, and package evidence, and the hardware suite is an explicit
+  production-release requirement. The correct disposition is certification of the
+  portable scope plus an explicit block on production/FCT release until the deferred
+  external evidence is recorded.
+
+prior_gates:
+  CVF-001: { review: APPROVE, quality: PASS }
+  CVF-002: { review: APPROVE, quality: PASS }
+  CVF-003: { review: APPROVE, quality: PASS }
+  CVF-004: { review: APPROVE, quality: PASS }
+  CVF-005: { review: APPROVE, quality: PASS }
+  CVF-006: { review: APPROVE, quality: PASS }
+  CVF-007: { review: APPROVE, quality: PASS }  # initial REQUEST_CHANGES (F1/F2), amendment re-review APPROVE
+  CVF-008: { review: APPROVE, quality: PASS }
+
+scope_of_certification:
+  certified_today: >-
+    Portable implementation scope on WSL GCC: all eleven contract modules implemented
+    inside the approved boundaries; public C ABI v1 header exact against the contract
+    (C11, five functions, statuses 0..13, exact constants and struct layouts, caller
+    ownership); .def allowlist exactly five exports with matching WSL ELF evidence;
+    canonical WSL quality chain green on the frozen final state (263/263 debug and
+    ASan, 0 skipped; format 83 files; abi-check 5 exports; static-analysis 21 TUs with
+    the recorded Windows-TU gap; wsl-quality workflow 6/6; C host example end-to-end
+    exit 0 with PASS verdict, reload, and shutdown); independent-test integrity intact
+    (47 files, 47/47 sha256, no weakened/skipped/deleted assertions; all amendments
+    owner-recorded with prior hashes).
+  not_certified_today: >-
+    Any Windows-specific claim: MSVC v143 compilation, DLL export verification via
+    dumpbin, package/package-verify execution, runtime dependency allowlist, notices
+    packaging, symbols archive, clean package-consumer run, and the opt-in UVC hardware
+    suite. These are DEFERRED (explicitly NOT PASS) in every recorded report; no WSL
+    result has been substituted for them and no fabricated Windows evidence exists.
+
+passes:
+  architecture:
+    result: PASS
+    findings:
+      - >-
+        All planned modules exist in the contract's exact paths (src/core, src/camera
+        {camera_backend, captured_frame, test_backends, uvc_windows}, src/recipes,
+        src/inspection, src/algorithms, src/diagnostics, src/artifacts, src/runtime,
+        src/c_api, include/cvforwin/cvf_api.h, plus the full build/test/delivery
+        surface). Public ABI verified field-by-field against contract
+        cvforwin_c_abi_v1; .def allowlist exactly five symbols; presets preserve the
+        GCC portable and MSVC v143 release identities with the F1 test/release split;
+        vcpkg baseline pinned (a1cae005c39be7b18ba319fced856b68d7276271); CI workflow
+        is windows-2022, immutable action SHAs, least permissions, canonical commands.
+      - >-
+        Forbidden changes absent: no vendor/** or third_party/binaries; no Daheng SDK
+        header/binary/runtime reference in code (grep clean; LICENSES/README documents
+        the intentional absence); no runtime plug-in loading (no LoadLibrary/dlopen);
+        no Python embedding; single live context enforced (CONTEXT_LIMIT); errors are
+        never FAIL (failure paths set NOT_EVALUATED in runtime and C API); no
+        first-camera fallback (resolve_identity rejects empty selectors, zero matches,
+        and ambiguity); retention stays inside the managed captures root and never
+        follows links; recipe reload is all-or-nothing through an atomic snapshot
+        holder; optional sink failures set warning flags without touching a valid
+        verdict. Dependency direction holds per all eight reviews.
+      - >-
+        Non-blocking documentation drift (owner: architect): the contract module
+        dependency lists are stale relative to the approved frozen interfaces -
+        test_camera_backends additionally uses OpenCV imgproc and core_model headers
+        (CVF-002 review F7), and inspection_contract_and_registry publishes
+        nlohmann-json (CVF-003 review NF-2). No direction or invariant is violated;
+        both are approved dependency families. Non-blocking bookkeeping (owner:
+        controller): .ai/workflow-state.yaml completed_gates omits the CVF-003
+        test-red entry (the RED report exists with real exit-1 evidence and is
+        referenced by the review), and the queue/next_action fields are stale.
+  correctness:
+    result: PASS
+    findings:
+      - >-
+        Implementation matches the frozen change interfaces and the contract's
+        acceptance semantics. Source-verified central invariants: cvf_inspect result
+        hygiene (single result_is_writable predicate gates every write; failed calls
+        clear output_json/image_path counters and NUL-terminate - CVF-001 review F1/F2
+        confirmed fixed in src/c_api/cvf_entry_points.cpp); capture_with_one_retry
+        performs at most one reconnect and one recapture with deadline checks before
+        each stage and never re-enumerates; runtime failure_outcome always pairs a
+        non-OK status with NOT_EVALUATED; required-artifact failure returns
+        REQUIRED_ARTIFACT_ERROR + NOT_EVALUATED with cleared outputs while optional
+        save/retention failures only set warning bits; catch-all exception containment
+        on all five entry points; reload validates a complete candidate before the
+        atomic publish and keeps the old snapshot on failure.
+      - >-
+        All developer reports record real commands with exit codes; every deviation is
+        documented and was judged acceptable by the corresponding review. The two
+        CVF-007 defects (F1 NUL-contaminated identity strings, F2 planar chroma stride
+        OOB) were fixed and verified by a focused re-review (APPROVE) with re-derived
+        bounds arithmetic. Non-blocking residuals: input_json parse sits outside the
+        end-to-end deadline (bounded 64 KiB, microseconds); a second cvf_shutdown
+        through a stale pointer is UB covered by the documented host-quiescence
+        precondition; validation order checks context before struct_size
+        (underdetermined in the contract, no test asserts otherwise).
+  testing:
+    result: PASS
+    findings:
+      - >-
+        Evidence chain complete and independent for every change: RED (real exit-1
+        compile evidence; CVF-007/008 structural or deferred, honestly recorded) ->
+        implementation -> fresh verify session -> review -> quality, each with real
+        exit codes. Ownership manifest is consistent: 47 files across CVF-001..008
+        (6+8+4+6+7+10+1+5), recomputed 47/47 byte-exact by the quality gate on the
+        frozen final state (manifest sha256 eb541739...). Final portable suite 263/263
+        in debug and ASan with 0 skipped and no skip/disable/weakening markers; every
+        test-file amendment (CVF-004 TV-1/TV-2/amendment-3, CVF-005 A6/TD-1/TD-2,
+        CVF-006 TV-4/boundary) is owner-recorded with previous and new hashes and
+        preserved or strengthened assertions. No fabricated Windows or hardware
+        evidence exists anywhere in the record; the WSL package target refuses loudly
+        (exit 1) rather than producing portable release evidence.
+      - >-
+        Non-blocking residuals: the independent ABI suite still does not pin
+        sizeof/offsetof layouts of the v1 structs (CVF-001 review F6, optional
+        carry-over; would strengthen the Windows ABI gate - owner: test-engineer);
+        clang-tidy cannot analyze the Windows-only uvc_backend.cpp TU on Linux
+        (compile-DB gap, covered by the Windows CI build); Windows symlink/junction
+        retention coverage has no MSVC-side case yet (CVF-005 review NB-6).
+  security:
+    result: PASS
+    findings:
+      - >-
+        No secret exposure (CI has contents:read only, no secrets, no persisted
+        credentials; action SHAs verified against the GitHub API per the CVF-008
+        review); no sensitive-path edits (project-contract.yaml untouched by
+        implementers, cvf_api.h matches the contract, cvforwin.def exact, vcpkg and
+        preset identities pinned); no destructive or publishing commands (uploads are
+        limited to the verified package and symbols archives; retention deletes only
+        regular files beneath the managed captures root and never follows links);
+        no unsafe defaults (warnings-as-errors ON, test backends OFF in the release
+        preset, hardware suite OFF by default, package targets refuse on portable
+        hosts). LICENSES covers all eight statically linked/redistributed components
+        with SPDX identities matching the pinned vcpkg install.
+      - >-
+        Non-blocking residuals: the runtime dependency allowlist accepts any "mf*"
+        DLL name prefix rather than exact Media Foundation names (CVF-008 review NB-1,
+        owner: developer + test-engineer coordination); the dumpbin export regex would
+        not display C++-mangled names (detection gap only, NB-2); if the configured
+        captures root itself is replaced by a link, writes act on the target
+        (deployment controls output_root; hardening note, CVF-005 review NB-1).
+  summary:
+    result: PASS
+    note: >-
+      All eight changes cleared reviewer APPROVE and quality PASS with consistent,
+      real, frozen-state evidence; zero blocking findings across architecture,
+      correctness, testing, and security. The program is blocked only on external
+      evidence that cannot be produced in this workspace.
+
+acceptance_checks:
+  - check: "User approves contract 1.0.0 and architect sets APPROVED before build work"
+    status: MET
+    evidence: "contract status APPROVED 2026-09-15 with recorded approval evidence; workflow-state baseline gate PASS"
+  - check: "All planned files within change_scope; dependency direction honored"
+    status: MET
+    evidence: "per-change scope verification in all eight reviews; repository tree matches contract module paths"
+  - check: "C11 sample host: ABI query, initialize, one inspect per cycle, reload, shutdown, no C++ knowledge"
+    status: MET
+    evidence: "examples/c_host strict C11 over cvf_api.h only; real WSL run exit 0 (status OK, verdict PASS, output_json, capture path, reload, shutdown) in CVF-008-quality (debug and ASan); Windows clean-consumer run DEFERRED to CI"
+  - check: "Public header free of forbidden ABI types; Windows DLL exports exactly the five functions"
+    status: MET_LOCAL_DEFERRED_WINDOWS
+    evidence: "header verified field-by-field (C11, only stdint/stddef, no forbidden types); .def allowlist exactly five; WSL ELF nm + abi-check 5/5 exports; authoritative Windows dumpbin check DEFERRED to windows-2022 CI"
+  - check: "Initialization rejects malformed config, duplicate/invalid recipes, unknown algorithms, ambiguous cameras, second context; no leaks"
+    status: MET
+    evidence: "CVF-004 60 independent recipe/config cases; CVF-006 rollback + lifecycle + CONTEXT_LIMIT (186 checks); camera ambiguity via CVF-002 identity cases and test backends; real-UVC rejection on Windows DEFERRED to hardware run"
+  - check: "Inspection distinguishes OK+PASS, OK+FAIL, warnings, error+NOT_EVALUATED; honors buffers and deadline"
+    status: MET
+    evidence: "cvf006 lifecycle 186 checks incl. verdict-ratio boundary; deadline/serialization/degraded-log suites; BUFFER_TOO_SMALL with bytes_required"
+  - check: "Camera fault tests prove at most one reconnect/recapture and no fallback to an unrelated device"
+    status: MET
+    evidence: "CVF-002 49 independent camera cases (fault injection, one-retry limit, no re-enumeration) + CVF-006 reconnect suite; Windows MSVC camera-suite execution DEFERRED (windows-msvc-tests preset now exists, F1 fixed)"
+  - check: "Recipe reload: complete validation and old-snapshot preservation on every failure path"
+    status: MET
+    evidence: "CVF-004 catalog all-or-nothing load + atomic holder (concurrency case, 50x ASan repeat green); CVF-006 reload failure keeps old snapshot"
+  - check: "Algorithms addable behind the registry without touching camera/runtime/C ABI; example documents cv2-to-C++ mapping"
+    status: MET
+    evidence: "CVF-003 registry/dispatch/example suites (37 independent cases, 295 assertions); compile-time registration only; docs describe the cv2 mapping"
+  - check: "WSL GCC build, unit tests, format check, static analysis, sanitizer workflow pass with recorded zero exit codes"
+    status: MET
+    evidence: "CVF-008-quality frozen-state re-run: configure/build 0, ctest 263/263 debug and ASan (0 skipped), format 83, abi-check 5, static-analysis 21 (Windows-TU gap recorded), wsl-quality workflow 6/6"
+  - check: "Windows MSVC build, tests, ABI/export, package, dependency allowlist, notices, clean C consumer pass with recorded zero exit codes"
+    status: DEFERRED
+    evidence: "workflow + presets + package-verify implemented (17/17 on clearly labeled simulated dumpbin, non-evidence); outstanding commands: cmake --workflow --preset windows-ci and cmake --workflow --preset windows-tests-quality plus the clean package-consumer step on windows-2022"
+  - check: "Verified Windows package contains DLL, import lib, header, examples, docs, notices; no non-system runtime DLL"
+    status: DEFERRED
+    evidence: "package-verify target implemented with contents/exports/notices/SHA/allowlist checks; requires the windows-2022 package run to certify"
+  - check: "Rolling logs and retention bounded; cannot affect a valid verdict except required persistence"
+    status: MET
+    evidence: "CVF-005 38 independent cases (rotation bounds, UTF-8 truncation, sanitization, symlink no-follow, age/size retention) + CVF-006 save-policy/degraded-log/required-artifact paths"
+  - check: "Representative Windows 10/11 UVC hardware passes the opt-in suite before production FCT deployment"
+    status: DEFERRED
+    evidence: "tests/hardware/uvc_smoke.cpp authored and hash-pinned (Windows-only TU, option default OFF, env-gated replug, no first-device fallback); requires the designated-station run with recorded PASS"
+  - check: "Daheng remains an unimplemented extension point with no SDK header, binary, or runtime dependency"
+    status: MET
+    evidence: "grep clean across the repository (documentation references only); no vendor/ or third_party/ directories; LICENSES/README records the intentional absence"
+
+residual_findings:
+  - id: RR-1
+    pass: testing
+    owner: test-engineer
+    severity: non_blocking
+    issue: "Independent ABI tests do not pin sizeof/offsetof of the v1 structs (CVF-001 review F6 carry-over); layout drift on MSVC x64 would not be caught by the independent suite."
+    required_fix: "Add _Static_assert(sizeof/offsetof) layout assertions for the four v1 structs before or alongside the first windows-2022 run; update ownership hashes."
+  - id: RR-2
+    pass: security
+    owner: developer
+    severity: non_blocking
+    issue: "Runtime dependency allowlist accepts any 'mf' name prefix (CVF-008 review NB-1) and the export regex would not list C++-mangled names (NB-2)."
+    required_fix: "Replace the prefix with exact Media Foundation DLL names in both scripts (coordinate the hash-pinned tests/package copy with the test owner) and broaden the row regex at the next packaging touch."
+  - id: RR-3
+    pass: correctness
+    owner: developer
+    severity: non_blocking
+    issue: "Possible MSVC /W4 narrowing warnings in src/camera/uvc_windows/uvc_backend.cpp frame-rate rational and integer conversions (CVF-007 review NF-3a/NF-6); warnings-as-errors would fail the Windows build loudly rather than silently."
+    required_fix: "Resolve with integer arithmetic or explicit casts during the first windows-2022 build if warned."
+  - id: RR-4
+    pass: correctness
+    owner: developer
+    severity: non_blocking
+    issue: "Release linker PDB existence rests on the pinned CMAKE_MSVC_DEBUG_INFORMATION_FORMAT (CVF-008 review NB-5); the symbols step fails loudly if absent."
+    required_fix: "Confirm the Release PDB during the first windows-2022 run; force /DEBUG if missing."
+  - id: RR-5
+    pass: correctness
+    owner: developer
+    severity: non_blocking
+    issue: "input_json parsing occurs before the end-to-end Deadline is constructed (CVF-006 review NB-1); bounded to 64 KiB at the C ABI, microsecond impact."
+    required_fix: "Construct the Deadline before parsing if timeout semantics are ever tightened; none required for 1.0.0."
+  - id: RR-6
+    pass: architecture
+    owner: architect
+    severity: non_blocking
+    issue: "Contract module dependency lists stale relative to approved frozen interfaces (test_camera_backends imgproc/core_model; inspection nlohmann-json) and the NFR-012 max_files reading plus the CVF-005 128-byte test note remain to be reconciled (CVF-002 F7, CVF-003 NF-2, CVF-005 NB-4/NB-5)."
+    required_fix: "Documentation-only amendments at the next permitted contract touch."
+  - id: RR-7
+    pass: architecture
+    owner: controller
+    severity: non_blocking
+    issue: "workflow-state.yaml bookkeeping: CVF-003 test-red gate missing from completed_gates (evidence artifact exists) and queue/next_action are stale relative to the RELEASE_REVIEW stage."
+    required_fix: "Refresh workflow-state when recording the release outcome."
+  - id: RR-8
+    pass: security
+    owner: developer
+    severity: non_blocking
+    issue: "If the configured captures root itself is replaced by a symlink/junction, saves and retention act on the link target (CVF-005 review NB-1); output_root is FCT-deployment controlled."
+    required_fix: "Optional hardening: re-check the root with symlink_status before retention or validate the real path at initialization."
+
+deferred_evidence:
+  - id: DEF-1
+    item: "git repository + remote (user-side prerequisite)"
+    severity: blocking-for-production-release
+    outstanding_steps:
+      - "Initialize a git repository in the workspace, commit the frozen tree (the quality-gate final digest 8727719a... identifies the certified state), and push to the GitHub remote that hosts Actions."
+  - id: DEF-2
+    item: "windows-2022 CI run (both jobs)"
+    severity: blocking-for-production-release
+    outstanding_steps:
+      - "Push and let .github/workflows/windows.yml run, or dispatch it; the release job executes `cmake --workflow --preset windows-ci` (configure/build/test/abi-check/package/package-verify/package-symbols)."
+      - "The test-enabled job executes `cmake --workflow --preset windows-tests-quality` (camera/ABI/lifecycle suites with test backends ON) and the clean package consumer `cmake -DCVF_PACKAGE_ROOT=<workspace>/build/windows-msvc-tests/package/cvforwin-1.0.0 -P tests/package/package_checks.cmake`."
+      - "Record all outputs and exit codes as the authoritative Windows release evidence; resolve RR-3/RR-4 if the build surfaces them."
+  - id: DEF-3
+    item: "Designated-station UVC hardware run"
+    severity: blocking-for-FCT-deployment
+    outstanding_steps:
+      - "On the designated Windows 10/11 x64 station with the configured UVC camera, build with CVFORWIN_BUILD_HARDWARE_TESTS=ON and run the opt-in tests/hardware suite."
+      - "Per the CVF-007 station checklist: confirm clean single-line identity strings in uvc_smoke --list (F1 verification), record the negotiated media subtype, prefer a planar-YUV-capable device to exercise the F2 conversion path, and run the env-gated unplug/replug retry."
+      - "Record a PASS before any FCT deployment (contract acceptance check 14 / test_policy production_release_requirement)."
+  - id: DEF-4
+    item: "Optional hardening alongside the CI touch"
+    severity: non_blocking
+    outstanding_steps:
+      - "RR-1 layout assertions, RR-2 allowlist/regex hardening, RR-8 root-symlink re-check; each is small and can ride the same Windows CI cycle."
+
+notes:
+  - >-
+    Independence held end-to-end: independent tests were authored before implementation
+    (RED evidence), the developer never modified hash-pinned test files, all amendments
+    were owner-recorded with prior/new digests, and the quality gate independently
+    recomputed 47/47 hashes and re-ran the canonical chain on the frozen state.
+  - >-
+    No Windows, MinGW, or hardware claim is substituted anywhere in the record; every
+    deferral is explicit and the portable package target refuses loudly rather than
+    fabricating release evidence.
+  - >-
+    This verdict does not request local rework. The portable scope is certified; the
+    production release block is discharged by executing DEF-1 and DEF-2 (Windows CI
+    evidence for acceptance checks 11-12 and the Windows halves of 3-7) and, before FCT
+    deployment, DEF-3 (acceptance check 14). After those runs record PASS, a short
+    release re-review can flip the verdict to release-ready without re-running the
+    development pipeline.

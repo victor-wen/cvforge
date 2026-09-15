@@ -1,0 +1,80 @@
+schema_version: 1
+change_id: CVF-004
+phase: AUTHOR
+owner: test-engineer
+recorded_at: 2026-09-15
+amendment_of: .ai/reports/CVF-004-test-red.yaml
+amendment_number: 3
+change:
+  id: CVF-006 backend schema extension
+  artifact: tests/unit/cvf004_config_test.cpp
+  case: "CVF-004 B2 negative: an unsupported backend is rejected"
+  summary: >-
+    CVF-006 extends the configuration schema in test-enabled builds only: camera.backend
+    additionally accepts "file" and "synthetic", while release builds remain "uvc"-only.
+    The previous unconditional rejection of "file" would have failed in the test-enabled
+    build, so the case is now build-mode aware.
+  behavior:
+    disabled_mode: >-
+      CVFORWIN_TEST_BACKENDS_ENABLED undefined or 0: the original rejection set
+      {v4l2, file, UVC, ""} is preserved (release-mode behavior unchanged).
+    enabled_mode: >-
+      CVFORWIN_TEST_BACKENDS_ENABLED defined and nonzero: {v4l2, UVC, ""} stay rejected
+      with config_error/config_value_invalid, and "file"/"synthetic" must load
+      successfully (REQUIRE has_value plus camera.backend echo) using the otherwise-valid
+      selector from valid_config() unchanged, so only the backend value under test varies.
+  guard: "#if defined(CVFORWIN_TEST_BACKENDS_ENABLED) && CVFORWIN_TEST_BACKENDS_ENABLED"
+  developer_wiring_note: >-
+    Until the developer wires CVFORWIN_TEST_BACKENDS_ENABLED on the cvf004 test target,
+    the file compiles and runs in disabled mode; the enabled-mode branch was validated by
+    an explicit -DCVFORWIN_TEST_BACKENDS_ENABLED=1 syntax-only compile.
+  assertion_integrity: >-
+    No assertion was removed, skipped, disabled, or weakened. The disabled-mode rejection
+    set lost no backend (only the conditional test backends moved into the enabled branch)
+    and the enabled branch adds acceptance coverage only.
+evidence:
+  - command: "clang-format -i tests/unit/cvf004_config_test.cpp"
+    exit_code: 0
+    counts: "formatting applied"
+  - command: "clang-format --dry-run --Werror tests/unit/cvf004_config_test.cpp"
+    exit_code: 0
+    counts: "no format drift"
+  - command: >-
+      g++ -std=c++20 -Wall -Wextra -Werror -I src -I include -I tests/unit
+      -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include
+      -isystem <same>/opencv4 -fsyntax-only tests/unit/cvf004_config_test.cpp
+    exit_code: 0
+    counts: "disabled mode (definition undefined) compiles"
+  - command: >-
+      g++ -std=c++20 -Wall -Wextra -Werror -DCVFORWIN_TEST_BACKENDS_ENABLED=1
+      -I src -I include -I tests/unit -isystem <same include roots>
+      -fsyntax-only tests/unit/cvf004_config_test.cpp
+    exit_code: 0
+    counts: "enabled mode compiles"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    counts: "cvf004_config_test.cpp.o rebuilt; cvf004_tests linked"
+  - command: "ctest --preset wsl-gcc-debug -R CVF-004 --output-on-failure"
+    exit_code: 0
+    counts: "passed=69, failed=0"
+    log: .ai/validation/logs/ctest_cvf004_cvf006.log
+ownership:
+  manifest: .ai/test-ownership.yaml
+  changed_files:
+    - path: tests/unit/cvf004_config_test.cpp
+      previous_sha256: 58ef1e743e1724029390599d3a597d8ba777c2cd343798fa3182648ce21f0fbd
+      sha256: 3cd3f957b5887b7dfbede112384c52e7befa67f25f5c9df5fb43077436750335
+  unchanged_files_rehashed_to_manifest:
+    - tests/unit/cvf004_test_support.h
+    - tests/unit/cvf004_error_codes_test.cpp
+    - tests/unit/cvf004_recipe_test.cpp
+    - tests/unit/cvf004_catalog_test.cpp
+    - tests/unit/cvf004_holder_test.cpp
+  mismatches: []
+notes:
+  - >-
+    The verify-phase frame_rate boundary addition and the TV-2 holder concurrency
+    synchronization were already recorded in the CVF-004 ownership notes; their hashes
+    match the current files, so no reconciliation was needed in this amendment.
+  - "No production code and no other role's file was modified."
+blockers: []

@@ -1,0 +1,192 @@
+change_id: CVF-008
+verdict: APPROVE
+reviewed_artifacts:
+  - .ai/project-contract.yaml
+  - .ai/changes/CVF-008.yaml
+  - .ai/reports/CVF-008-implementation.yaml
+  - .ai/reports/CVF-008-test-red.yaml
+  - .ai/reports/CVF-008-test-verify.yaml
+  - .ai/test-ownership.yaml
+  - .ai/test-briefs/CVF-008.yaml
+  - examples/c_host/** (main.c, CMakeLists.txt, run_example.sh, config/**)
+  - config/examples/**
+  - LICENSES/**
+  - docs/**
+  - .github/workflows/windows.yml
+  - cmake/CvfPackage.cmake, cmake/CvfPackage.cmake.in, cmake/CvfPackageVerify.cmake.in
+  - cmake/CvfOptions.cmake, cmake/CvfFormat.cmake, cmake/CvfAbiCheck.cmake
+  - CMakePresets.json, CMakeLists.txt
+  - tests/package/**
+  - .ai/validation/cvf008-developer/** (logs 01-16, verify-package-scripts.sh)
+summary: >-
+  Independent semantic review of CVF-008 (native C host example, example configs,
+  packaging fixes F3/F4/QE-1, F1 Windows test preset, CI workflow, licenses, docs,
+  and the clean package-consumer kit) against contract 1.0.0. All observable claims
+  that can be checked on the frozen local state hold, and every Windows-only claim is
+  recorded as deferred rather than fabricated. The C host example is strict C11
+  against cvf_api.h only, clearly labeled a template, deterministic in its exit codes,
+  and its recorded WSL run is real (exit 0, PASS verdict, JSON, capture path; usage
+  exit 2 and missing-config exit 1 in the negative logs). F3 (script-mode
+  configuration resolution with no literal generator expression in any -P body),
+  F4 (real package-verify: contents, exactly one project DLL, notices, packaged-vs-built
+  SHA256, exact five exports from cvforwin.def, system-only runtime dependency
+  allowlist, upload archive, hard failure when dumpbin is absent), and QE-1
+  (metacharacter-free refusal that exits non-zero through cmake -E false under Ninja
+  and Unix Makefiles) are implemented and probed (17/17 on a clearly labeled simulated
+  dumpbin, explicitly not Windows evidence). F1 is correct: windows-msvc-release pins
+  CVFORWIN_BUILD_TEST_BACKENDS=OFF so the release package stays uvc-only, and the new
+  windows-msvc-tests preset plus windows-tests-quality workflow run the camera/ABI/
+  lifecycle suites with the canonical command names intact. The CI workflow is
+  windows-2022 with least permissions (contents: read), no secrets, canonical
+  commands, release vs test-enabled jobs, a clean-consumer step, and uploads limited
+  to the verified release package ZIP and the symbols ZIP; both pinned action SHAs
+  were verified against the GitHub API as the exact current v4 tag targets
+  (PGP-verified commits), so the immutable refs and the "# v4" comments are truthful.
+  LICENSES covers every statically linked or redistributed component with eight
+  non-empty notices whose SPDX identities and versions match the pinned vcpkg install
+  log; no Daheng or vendor binary exists. Scope is clean (changed paths all inside
+  allowed_files; tests/package untouched by the developer with 5/5 CVF-008 and 47/47
+  manifest hash matches recorded by the test owner) and the package-consumer kit is a
+  sound standalone design wired to the staged package path. No blocking findings;
+  Windows execution remains a contract-sanctioned deferral.
+blocking_findings: []
+non_blocking_findings:
+  - id: NB-1
+    severity: low
+    area: package verification / runtime dependency allowlist
+    finding: >-
+      Both allowlist implementations accept any dependent DLL whose lowercased name
+      starts with the prefix "mf", so a non-system library such as mfc140u.dll (or any
+      other mf* binary) would be silently allowed. The build does not use MFC, so the
+      practical risk is low, but the one-DLL/no-non-system-dependency invariant is
+      checked less strictly than intended for that entry.
+    evidence: >-
+      cmake/CvfPackageVerify.cmake.in line 202 (prefix list contains "mf");
+      tests/package/package_checks.cmake line 235 (same list);
+      vcruntime140.dll rejection probe in log 09 shows the general mechanism works.
+    required_action: >-
+      Optional hardening at the next packaging touch: replace the bare "mf" prefix with
+      exact system names (mf.dll, mfplat.dll, mfreadwrite.dll, mfuuid.dll) in both
+      scripts, coordinating the tests/package copy with the test owner since it is
+      hash-pinned.
+  - id: NB-2
+    severity: low
+    area: export-set verification robustness
+    finding: >-
+      The dumpbin /exports row regex captures only names starting with [A-Za-z_], so a
+      hypothetical extra C++-mangled export (?-prefixed) would not appear in the
+      observed set and would not trip the "exactly five exports" comparison. Under the
+      .def allowlist model no such export can occur, so this is a detection gap rather
+      than an active defect.
+    evidence: >-
+      cmake/CvfPackageVerify.cmake.in line 181; tests/package/package_checks.cmake
+      line 212 (identical regex).
+    required_action: >-
+      Optional: broaden the row regex (e.g. allow a leading '?') or additionally assert
+      the dumpbin "number of functions/names" counts equal 5. No change required for
+      this change.
+  - id: NB-3
+    severity: info
+    area: documentation accuracy
+    finding: >-
+      docs/build.md documents CVFORWIN_BUILD_SHARED as a functional ON/OFF option, but
+      the option is never consulted (the shared library target is created
+      unconditionally), so setting it OFF has no effect and the documented behavior is
+      misleading.
+    evidence: >-
+      docs/build.md line 77; grep shows cmake/CvfOptions.cmake line 45 is the only
+      occurrence besides the docs (option declared but unused).
+    required_action: >-
+      Optional: either enforce the option in CMakeLists.txt or label it as
+      informational/reserved in the docs at the next build-file or docs touch.
+  - id: NB-4
+    severity: info
+    area: evidence quality
+    finding: >-
+      The persisted build log .ai/validation/cvf008-developer/02-build.log is
+      "ninja: no work to do", so it is not a clean-build transcript and does not by
+      itself substantiate the "clean build, 0 compiler warnings" wording; the compile
+      is, however, substantiated by the ASan build log (11-asan-build.log lines 2-3
+      show main.c compiled and linked) and by the real example and negative-path runs.
+      The claim is not false, only weakly documented.
+    evidence: >-
+      .ai/validation/cvf008-developer/02-build.log (2 lines);
+      11-asan-build.log lines 2-3; 05-example-run.log; 14-example-negative-paths.log.
+    required_action: >-
+      Quality gate: record a fresh freeze-state build transcript (or note the
+      incremental log) when re-running the canonical chain.
+  - id: NB-5
+    severity: info
+    area: Windows release symbols archive (deferred)
+    finding: >-
+      The package-symbols target depends on a linker PDB existing in every
+      configuration, which rests on the newly pinned
+      CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=ProgramDatabase. This cannot be confirmed on
+      a portable host; if the Release linker PDB is absent the windows-ci symbols step
+      fails loudly (before any upload), so no false success is possible.
+    evidence: >-
+      cmake/CvfOptions.cmake lines 33-39; cmake/CvfPackage.cmake lines 92-105;
+      CMakePresets.json windows-msvc-release-symbols;
+      .ai/reports/CVF-008-implementation.yaml windows_deferred.
+    required_action: >-
+      Confirm the Release PDB during the first windows-2022 run; if absent, force the
+      linker debug flag (e.g. /DEBUG) for the release configuration. No local change
+      required for this verdict.
+independence_notes: >-
+  Test-set integrity is intact. tests/package/** was authored and hash-pinned by the
+  test owner (CVF-008 section of .ai/test-ownership.yaml) and the developer report
+  states it was not modified; the author report (5 hashes) and the verify report
+  (5/5 CVF-008 and 47/47 whole-manifest matches) agree with the manifest values, and I
+  inspected all five kit files: they are standalone (not registered in the main
+  build), derive expectations from the contract/brief, and contain no skips or
+  weakened assertions (missing dumpbin is itself a failure). The developer wired the
+  CI job only. Limitation of this session: the reviewer has no shell, so sha256 values
+  could not be recomputed locally; hash integrity rests on the mutually consistent
+  owner/developer recordings plus direct source inspection, and the quality gate
+  remains the authoritative executor. The Windows package/dumpbin/consumer execution
+  is deferred by the change contract and is recorded as deferred in every report; the
+  simulated-dumpbin harness and its logs are explicitly labeled non-Windows evidence.
+notes:
+  - "Assessment: C host example verified as intended (strict C11 over cvf_api.h only,
+     template labeling in the header and runtime banner, ABI probe, one inspect per
+     cycle, reload, shutdown, exit codes 0/1/2); real WSL evidence exits 0 with PASS
+     verdict, output_json and a captures path, and the negative paths exit 2 then 1."
+  - "Assessment: F3/F4/QE-1 implemented and probed; no -P body contains a literal
+     generator expression, the passed configuration is honored, package-verify performs
+     contents/exports/notices/allowlist/SHA checks, and the portable refusals exit
+     non-zero with clean messages under Ninja and Unix Makefiles."
+  - "Assessment: F1 preset split correct (release test-backends OFF; windows-msvc-tests
+     ON; windows-ci and windows-tests-quality workflows; canonical command names and
+     test presets present and consistent with the contract quality_commands)."
+  - "Assessment: CI workflow windows-2022, least permissions, no secrets, canonical
+     commands, release vs test-enabled jobs, clean-consumer step, uploads limited to
+     the verified package and the separate symbols archive; both action SHAs resolve to
+     the exact v4 tag commits (checked via the GitHub API)."
+  - "Assessment: LICENSES complete and auditable - eight notices with SPDX identities
+     and versions matching the pinned vcpkg install (opencv4 4.12.0, nlohmann-json
+     3.12.0, spdlog 1.17.0, fmt 12.2.0, Catch2 3.16.0, libjpeg-turbo 3.2.0, libpng
+     1.6.58, zlib 1.3.2); no Daheng or vendor binary; system DLLs and the separate PDB
+     artifact are correctly excluded."
+  - "Assessment: scope compliance clean; all changed paths are inside change
+     allowed_files (examples, config/examples, LICENSES, docs, workflow, cmake,
+     CMakeLists.txt, CMakePresets.json, and the allowed validation harness)."
+  - "Assessment: package-consumer kit design is sound and wired by the workflow to the
+     staged test-enabled package path
+     build/windows-msvc-tests/package/cvforwin-1.0.0; the release package itself is
+     covered by package-verify and abi-check, with the synthetic inspect deliberately
+     running against the test-enabled variant as the change contract specifies."
+  - "Approval scope: this verdict covers only the local frozen state of CVF-008.
+     Windows MSVC build/test/abi-check/package/package-verify, the real dumpbin export
+     and dependency checks, the symbols archive, the two artifact uploads, and the
+     clean package-consumer run remain deferred to windows-2022 CI and are not claimed
+     as passed; hosted-CI and hardware evidence obligations are not waived."
+required_actions:
+  - "quality_owner: re-run the canonical WSL chain on the frozen state (configure,
+     build, ctest, format-check, static-analysis, and the C host example end-to-end)
+     and record raw zero-exit output in .ai/reports/CVF-008-quality.yaml, independent of
+     the developer logs."
+  - "quality_owner: recompute all test-ownership sha256 values (47 files) and confirm
+     tests/package/** is byte-identical to the CVF-008 manifest entries."
+  - "release_owner: record the windows-2022 CI results (release and test-enabled jobs,
+     package-verify, symbols archive, clean package consumer) as the authoritative
+     Windows evidence, or the explicit deferral, with no substitution of WSL results."

@@ -1,0 +1,148 @@
+schema_version: 1
+change_id: CVF-005
+phase: VERIFY
+verified_at: 2026-09-15
+owner: test-engineer
+session: >-
+  Fresh verify session with implementation blindness preserved. Inputs used: the
+  CVF-005 test brief, the approved project contract, the seven owned
+  tests/unit/cvf005_* files, .ai/test-ownership.yaml, and CMakeLists.txt only
+  for runner configuration (CMakePresets.json is sandbox-denied to this role).
+  No production source, no
+  .ai/changes/**, no other .ai/reports/** artifact, no diff, and no
+  .ai/validation/cvf005-developer* file was read.
+environment: >-
+  WSL GCC preset wsl-gcc-debug (build/wsl-gcc-debug), VCPKG_ROOT=$HOME/vcpkg.
+  Commands were executed through the test-engineer-owned harness
+  .ai/validation/cvf005-test-engineer-verify.sh (+ -extra/-summary/-diag/
+  -crosscheck companions) because direct cmake invocations are sandbox-denied
+  for this role; no other role's harness or file was modified.
+commands:
+  - command: "export VCPKG_ROOT=$HOME/vcpkg && cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    counts: "configure ok; build files written to build/wsl-gcc-debug"
+    evidence: /tmp/opencode/cvf005-verify/configure.log
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    counts: "ninja: no work to do (all outputs current for the configured sources)"
+    evidence: /tmp/opencode/cvf005-verify/build.log
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "passed=242, failed=0, skipped=0"
+    evidence: /tmp/opencode/cvf005-verify/ctest-full.log
+  - command: "ctest --preset wsl-gcc-debug -R CVF-005 --output-on-failure"
+    exit_code: 0
+    counts: "passed=38, failed=0, skipped=0"
+    evidence: /tmp/opencode/cvf005-verify/ctest-cvf005.log
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    counts: "69 file(s) conform to .clang-format"
+    evidence: /tmp/opencode/cvf005-verify/format-check.log
+  - command: "ctest --preset wsl-gcc-debug -R CVF-005 --repeat until-fail:10"
+    exit_code: 0
+    counts: "10 rounds x 38 tests, passed=380, failed=0"
+    evidence: /tmp/opencode/cvf005-verify/ctest-cvf005-repeat10.log
+cvf005_selection:
+  registered_ctest_names_with_prefix: 38
+  ctest_name_range: "Test #10-#13 and Test #205-#238"
+  independent_test_engineer_cases: 34
+  independent_test_files:
+    - tests/unit/cvf005_test_support.h
+    - tests/unit/cvf005_error_codes_test.cpp
+    - tests/unit/cvf005_diagnostics_config_test.cpp
+    - tests/unit/cvf005_diagnostics_logging_test.cpp
+    - tests/unit/cvf005_capture_store_test.cpp
+    - tests/unit/cvf005_save_policy_test.cpp
+    - tests/unit/cvf005_retention_test.cpp
+  developer_authored_cases: 4
+  developer_case_names_observed:
+    - "CVF-005 a root with a trailing separator still yields direct children"
+    - "CVF-005 degraded diagnostics keeps the log path contract and never throws"
+    - "CVF-005 retention is non-recursive and only handles root regular files"
+    - "CVF-005 save reports image_write_error when the managed root is gone"
+  developer_cases_origin: >-
+    Discovered from the developer cvf_unit_tests target (tests/unit/test_*.cpp);
+    source was not read. All 4 executed and passed inside the canonical full run.
+  all_34_owned_cases_executed: true
+  skips_or_disabled: 0
+  hidden_or_shouldfail_tags: none
+ownership:
+  manifest: .ai/test-ownership.yaml
+  files_checked: 7
+  mismatches: []
+  hashes:
+    - path: tests/unit/cvf005_test_support.h
+      expected: 41d4009cc58bebc9c3220ddc3a1292d92209fe81c4730b1e86d538204d5bbd00
+      actual: 41d4009cc58bebc9c3220ddc3a1292d92209fe81c4730b1e86d538204d5bbd00
+      match: true
+    - path: tests/unit/cvf005_error_codes_test.cpp
+      expected: abd938bd7c61aa931c077b4d0a922e44b03e123069c14f0f9c63cecc2c4f5e58
+      actual: abd938bd7c61aa931c077b4d0a922e44b03e123069c14f0f9c63cecc2c4f5e58
+      match: true
+    - path: tests/unit/cvf005_diagnostics_config_test.cpp
+      expected: bffd7a751158a2e98ae057096b0ce0d0f961a08aef3e40aa31ea8487027ff07a
+      actual: bffd7a751158a2e98ae057096b0ce0d0f961a08aef3e40aa31ea8487027ff07a
+      match: true
+    - path: tests/unit/cvf005_diagnostics_logging_test.cpp
+      expected: 645437c7a745701244e3cca8234b71943470cdfdf562070bdbcf6d77bdff813f
+      actual: 645437c7a745701244e3cca8234b71943470cdfdf562070bdbcf6d77bdff813f
+      match: true
+    - path: tests/unit/cvf005_capture_store_test.cpp
+      expected: b40bdbc5574c2ab3af99d46902f8c6ca8fa488e15ecd254d3741143e699c5d41
+      actual: b40bdbc5574c2ab3af99d46902f8c6ca8fa488e15ecd254d3741143e699c5d41
+      match: true
+    - path: tests/unit/cvf005_save_policy_test.cpp
+      expected: 1d60adda8553a906cb88db3b21c1dd012cd12d9d730a889e0e4df4bb835b49bb
+      actual: 1d60adda8553a906cb88db3b21c1dd012cd12d9d730a889e0e4df4bb835b49bb
+      match: true
+    - path: tests/unit/cvf005_retention_test.cpp
+      expected: 936a86e7abd26926a4e5d26575ace32490b59c0b2fecf860b63b44facf10889e
+      actual: 936a86e7abd26926a4e5d26575ace32490b59c0b2fecf860b63b44facf10889e
+      match: true
+assertion_review:
+  files_reviewed: 7
+  method: >-
+    Full read of every owned file; checked for conditional/early-return skips,
+    hidden Catch2 tags, optional assertions, and setup liveness of the
+    environment-sensitive cases.
+  short_circuited_assertions: none
+  removed_or_weakened_assertions: none
+  notes:
+    - >-
+      B13 "an old symlink itself is not deleted": the no-follow timestamp fixture
+      result was INFO-only, so liveness was probed by running the case directly
+      with Catch2 -s; the fixture succeeded ("symlink no-follow timestamp
+      control: 1" repeated with each of the section's assertions), therefore the
+      old-symlink scenario was genuinely exercised. Assertions are unconditional.
+    - >-
+      B11 exact age-equality boundary is not representable deterministically
+      without an injectable clock (file age is always max_age + elapsed time at
+      call time), so the deterministic approximation probes one minute inside a
+      120 s window (kept) and one minute outside (deleted); documented in the
+      test source.
+    - >-
+      Runtime file-sink write failure (B6 file-write half) is not separately
+      induced: an already-open spdlog file descriptor keeps succeeding on Linux
+      after unlink/rename of its path, so no stable black-box fault injection
+      exists without implementation knowledge. Create-time sink failure with the
+      warning already set, callback containment, and never-throw are covered by
+      B5/B6 owned cases. Recorded as a residual coverage note, not a failure.
+    - >-
+      B4 rotation genuinely exercised: 40 entries x ~120 bytes against a
+      1024-byte limit with max_files=2 and max_files=1; file count stayed in
+      [1, max_files] and the newest entry remained readable.
+  edge_cases_added: 0
+  files_changed_in_verify: 0
+  ownership_manifest_updated: false
+failures: []
+blockers: []
+notes: >-
+  VERIFY PASS for the independent CVF-005 suite. All 7 owned files hash-match the
+  test-owner manifest byte-exact (no independence violation), all 34 owned cases
+  plus the 4 developer CVF-005 cases executed and passed inside the canonical
+  wsl-gcc-debug ctest run (242/242 overall, 0 skips), the owned suite is stable
+  over 10 consecutive rounds, and the owned files pass the canonical
+  format-check target. Evidence logs are in /tmp/opencode/cvf005-verify/;
+  test-engineer harness scripts are .ai/validation/cvf005-test-engineer-verify*.sh.
+  Static-analysis and sanitizer presets were outside this verify instruction and
+  were not run in this session.

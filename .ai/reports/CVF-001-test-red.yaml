@@ -1,0 +1,210 @@
+schema_version: 1
+change_id: CVF-001
+phase: AUTHOR
+generated_at: 2026-09-15
+author: test-engineer
+inputs:
+  - .ai/test-briefs/CVF-001.yaml
+  - .ai/project-contract.yaml
+implementation_context_used: none
+summary: >-
+  Four independent test translation units plus two isolation stub headers were
+  authored under tests/abi/ before implementation. RED is the expected compile
+  failure caused by the missing public header and the absent canonical build
+  preset. A spec-derived mock self-check (outside the repository) confirms the
+  tests themselves are compile-clean under -Wall -Wextra -Werror and fully green
+  (52 checks, 0 failures) against a specification-conformant surface, so the RED
+  failures are attributable to the missing header, not to test bugs.
+red_tests:
+  - tests/abi/test_c11_surface.c
+  - tests/abi/test_abi_runtime.c
+  - tests/abi/test_header_isolation.c
+  - tests/abi/test_cpp20_include.cpp
+case_inventory:
+  - file: tests/abi/test_c11_surface.c
+    brief_ids: [B1, B3, B4]
+    cases:
+      - name: B1_c11_surface_usage
+        expectation: "Every documented function, struct, field, constant and callback type is named in a strict C11 TU."
+      - name: B3_exact_constants
+        expectation: "ABI version, statuses 0..13, verdicts 0/1/2, init flags 1/2, and limits 128/128/65536/65536/1024/4096 are exact."
+      - name: B4_function_signatures
+        expectation: "All five functions assign to function pointers of the exact documented signatures; callback matches cvf_log_callback/CVF_CALL."
+  - file: tests/abi/test_cpp20_include.cpp
+    brief_ids: [B4]
+    cases:
+      - name: B4_cpp20_inclusion_and_exact_fields
+        expectation: "Header compiles as C++20; cvf_context stays opaque; all constants, field types and function signatures are exact; linked call to cvf_get_abi_version() returns 1."
+  - file: tests/abi/test_header_isolation.c
+    brief_ids: [B9]
+    cases:
+      - name: B9_header_self_containment
+        expectation: "Header compiles as C11 with -nostdinc using only stub <stdint.h>/<stddef.h>, so no C++/OpenCV/vendor/Windows header is required."
+  - file: tests/abi/test_abi_runtime.c
+    brief_ids: [B2, B5, B6, B7, B8]
+    cases:
+      - name: abi_version_is_1_without_initialization
+        brief: B2
+      - name: initialize_null_options_rejected
+        brief: B5 / negative
+      - name: initialize_null_out_context_rejected
+        brief: B5 / negative
+      - name: initialize_null_error_rejected
+        brief: B5 / negative
+      - name: initialize_struct_size_zero_rejected
+        brief: B5
+      - name: initialize_struct_size_minus_one_rejected
+        brief: B5 / boundary
+      - name: initialize_abi_version_zero_rejected
+        brief: B5
+      - name: initialize_abi_version_two_rejected
+        brief: B5 / boundary
+      - name: initialize_reserved_nonzero_not_ok
+        brief: B5 / negative
+      - name: initialize_unknown_flag_bit_rejected
+        brief: B5 / boundary 0x80000000
+      - name: initialize_callback_flag_without_callback_rejected
+        brief: B5 / boundary
+      - name: initialize_error_struct_size_zero_rejected
+        brief: boundary (v1 structs passed to functions)
+      - name: initialize_error_struct_size_minus_one_rejected
+        brief: boundary (v1 structs passed to functions)
+      - name: initialize_error_null_buffer_with_capacity_rejected
+        brief: buffer_rules (NULL buffer legal only with capacity 0)
+      - name: initialize_missing_config_root_reports_error
+        brief: B8 + B6
+      - name: initialize_error_message_capacity_zero
+        brief: B6
+      - name: initialize_error_message_capacity_one
+        brief: B6
+      - name: reload_recipes_null_context_invalid_context
+        brief: B7
+      - name: reload_recipes_null_context_null_error_not_ok
+        brief: negative
+      - name: shutdown_null_context_invalid_context
+        brief: B7
+      - name: inspect_null_context_invalid_context
+        brief: B7
+      - name: inspect_null_context_verdict_not_evaluated
+        brief: B7 + no-fake-OK (contract error_and_warning_rules)
+      - name: inspect_null_context_null_request_null_result_not_ok
+        brief: negative
+      - name: inspect_null_context_struct_size_zero_not_ok
+        brief: boundary (exact status underdetermined, see ambiguities)
+      - name: inspect_null_context_result_struct_size_zero_not_ok
+        brief: boundary (exact status underdetermined, see ambiguities)
+      - name: inspect_null_context_abi_version_two_not_ok
+        brief: boundary (exact status underdetermined, see ambiguities)
+commands:
+  - command: "gcc -std=c11 -Wall -Wextra -Werror -I include -fsyntax-only tests/abi/test_c11_surface.c"
+    exit_code: 1
+    counts: "compiled=0, failed=1, executed=0"
+    red_tests:
+      - B1_c11_surface_usage
+      - B3_exact_constants
+      - B4_function_signatures
+    observed: "tests/abi/test_c11_surface.c:16:10: fatal error: cvforwin/cvf_api.h: No such file or directory"
+  - command: "gcc -std=c11 -Wall -Wextra -Werror -I include -fsyntax-only tests/abi/test_abi_runtime.c"
+    exit_code: 1
+    counts: "compiled=0, failed=1, executed=0"
+    red_tests:
+      - abi_version_is_1_without_initialization
+      - all initialize/reload/inspect/shutdown validation cases above
+    observed: "tests/abi/test_abi_runtime.c:21:10: fatal error: cvforwin/cvf_api.h: No such file or directory"
+  - command: "gcc -std=c11 -Wall -Wextra -Werror -nostdinc -I tests/abi/isolation_stub -I include -fsyntax-only tests/abi/test_header_isolation.c"
+    exit_code: 1
+    counts: "compiled=0, failed=1, executed=0"
+    red_tests:
+      - B9_header_self_containment
+    observed: "tests/abi/test_header_isolation.c:18:10: fatal error: cvforwin/cvf_api.h: No such file or directory"
+  - command: "g++ -std=c++20 -Wall -Wextra -Werror -I include -fsyntax-only tests/abi/test_cpp20_include.cpp"
+    exit_code: 1
+    counts: "compiled=0, failed=1, executed=0"
+    red_tests:
+      - B4_cpp20_inclusion_and_exact_fields
+    observed: "tests/abi/test_cpp20_include.cpp:18:10: fatal error: cvforwin/cvf_api.h: No such file or directory"
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 1
+    counts: "configured=0, failed=1"
+    red_tests: []
+    observed: "CMake Error: Could not read presets from /home/administrator/c_cpp_project/cvforwin: File not found: CMakePresets.json"
+failures:
+  - test: tests/abi/test_c11_surface.c
+    expected: "Compiles under gcc -std=c11 -Wall -Wextra -Werror once include/cvforwin/cvf_api.h exists."
+    observed: "exit 1; fatal error: cvforwin/cvf_api.h: No such file or directory"
+  - test: tests/abi/test_abi_runtime.c
+    expected: "Compiles under gcc -std=c11 -Wall -Wextra -Werror once include/cvforwin/cvf_api.h exists."
+    observed: "exit 1; fatal error: cvforwin/cvf_api.h: No such file or directory"
+  - test: tests/abi/test_header_isolation.c
+    expected: "Compiles with -nostdinc and the isolation stubs once include/cvforwin/cvf_api.h exists."
+    observed: "exit 1; fatal error: cvforwin/cvf_api.h: No such file or directory"
+  - test: tests/abi/test_cpp20_include.cpp
+    expected: "Compiles under g++ -std=c++20 -Wall -Wextra -Werror once include/cvforwin/cvf_api.h exists."
+    observed: "exit 1; fatal error: cvforwin/cvf_api.h: No such file or directory"
+  - test: canonical wsl-gcc-debug configure
+    expected: "cmake --preset wsl-gcc-debug configures the CVF-001 build so tests can run via ctest later."
+    observed: "exit 1; CMakePresets.json not found (build bootstrap not yet delivered; VCPKG_ROOT also unset per .ai/workflow-state.yaml)."
+harness_self_check:
+  purpose: >-
+    Prove the independent tests contain no harness bugs and can reach a fully
+    green state on a specification-conformant surface. Not implementation
+    evidence; the mock is outside the repository and was reconstructed only from
+    the brief's public_surface_reference.
+  mock_location: /tmp/opencode/tests/cvf001-mock
+  commands:
+    - command: "gcc -std=c11 -Wall -Wextra -Werror -I <mock>/include -fsyntax-only tests/abi/test_c11_surface.c"
+      exit_code: 0
+    - command: "gcc -std=c11 -Wall -Wextra -Werror -I <mock>/include -fsyntax-only tests/abi/test_abi_runtime.c"
+      exit_code: 0
+    - command: "gcc -std=c11 -Wall -Wextra -Werror -nostdinc -I tests/abi/isolation_stub -I <mock>/include -fsyntax-only tests/abi/test_header_isolation.c"
+      exit_code: 0
+    - command: "g++ -std=c++20 -Wall -Wextra -Werror -I <mock>/include -fsyntax-only tests/abi/test_cpp20_include.cpp"
+      exit_code: 0
+    - command: "link tests/abi/test_abi_runtime.c against mock_cvf_api.o and run"
+      exit_code: 0
+      counts: "checks=52, failures=0, skipped=0"
+    - command: "link tests/abi/test_cpp20_include.cpp against mock_cvf_api.o and run"
+      exit_code: 0
+      counts: "checks=1, failures=0, skipped=0"
+execution_harness: .ai/validation/cvf-001-author-red.sh
+ambiguities:
+  - case: inspect_null_context_struct_size_zero_not_ok / inspect_null_context_result_struct_size_zero_not_ok / inspect_null_context_abi_version_two_not_ok
+    issue: >-
+      The brief pins CVF_STATUS_INVALID_CONTEXT only for otherwise well-formed
+      request/result structures, and pins struct_size/abi_version statuses
+      without stating which validation runs first. With a malformed struct and a
+      null context simultaneously, the exact status is underdetermined.
+    handling: "Only no-crash and non-OK (no fake OK) are asserted; no exact status is guessed."
+  - case: initialize_reserved_nonzero_not_ok
+    issue: >-
+      No successful initialize exists in this change (nonexistent config root is
+      the only reachable path), so a nonzero-reserved rejection cannot be
+      isolated from the config failure; both are non-OK.
+    handling: "Only the brief's documented non-OK property is asserted."
+  - case: initialize_error_message_capacity_zero / initialize_error_message_capacity_one
+    issue: >-
+      The brief does not state whether an undersized error buffer changes the
+      returned status. The tests assert the operation status is unchanged and
+      message_bytes_required is identical to the full-capacity run, derived from
+      B6 (required reports the needed size even when the buffer is too small)
+      plus deterministic error reporting.
+    handling: "Asserted with traceability to B6; flagged for reviewer attention."
+ownership:
+  manifest: .ai/test-ownership.yaml
+  files_checked: 6
+  mismatches: []
+blockers:
+  - >-
+    Canonical ctest-based RED is not reachable yet: CMakePresets.json,
+    CMakeLists.txt and VCPKG_ROOT are absent, so cmake --preset wsl-gcc-debug
+    fails before any test target exists. This is expected for CVF-001 authoring;
+    the developer wires tests/abi into the build.
+  - >-
+    Linking tests against the runtime library is not possible until the
+    implementation exists; RED is therefore compile-failure evidence only, as
+    the brief anticipates.
+  - >-
+    The command sandbox permits execution only via .ai/validation/* and named
+    test-runner patterns; the canonical gcc/g++/cmake commands were run through
+    .ai/validation/cvf-001-author-red.sh (harness tooling created by
+    test-engineer). No other .ai file was modified.

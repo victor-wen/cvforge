@@ -1,0 +1,96 @@
+schema_version: 1
+change_id: CVF-008
+program: cvforwin-implementation-1.0.0
+title: "Native C host example, example configs, package/CI fixes (F3/F4/QE-1/F1), licenses, docs, package-consumer test kit"
+risk: R2
+risk_justification: >-
+  Completes the approved delivery surface (examples, docs, licenses, CI workflow, packaging
+  fixes) inside the baseline. No public ABI, schema, module-boundary, or dependency change.
+  Packaging/CI execution evidence is Windows-only and deferred to windows-2022 CI.
+intent: >-
+  Deliver the native C consumer example and example configuration/recipes, fix the known
+  packaging defects (F3 script-mode $<CONFIG>, F4 package-verify placeholder, QE-1 refusal-path
+  quoting), resolve the Windows test-preset gap (F1) with a test-enabled preset, add third-party
+  notices and usage/schema docs, and author the clean package-consumer test kit for CI.
+scope:
+  allowed_files:
+    production:
+      - examples/c_host/**
+      - config/examples/**
+      - LICENSES/**
+      - docs/**
+      - .github/workflows/**
+      - cmake/**
+      - CMakeLists.txt
+      - CMakePresets.json
+    package_tests:
+      - tests/package/**
+    developer_tests:
+      - tests/unit/** (files not matching cvf00*_* independent names)
+    evidence_harness:
+      - .ai/validation/**
+  out_of_scope:
+    - include/cvforwin/**
+    - src/**
+    - tests/abi/**, tests/camera/**, tests/unit/cvf00*_*
+    - .ai/project-contract.yaml
+interface_v1:
+  c_host_example:
+    path: "examples/c_host/main.c (+ CMakeLists.txt)"
+    behavior: >-
+      Strict C11 consumer using only cvf_api.h: query ABI version, cvf_initialize with an
+      example config (test-enabled synthetic or file backend for local runs), cvf_inspect once
+      per cycle (report status/verdict/elapsed/output excerpt/image path), optionally
+      cvf_reload_recipes, cvf_shutdown. Non-zero exit on any failure; no C++ knowledge.
+  example_config:
+    path: "config/examples/{cvforwin.json,recipes/*.json}"
+    behavior: "Valid schema_version 1 documents demonstrating logging/retention settings and the example.threshold recipe (documented as a template, not a production algorithm)."
+  packaging_fixes:
+    - "F3: cmake/CvfPackage.cmake.in must expand the configuration correctly in script mode (no literal $<CONFIG>); the package target must locate build outputs via the passed configuration."
+    - "F4: implement package-verify (package contents, exactly five exports, notices, runtime dependency allowlist) or make the target fail with a clear unimplemented message only when explicitly unsupported; windows-ci must be able to pass once implemented."
+    - "QE-1: fix the package refusal-path shell quoting so the portable refusal exits nonzero without a shell syntax error."
+    - "F1: add a Windows test configuration preset (test backends ON) so the camera/ABI suites run on MSVC; keep windows-msvc-release test-backends OFF so the release package never contains test backends."
+  ci_workflow:
+    path: ".github/workflows/windows.yml"
+    behavior: >-
+      windows-2022, immutable action references, least permissions, no secrets in logs; runs the
+      canonical windows commands (release), the test-enabled Windows suite, package +
+      package-verify, and the clean package-consumer build; uploads only the verified package
+      and a separate symbols archive.
+  package_consumer:
+    path: "tests/package/**"
+    behavior: >-
+      Independent clean consumer kit: a standalone CMake project + C11 source that configures,
+      compiles, links, and runs against an installed package (CVF_PACKAGE_ROOT), performing a
+      synthetic inspect via the package's supported test-enabled build, plus content checks
+      (DLL, import lib, header, example config, notices, no non-system runtime DLL). Executed by
+      windows-ci only.
+invariants:
+  - "The example host and example config are clearly marked as templates, not production inspection."
+  - "Licenses/notices cover every statically linked or redistributed third-party component; no Daheng or vendor binary appears."
+  - "CI uses immutable action references and the canonical command names; no secrets are logged."
+  - "The release package contains exactly one project runtime DLL and no non-system runtime DLL dependency."
+verification:
+  portable_wsl:
+    - "cmake --preset wsl-gcc-debug"
+    - "cmake --build --preset wsl-gcc-debug --parallel"
+    - "ctest --preset wsl-gcc-debug --output-on-failure"
+    - "run the built C host example end-to-end on WSL with the synthetic backend (real exit code)"
+    - "cmake --build --preset wsl-gcc-debug --target format-check"
+    - "cmake --preset wsl-clang-analysis && cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+  deferred:
+    - "windows_msvc configure/build/test/abi-check/package/package-verify, windows-ci workflow, clean package consumer, runtime dependency allowlist, notices packaging: windows-2022 CI."
+acceptance_reference: >-
+  Contract acceptance_checks 3 (C11 sample host), 11 (verified package contents/notices) and
+  FR-018 (deterministic example algorithm/recipes/consumer), with Windows evidence deferred.
+rollback: "Remove examples/, config/examples/, LICENSES/, docs/, the workflow, tests/package/, and revert the packaging/preset fixes."
+reporting:
+  developer_report: .ai/reports/CVF-008-implementation.yaml
+  test_red_report: .ai/reports/CVF-008-test-red.yaml
+  test_verify_report: .ai/reports/CVF-008-test-verify.yaml
+  review_report: .ai/reviews/CVF-008.yaml
+  quality_report: .ai/reports/CVF-008-quality.yaml
+notes:
+  - "The C host example must be runnable locally on WSL against the test-enabled build — its exit code is real acceptance evidence for the lifecycle."
+  - "Package-consumer kit and CI results are deferred to windows-2022; do not fabricate them."
+  - "Carry-over items from CVF-001/002 reviews: F3, F4, QE-1, F1 (this change)."

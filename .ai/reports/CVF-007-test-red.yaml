@@ -1,0 +1,238 @@
+schema_version: 1
+change_id: CVF-007
+phase: AUTHOR
+owner: test-engineer
+recorded_at: 2026-09-15
+suite: hardware_uvc
+result: "RED (structural; execution deferred to a designated Windows station)"
+
+honesty_statement: >-
+  This report claims no Windows compile or run output. The authoring host is WSL:
+  there is no Windows, no Media Foundation, and no camera, and src/camera/uvc_windows
+  does not exist yet (the CVF-007 implementation is not authored). The suite is
+  entirely inside "#if defined(_WIN32)"; on this host the translation unit is empty by
+  design. The evidence below is exactly what this host can produce: formatting, a
+  forced "-D_WIN32" probe that fails at the missing implementation header, and a
+  shadow-compile of the Windows body against a throwaway test-side stub. Execution
+  evidence stays deferred until the developer wires the opt-in CMake target and a
+  Windows 10/11 x64 station with a UVC camera runs the suite. Nothing here may be
+  presented as a PASS of the hardware suite.
+
+artifacts:
+  - path: tests/hardware/uvc_smoke.cpp
+    role: independent black-box hardware smoke suite (deliverable; Windows-only)
+    sha256: 02141468189556cae2f71985f65a6009b63d37aeb148c2faf3eeb3feeb5ff69c
+  - path: .ai/validation/cvf007-test-engineer-author.sh
+    role: author-phase harness (clang-format, syntax probes, hashes); not a test source
+    sha256: bcf074de14ceb45fdc27efec38f88412d85893ece0acc8b0e00f62a896300db0
+ownership_manifest: .ai/test-ownership.yaml   # CVF-007 section appended; other sections byte-exact
+
+cases:
+  - id: H1
+    location: "tests/hardware/uvc_smoke.cpp :: check_enumeration()"
+    trace: "brief observable_behaviors H1"
+    checks:
+      - "backend.backend_key() == \"uvc\""
+      - "enumerate(deadline) succeeds"
+      - "every enumerated descriptor has backend_key \"uvc\" and a non-empty device_path"
+      - "vendor_id/product_id are empty or exactly 4 lowercase hex (descriptor contract)"
+      - "exposed optional identity fields are printed; fields the OS does not expose are not fabricated or required"
+    category: acceptance
+
+  - id: H2
+    location: "tests/hardware/uvc_smoke.cpp :: run_suite(), run_resolution_cases()"
+    trace: "brief observable_behaviors H2"
+    checks:
+      - "empty selector -> invalid_argument/selector_empty (never a first-device fallback)"
+      - "selector matching no enumerated device -> camera_not_found/camera_not_found"
+      - "selector matching multiple devices (synthetic twin pair) -> camera_not_found/camera_identity_ambiguous"
+      - "operator selector from CVF_HW_UVC_DEVICE_PATH/VID/PID/NAME is mandatory and must resolve exactly one device"
+    category: acceptance
+
+  - id: "H2 boundary: friendly_name-only selector"
+    location: "tests/hardware/uvc_smoke.cpp :: run_resolution_cases()"
+    trace: "brief boundary_cases item 1"
+    checks:
+      - "friendly_name-only selector resolves the same descriptor, or fails per rules (ambiguous/not found), never a fallback"
+      - "friendly_name matching is exact: a suffixed name yields camera_not_found"
+      - "skipped with a reason if the device exposes no friendly_name"
+    category: boundary
+
+  - id: "H2 boundary: zero devices attached"
+    location: "tests/hardware/uvc_smoke.cpp :: run_suite()"
+    gate: "CVF_HW_EXPECT_ZERO_DEVICES=1 (camera-less station)"
+    trace: "brief boundary_cases item 2"
+    checks:
+      - "enumerate is empty"
+      - "resolution fails with camera_not_found/camera_not_found"
+    category: boundary
+
+  - id: H3
+    location: "tests/hardware/uvc_smoke.cpp :: run_open_capture_close_session()"
+    trace: "brief observable_behaviors H3"
+    checks:
+      - "open with the resolved descriptor and configured settings (default 640x480 BGR8, env-overridable) succeeds"
+      - "three consecutive captures return owned BGR8 frames with the configured dimensions and strictly increasing sequence"
+      - "consecutive frames do not alias one pixel buffer"
+      - "close() is idempotent (called twice) and capture afterwards fails with camera_io, no crash"
+      - "the backend can reopen the same descriptor and capture again"
+      - "held pixels stay valid after close and backend destruction"
+    category: acceptance
+
+  - id: H4
+    location: "tests/hardware/uvc_smoke.cpp :: run_repeated_cycles_case()"
+    trace: "brief observable_behaviors H4"
+    checks:
+      - "50 repeated captures (CVF_HW_CYCLES overridable) all return valid BGR8 frames with configured dimensions and increasing sequence"
+      - "one further capture succeeds after the loop"
+      - "the device is still enumerated after the loop (no resource exhaustion)"
+    category: acceptance
+
+  - id: H5
+    location: "tests/hardware/uvc_smoke.cpp :: run_expired_deadline_case()"
+    trace: "brief observable_behaviors H5"
+    checks:
+      - "capture with an already-expired deadline (core::Deadline::immediate()) -> timeout/capture_timed_out"
+      - "a normal capture afterwards succeeds (device not wedged)"
+    category: acceptance
+
+  - id: H6
+    location: "tests/hardware/uvc_smoke.cpp :: run_manual_replug_case()"
+    gate: "CVF_HW_UNPLUG_TEST=1 plus an interactive console; unset -> reported skipped, never runs automatically"
+    trace: "brief observable_behaviors H6 and constraints"
+    checks:
+      - "first capture after unplug fails with camera_io"
+      - "bounded capture_with_one_retry fails with camera_io while the device is absent, within deadline + 2000 ms slack"
+      - "after replug into the same USB port, one bounded reconnect + recapture recovers with a valid BGR8 frame"
+      - "the at-most-one-retry rule itself is pinned deterministically by the hardware-free CVF-002 suite; this case observes the bounded recovery end to end"
+    category: acceptance, manual
+
+  - id: "negative: open before resolve / stale descriptor"
+    location: "tests/hardware/uvc_smoke.cpp :: run_negative_cases()"
+    trace: "brief negative_cases"
+    checks:
+      - "capture before open fails with status camera_io, no crash"
+      - "open with a fabricated stale descriptor fails with status camera_not_found, no crash; the exact detail code is printed, not pinned"
+      - "close() on a never-opened backend returns without crashing"
+    category: negative
+
+commands:
+  - command: "bash .ai/validation/cvf007-test-engineer-author.sh format"
+    exit_code: 0
+    observed: >-
+      clang-format -i exit 0; clang-format --dry-run --Werror exit 0 (idempotent, hash
+      unchanged); "g++ -std=c++20 -Wall -Wextra -Werror -fsyntax-only -I src -I include
+      tests/hardware/uvc_smoke.cpp" (no _WIN32) exit 0 = empty translation unit, guard
+      verified; forced probe "g++ -std=c++20 -fsyntax-only -D_WIN32 -I src -I include
+      -I <opencv4 include> tests/hardware/uvc_smoke.cpp" exit 1 with first diagnostic
+      "fatal error: camera/uvc_windows/uvc_backend.h: No such file or directory"
+      (expected structural RED: implementation not authored).
+  - command: "bash .ai/validation/cvf007-test-engineer-author.sh stub"
+    exit_code: 0
+    observed: >-
+      Harness generates a throwaway stub of the assumed UVC interface under
+      /tmp/opencode, then "g++ -std=c++20 -Wall -Wextra -fsyntax-only -D_WIN32 -I src
+      -I include -I <opencv4 include> -I <stub dir> tests/hardware/uvc_smoke.cpp" exits 0
+      with zero warnings/errors. This is author self-checking against the real frozen
+      headers + real OpenCV headers only; it is NOT Windows build evidence, and the stub
+      is never part of the repository.
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    observed: >-
+      100% tests passed, 0 tests failed out of 262 (4.41 s). The hardware suite is not
+      registered in any target, so the portable WSL suite is unaffected by this change.
+
+red_tests: []
+red_note: >-
+  No case from this suite executed in this session; none can execute on WSL. The only RED
+  artifact is the forced -D_WIN32 compile failure at the missing
+  src/camera/uvc_windows/uvc_backend.h. Deferred execute evidence is required on the
+  Windows station before this suite can be reported green.
+
+deferred_execution:
+  required_environment: "Windows 10/11 x64, MSVC v143, UVC camera attached to a known port, interactive console"
+  required_wiring: "see developer_wiring below; the target must exist before any execution claim"
+  operator_steps:
+    - "configure with -DCVFORWIN_BUILD_HARDWARE_TESTS=ON"
+    - "run the built executable with --list and record the identity"
+    - "set CVF_HW_UVC_DEVICE_PATH (or VID/PID/NAME) and run the suite; it must refuse to run without a selector"
+    - "for the manual case set CVF_HW_UNPLUG_TEST=1 and follow the two on-screen prompts (unplug, then replug into the same USB port)"
+    - "record raw command, exit code, and output on the station; add the verify report via the test owner"
+
+developer_wiring:
+  - id: W1
+    required: >-
+      Add CMake option CVFORWIN_BUILD_HARDWARE_TESTS (BOOL, default OFF) and register the
+      hardware target only on WIN32.
+  - id: W2
+    required: >-
+      The target (suggested name cvf_hw_uvc_smoke) builds tests/hardware/uvc_smoke.cpp as
+      an executable and links the UVC backend library plus opencv_core; include dirs src/
+      and include/ cover the frozen headers.
+  - id: W3
+    required: >-
+      Do not add this target to ctest or to the mandatory wsl_*/windows_full_quality
+      workflows; it is opt-in hardware evidence only.
+  - id: W4
+    required: >-
+      Implement the assumed interface exactly (assumption A1): src/camera/uvc_windows/uvc_backend.h
+      declares a default-constructible cvforwin::camera::UvcCameraBackend implementing
+      cvforwin::camera::ICameraBackend and reporting backend_key() == "uvc".
+  - id: W5
+    required: >-
+      tests/hardware/uvc_smoke.cpp is hash-pinned by the test owner and must not be edited by
+      the developer; if a different interface spelling is planned, coordinate through this
+      report before verify.
+
+assumptions:
+  - id: A1
+    assumption: >-
+      Concrete backend spelling: cvforwin::camera::UvcCameraBackend declared in
+      src/camera/uvc_windows/uvc_backend.h, default-constructible, implementing ICameraBackend,
+      backend_key() == "uvc". src/camera/uvc_windows is absent at authoring time; the two
+      static_asserts in the suite pin this single coordination point.
+    source: "brief interface_reference names only ICameraBackend and backend_key \"uvc\"; spelling mirrors FileCameraBackend/SyntheticCameraBackend"
+  - id: A2
+    assumption: "CameraSettings width/height/frame_rate/preferred_format carry the configured settings; suite defaults are 640x480, bgr8, fps 0 (backend default)."
+    source: "frozen src/camera/camera_backend.h read through the sanctioned harness; brief H3 'configured dimensions'"
+  - id: A3
+    assumption: "close() is idempotent and safe on a never-opened backend; capture after close fails with broad status camera_io (detail code printed, not pinned)."
+    source: "brief H3 'close is idempotent'; frozen CVF-002 closed-session semantics"
+  - id: A4
+    assumption: "open with a stale/unresolved descriptor fails with broad status camera_not_found; the exact detail code is printed but not pinned."
+    source: "brief negative_cases 'documented failure, no crash'; contract invariant 'no first-device fallback'"
+  - id: A5
+    assumption: "The multiple-match case is built from a synthetic twin pair only; no test path reads the first enumerated descriptor or falls back to a device."
+    source: "brief constraints 'Never fall back to the first device in any test path'"
+  - id: A6
+    assumption: "Sequence is asserted strictly increasing, not pinned to an absolute start value."
+    source: "brief H3 'an incrementing sequence'"
+  - id: A7
+    assumption: "If the OS exposes no friendly_name, the friendly_name-only boundary is skipped with a reason; the same boundary is covered deterministically on synthetic candidates by the CVF-002 suite."
+    source: "brief H1 'where the OS exposes them'"
+  - id: A8
+    assumption: "The failed bounded retry in H6 must return within deadline + 2000 ms slack; the measured elapsed time is printed."
+    source: "brief H6 'bounded reconnect'; deterministic boundedness is pinned by the CVF-002 B9/B10 suite"
+  - id: A9
+    assumption: "Standalone self-checking executable, no test framework; exit 0 = all executed checks passed (manual skip allowed), exit 1 = at least one failure."
+    source: "task instruction 'simple self-checking main so it can run standalone on a station'"
+  - id: A10
+    assumption: >-
+      Interactive read access is denied by the sandbox for src/** and CMakePresets.json; the
+      frozen interface declaration surfaces were obtained through the allowed
+      .ai/validation harness. No .cpp implementation file was opened, and
+      .ai/changes/**, .ai/reports/**, diffs, changed-file lists, and developer notes were
+      not read.
+    source: "sandbox permission rules; brief allowed_context/forbidden_context"
+
+ownership:
+  manifest: .ai/test-ownership.yaml
+  change: CVF-007
+  owner: test-engineer
+  files_checked: 1
+  mismatches: []
+
+blockers:
+  - "Windows execution pending: no Windows host, Media Foundation, or camera in the authoring environment (by design)."
+  - "Implementation absent: src/camera/uvc_windows does not exist; the forced -D_WIN32 probe is RED at the missing header."
+  - "CMake target not wired: the developer must add CVFORWIN_BUILD_HARDWARE_TESTS (default OFF, WIN32-only)."

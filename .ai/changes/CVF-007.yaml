@@ -1,0 +1,91 @@
+schema_version: 1
+change_id: CVF-007
+program: cvforwin-implementation-1.0.0
+title: "UVC Windows backend (Media Foundation) + runtime factory integration"
+risk: R2
+risk_justification: >-
+  Implements the approved uvc_windows_backend module and wires it into the existing runtime
+  factory on Windows. No public ABI, config schema, dependency-family, or invariant change.
+  Windows-only sources are excluded from portable builds; Windows compile/ABI evidence is
+  deferred to windows-2022 CI and representative hardware per the contract.
+intent: >-
+  Provide the driverless UVC camera path on Windows: Media Foundation enumeration with stable
+  identity attributes (symbolic link and/or VID/PID/friendly name), exactly-one resolution,
+  open/configure/capture/close with deadline, one bounded reconnect/recapture, and Windows
+  frames converted to backend-neutral CapturedFrame values.
+scope:
+  allowed_files:
+    production:
+      - src/camera/uvc_windows/**
+      - src/runtime/**
+      - CMakeLists.txt
+      - cmake/**
+    hardware_tests:
+      - tests/hardware/**
+    developer_tests:
+      - tests/unit/** (files not matching cvf00*_* independent names)
+    evidence_harness:
+      - .ai/validation/**
+  out_of_scope:
+    - include/cvforwin/**
+    - src/c_api/**
+    - src/camera/camera_backend.*
+    - src/camera/test_backends/**
+    - src/recipes/**
+    - src/diagnostics/**
+    - src/artifacts/**
+    - examples/**
+    - docs/**
+    - .github/**
+    - .ai/project-contract.yaml
+interface_v1:
+  authority_note: >-
+    The UVC backend implements the existing camera::ICameraBackend contract (CVF-002) with
+    backend_key "uvc"; descriptors expose Windows Media Foundation identity attributes.
+  files:
+    - "src/camera/uvc_windows/uvc_backend.h"
+    - "src/camera/uvc_windows/uvc_backend.cpp"
+  descriptor_mapping:
+    - "device_path = MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK (wide string converted to UTF-8)"
+    - "vendor_id/product_id = 4-hex-digit lowercase from MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_... / device instance ID parsing"
+    - "friendly_name = MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME (UTF-8)"
+  behavior:
+    - "enumerate returns every video-capture device with the attributes above; resolution uses the existing resolve_identity rules (zero/multiple matches fail; no first-device fallback)."
+    - "open: activate the resolved Media Foundation device source, create the source reader, select the closest supported format for the requested width/height/frame rate/pixel format preference; convert native frames (and any required color conversion) into an owned BGR8 cv::Mat."
+    - "capture: honor the deadline; on timeout return timeout/capture_timed_out."
+    - "reconnect: release and re-activate the device, one bounded retry is enforced by capture_with_one_retry."
+    - "close: deterministic COM/resource teardown; idempotent."
+    - "Error mapping: missing/ambiguous device -> camera_not_found; device or stream failure -> camera_io (+ camera_disconnected/capture_failed details); deadline expiry -> timeout."
+    - "Windows-only: entire implementation guarded by _WIN32 and built only under if(WIN32); no vendor SDK, Media Foundation system libraries only."
+  runtime_integration:
+    - "The runtime backend factory selects the UVC backend for config backend \"uvc\" on Windows builds; on non-Windows builds the same config fails with camera_not_found (backend unavailable)."
+  hardware_tests:
+    - "tests/hardware/uvc_smoke.cpp (Windows-only, opt-in): stable identity selection, acquisition of N frames with image integrity checks, repeated-cycle resource stability, optional unplug/replug retry when explicitly enabled by environment variable. Never falls back to the first device; never runs in mandatory CI."
+invariants:
+  - "No Daheng/vendor SDK headers, binaries, or runtime dependencies."
+  - "No inspection, recipe, or public ABI coupling in the UVC module."
+  - "Device matching resolves exactly one configured identity or fails; no first-device fallback."
+  - "Portable WSL builds are unaffected: the module is excluded and all existing tests stay green."
+verification:
+  portable_wsl:
+    - "cmake --preset wsl-gcc-debug"
+    - "cmake --build --preset wsl-gcc-debug --parallel"
+    - "ctest --preset wsl-gcc-debug --output-on-failure (unchanged 262/262)"
+    - "cmake --build --preset wsl-gcc-debug --target format-check"
+    - "cmake --preset wsl-clang-analysis && cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+  deferred:
+    - "Windows MSVC build, ABI/export checks, and the opt-in UVC hardware smoke suite: windows-2022 CI + designated hardware (contract: WSL is never Windows ABI evidence; hosted CI has no camera)."
+acceptance_reference: >-
+  Contract FR-006/FR-011/FR-012 and acceptance_checks 7 (no first-device fallback, at most one
+  reconnect/recapture) and 14 (Daheng remains unimplemented with no SDK dependency), with the
+  Windows/hardware evidence deferred as documented.
+rollback: "Remove src/camera/uvc_windows/**, revert the runtime factory branch, remove tests/hardware/**."
+reporting:
+  developer_report: .ai/reports/CVF-007-implementation.yaml
+  test_red_report: .ai/reports/CVF-007-test-red.yaml
+  test_verify_report: .ai/reports/CVF-007-test-verify.yaml
+  review_report: .ai/reviews/CVF-007.yaml
+  quality_report: .ai/reports/CVF-007-quality.yaml
+notes:
+  - "The hardware suite cannot execute in this environment (no Windows, no camera); its evidence status is explicitly deferred, not faked."
+  - "Windows CI is not yet runnable from this workspace (no git remote/CI setup); that remains an outstanding release prerequisite tracked in workflow-state."

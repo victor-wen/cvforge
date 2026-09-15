@@ -1,0 +1,165 @@
+schema_version: 1
+change_id: CVF-002
+program: cvforwin-implementation-1.0.0
+title: "Camera contract + test camera backends (file/synthetic/fault) with Deadline and Result core additions"
+risk: R2
+risk_justification: >-
+  Implements the approved camera_contract and test_camera_backends modules inside the
+  baseline. No public ABI, schema, dependency-family, module-boundary, or invariant
+  change; adds bounded internal core types (Deadline, Result) and camera error codes
+  to core_model. Hardware UVC remains out of scope for this change.
+intent: >-
+  Establish the backend-neutral camera contract (identity, settings, captured frames,
+  deadlines, bounded capture with at most one reconnect/recapture) plus deterministic
+  file/synthetic/fault-injection backends, so camera fault behavior is fully testable
+  on WSL without hardware and the later UVC backend and runtime orchestrator can be
+  implemented against a stable internal interface.
+scope:
+  allowed_files:
+    production:
+      - src/core/result.h
+      - src/core/deadline.h
+      - src/core/deadline.cpp
+      - src/core/error.h
+      - src/core/error.cpp
+      - src/camera/camera_backend.h
+      - src/camera/camera_backend.cpp
+      - src/camera/captured_frame.h
+      - src/camera/test_backends/**
+      - CMakeLists.txt
+      - cmake/**
+    independent_tests:
+      - tests/camera/**
+    developer_tests:
+      - tests/unit/**
+    fixtures:
+      - tests/fixtures/camera/**
+    evidence_harness:
+      - .ai/validation/**
+  out_of_scope:
+    - include/cvforwin/**
+    - src/c_api/**
+    - src/camera/uvc_windows/**
+    - src/recipes/**
+    - src/inspection/**
+    - src/algorithms/**
+    - src/diagnostics/**
+    - src/artifacts/**
+    - src/runtime/**
+    - examples/**
+    - docs/**
+    - .github/**
+    - .ai/project-contract.yaml
+interface_v1:
+  authority_note: >-
+    Frozen internal interface for tests and implementation in this change. Namespaces
+    cvforwin::core and cvforwin::camera. Any later rename is a normal bounded change,
+    but tests and implementation within this change must use these spellings exactly.
+  core_additions:
+    result_h: "src/core/result.h"
+    deadline_h: "src/core/deadline.h"
+    result_api:
+      - "template <typename T> class Result { Result(T value); Result(Failure failure); bool has_value() const noexcept; explicit operator bool() const noexcept; T& value() &; const T& value() const&; T&& value() &&; const Failure& failure() const&; };"
+      - "template <> class Result<void> { Result() noexcept; Result(Failure failure); bool has_value() const noexcept; explicit operator bool() const noexcept; const Failure& failure() const&; };"
+      - "Accessing value() on an empty Result or failure() on a valued Result throws std::logic_error (internal misuse only; never crosses the C ABI)."
+      - "Result<void> default construction means success."
+    deadline_api:
+      - "class Deadline { static Deadline from_timeout_ms(std::uint32_t timeout_ms); static Deadline immediate(); bool expired() const noexcept; std::chrono::milliseconds remaining() const noexcept; };"
+      - "from_timeout_ms(0) is immediately expired; remaining() is clamped to >= 0 (saturating)."
+    error_codes_new:
+      - "camera_not_found = 1400 -> Status::camera_not_found"
+      - "camera_identity_ambiguous = 1401 -> Status::camera_not_found"
+      - "camera_not_open = 1402 -> Status::camera_io"
+      - "camera_disconnected = 1403 -> Status::camera_io"
+      - "capture_failed = 1404 -> Status::camera_io"
+      - "capture_timed_out = 1405 -> Status::timeout"
+      - "frames_exhausted = 1406 -> Status::camera_io"
+      - "deadline_expired = 1407 -> Status::timeout"
+      - "selector_empty = 1408 -> Status::invalid_argument"
+      - "descriptor_mismatch = 1409 -> Status::camera_not_found"
+  camera_contract:
+    captured_frame_h: "src/camera/captured_frame.h"
+    camera_backend_h: "src/camera/camera_backend.h"
+    types:
+      PixelFormat: "enum class PixelFormat : std::uint32_t { unknown = 0, mono8 = 1, bgr8 = 2, rgb8 = 3 };"
+      FrameMetadata: "struct FrameMetadata { std::uint64_t sequence; std::chrono::steady_clock::time_point captured_at; std::uint32_t width; std::uint32_t height; PixelFormat pixel_format; };"
+      CapturedFrame: "struct CapturedFrame { cv::Mat pixels; FrameMetadata metadata; }; pixels is always normalized BGR8 and owned; no backend handles."
+      CameraDescriptor: "struct CameraDescriptor { std::string backend_key; std::string device_path; std::string vendor_id; std::string product_id; std::string friendly_name; };"
+      CameraSelector: "struct CameraSelector { std::string device_path; std::string vendor_id; std::string product_id; std::string friendly_name; }; empty-string field = unspecified."
+      CameraSettings: "struct CameraSettings { std::uint32_t width; std::uint32_t height; double frame_rate; PixelFormat preferred_format; };"
+      ICameraBackend: "class ICameraBackend { virtual ~ICameraBackend() = default; virtual std::string_view backend_key() const noexcept = 0; virtual core::Result<std::vector<CameraDescriptor>> enumerate(const core::Deadline&) = 0; virtual core::Result<void> open(const CameraDescriptor&, const CameraSettings&, const core::Deadline&) = 0; virtual core::Result<CapturedFrame> capture(const core::Deadline&) = 0; virtual core::Result<void> reconnect(const CameraSettings&, const core::Deadline&) = 0; virtual void close() noexcept = 0; };"
+    free_functions:
+      - "core::Result<CameraDescriptor> resolve_identity(const std::vector<CameraDescriptor>& candidates, const CameraSelector& selector);"
+      - "core::Result<CapturedFrame> capture_with_one_retry(ICameraBackend& backend, const CameraSettings& settings, const core::Deadline& deadline);"
+    identity_resolution_rules:
+      - "A selector with all four fields empty is rejected: Failure(Status::invalid_argument, ErrorCode::selector_empty)."
+      - "A descriptor matches iff every non-empty selector field equals the descriptor field exactly (case-sensitive, trimmed by the caller)."
+      - "Zero matches: Failure(Status::camera_not_found, ErrorCode::camera_not_found). Two or more matches: Failure(Status::camera_not_found, ErrorCode::camera_identity_ambiguous). Exactly one: that descriptor. Never a first-match fallback."
+    bounded_capture_rules:
+      - "capture_with_one_retry calls capture once; on success returns the frame."
+      - "A failure whose broad status is not camera_io is returned unchanged (timeouts and other errors are not retried)."
+      - "If the deadline is expired before reconnect or before recapture, return Failure(Status::timeout, ErrorCode::deadline_expired)."
+      - "On a camera_io failure: at most one backend.reconnect(settings, deadline), then at most one more backend.capture(deadline). The second result is returned as-is; there is no third attempt."
+      - "The helper never enumerates or opens a different descriptor (no implicit device re-selection)."
+  test_backends:
+    option: "CVFORWIN_BUILD_TEST_BACKENDS (CMake option; ON in dev presets, OFF in release presets); target cvforwin_test_backends."
+    headers:
+      - "src/camera/test_backends/file_camera_backend.h"
+      - "src/camera/test_backends/synthetic_camera_backend.h"
+    common_fault_api:
+      - "enum class FaultKind { disconnect, capture_error };"
+      - "void inject_capture_failure(std::uint32_t capture_call_1based, FaultKind kind);"
+      - "void inject_capture_delay(std::uint32_t capture_call_1based, std::chrono::milliseconds delay);"
+      - "void clear_faults();"
+      - "counters: std::uint32_t enumerate_call_count(), open_call_count(), capture_call_count(), reconnect_call_count(), close_call_count() const noexcept;"
+    fault_semantics:
+      - "capture_call_1based counts every capture() call on the backend, starting at 1 for the first call after construction or clear_faults()."
+      - "disconnect at call n: that call returns Failure(Status::camera_io, ErrorCode::camera_disconnected); the backend stays disconnected and every later capture fails the same way until reconnect() succeeds; reconnect() clears the state."
+      - "capture_error at call n: that call returns Failure(Status::camera_io, ErrorCode::capture_failed); it is one-shot (the next call behaves normally)."
+      - "delay at call n: if the deadline is expired, return Failure(Status::timeout, ErrorCode::capture_timed_out) immediately; otherwise sleep min(delay, remaining); if delay > remaining the deadline expires during the sleep and the call returns Failure(Status::timeout, ErrorCode::capture_timed_out); otherwise it returns the frame."
+      - "Faults are consumed by the calls they target; clear_faults() resets plans and counters."
+    file_backend:
+      - "FileCameraConfig { CameraDescriptor descriptor; std::vector<std::string> frame_paths; } (absolute paths)."
+      - "enumerate returns exactly {descriptor}. open succeeds iff the given descriptor equals the configured descriptor field-by-field, else Failure(Status::camera_not_found, ErrorCode::descriptor_mismatch)."
+      - "capture loads the next frame via OpenCV imgcodecs, converts mono to BGR8, and returns it with metadata (sequence increments per successful capture from 0). After the last frame: Failure(Status::camera_io, ErrorCode::frames_exhausted). Undecodable file: Failure(Status::camera_io, ErrorCode::capture_failed)."
+      - "capture/reconnect before a successful open: Failure(Status::camera_io, ErrorCode::camera_not_open). close() is idempotent."
+    synthetic_backend:
+      - "SyntheticCameraConfig { CameraDescriptor descriptor (backend_key defaults to \"synthetic\"); std::uint32_t width = 64; std::uint32_t height = 48; }."
+      - "open applies non-zero settings.width/height over the config defaults; enumerate returns {descriptor}."
+      - "capture without open: Failure(Status::camera_io, ErrorCode::camera_not_open)."
+      - "Frame content is deterministic: pixel(x,y) = BGR((x + y + seq) & 0xFF, (x + 2*y + seq) & 0xFF, (2*x + y + seq) & 0xFF) where seq is the frame sequence starting at 0; metadata.pixel_format = bgr8, width/height as configured, captured_at set from the steady clock."
+invariants:
+  - "CapturedFrame never carries backend handles or vendor types; pixels are an owned BGR8 cv::Mat."
+  - "No product verdicts, algorithm selection, public C ABI structures, or recipe concepts appear in the camera contract."
+  - "No exception crosses the C ABI (unchanged); camera code returns Result/Failure values."
+  - "Identity resolution never falls back to the first device; zero or multiple matches always fail."
+  - "The bounded capture path performs at most one reconnect and one recapture, never re-enumerates, and honors the remaining deadline."
+  - "Test backends are deterministic, hardware-free, and only built when the CMake option is on."
+verification:
+  canonical_wsl:
+    - "cmake --preset wsl-gcc-debug"
+    - "cmake --build --preset wsl-gcc-debug --parallel"
+    - "ctest --preset wsl-gcc-debug --output-on-failure"
+    - "cmake --build --preset wsl-gcc-debug --target format-check"
+    - "cmake --preset wsl-clang-analysis && cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+    - "cmake --preset wsl-gcc-asan && cmake --build --preset wsl-gcc-asan --parallel && ctest --preset wsl-gcc-asan --output-on-failure"
+  task_specific:
+    - "Camera suite runs inside ctest (tests/camera/** registered by the developer)."
+acceptance_reference: >-
+  Contract acceptance_checks 7 (camera fault tests prove at most one reconnect/recapture and
+  no fallback to an unrelated device) and the camera_contract test-suite coverage list
+  (open/configure/capture/reconnect/close ordering, ambiguous identity, disconnect, timeout,
+  one-retry limit).
+rollback: >-
+  Remove the added core/camera sources and the tests/camera suite; the public ABI and
+  existing modules are untouched.
+reporting:
+  developer_report: .ai/reports/CVF-002-implementation.yaml
+  test_red_report: .ai/reports/CVF-002-test-red.yaml
+  test_verify_report: .ai/reports/CVF-002-test-verify.yaml
+  review_report: .ai/reviews/CVF-002.yaml
+  quality_report: .ai/reports/CVF-002-quality.yaml
+notes:
+  - "Local command sandbox: workers may add their own harness scripts under .ai/validation/** (never modify other roles' harnesses)."
+  - "Fixtures under tests/fixtures/camera/** must be small, deterministic, and self-generated (license-clear); runtime-generated temp files are acceptable where a test needs them."
+  - "No UVC, no runtime, no C ABI changes in this change."

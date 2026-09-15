@@ -1,0 +1,137 @@
+schema_version: 1
+change_id: CVF-008
+phase: VERIFY
+status: GREEN_WSL_DEFERRED_WINDOWS
+recorded_at: 2026-09-15
+owner: test-engineer
+brief: .ai/test-briefs/CVF-008.yaml
+contract: .ai/project-contract.yaml
+headline: >-
+  Fresh-session WSL verification is green: canonical configure/build/ctest exit 0 with
+  263/263 tests passed and no skipped/disabled tests; all five CVF-008 files and all 47
+  ownership-manifest files re-hash exactly. The Windows-only package execution
+  (workflow job, package_checks dumpbin/notice/DLL steps, clean consumer link/run) was
+  NOT executed on WSL and is recorded as deferred, not PASS.
+
+harness: .ai/validation/cvf008-test-engineer-verify.sh
+harness_note: >-
+  Direct cmake/ctest commands are sandbox-denied for the test-engineer role; the
+  canonical commands below were run from this harness under .ai/validation/ (allowed
+  path). Harness log dir: /tmp/cvf008-verify.151516 (ephemeral; summary captured here).
+
+commands:
+  - command: "VCPKG_ROOT=$HOME/vcpkg cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    role: canonical wsl_configure
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    role: canonical wsl_build
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "passed=263, failed=0, skipped=0"
+    key_output: "100% tests passed, 0 tests failed out of 263; Total Test time (real) = 3.52 sec"
+    role: canonical wsl_test
+  - command: "ctest --preset wsl-gcc-debug -N"
+    exit_code: 0
+    counts: "registered tests=263"
+    role: package-kit isolation check
+
+skips_and_short_circuits:
+  search_command: "grep -inE \"skipped|disabled|did not run|not run\" ctest output"
+  result: "no skip/disabled/not-run lines"
+  package_tests_on_wsl: >-
+    The registered test list contains no test/consumer/dumpbin/package test. The only
+    text match for 'windows' is the unrelated unit case 'is_absolute_path accepts POSIX
+    and Windows absolute paths'. Root CMakeLists.txt registers tests/abi, tests/unit,
+    tests/camera and the CVF-003..CVF-007 targets only; tests/package/** is a standalone
+    CMake script plus standalone consumer project and is not added to the main build.
+  file_review: >-
+    Reviewed all five own kit files in this session. main.c has no skip macros; its only
+    early exits are the documented usage error (exit 2) and an initialize failure that
+    prints the error and exits 1. The NUL-termination check is guarded by an independent
+    bounded-bytes check that fails first, so no failure is hidden. package_checks.cmake
+    has no optional/disabled checks: a missing dumpbin is itself a failure, and the
+    negative self-probes are skipped only when a check already failed (the script still
+    exits non-zero). No assertion was weakened, skipped, or removed.
+
+ownership:
+  manifest: .ai/test-ownership.yaml
+  cvf008_files_checked: 5
+  all_manifest_files_checked: 47
+  mismatches: []
+  hash_results:
+    - path: tests/package/package_checks.cmake
+      expected: 3f23084482a3098d6be35d31673db61cd9ab2784d6a0077fb977788f713f4f78
+      observed: 3f23084482a3098d6be35d31673db61cd9ab2784d6a0077fb977788f713f4f78
+      match: true
+    - path: tests/package/consumer/CMakeLists.txt
+      expected: 0f48932b501f3913f68460bbe92dec5c6210437f56d501a8c5846d7cb6e0eace
+      observed: 0f48932b501f3913f68460bbe92dec5c6210437f56d501a8c5846d7cb6e0eace
+      match: true
+    - path: tests/package/consumer/main.c
+      expected: 7dba7464da5d88f460cef2c0cfd78f1e8f75186c192b809dbf0e21e5c36dce12
+      observed: 7dba7464da5d88f460cef2c0cfd78f1e8f75186c192b809dbf0e21e5c36dce12
+      match: true
+    - path: tests/package/consumer/config/cvforwin.json
+      expected: 42aa7e9b1580ffc5d6c8f1f261d037aba86f35b0052141c072b10d5fdb3a2eb0
+      observed: 42aa7e9b1580ffc5d6c8f1f261d037aba86f35b0052141c072b10d5fdb3a2eb0
+      match: true
+    - path: tests/package/consumer/config/recipes/example.pass.json
+      expected: 161061dfea745a30675447acb62effe6fc95bd1140caa318b42ebdae9e042a09
+      observed: 161061dfea745a30675447acb62effe6fc95bd1140caa318b42ebdae9e042a09
+      match: true
+  manifest_audit: "python3 audit: manifest-ok checked=47 files, 0 mismatches (CVF-001..CVF-008)"
+  changes_this_phase: >-
+    No test file was changed, so the manifest was not updated. One new non-test harness
+    file was added: .ai/validation/cvf008-test-engineer-verify.sh (verification tooling,
+    outside the ownership manifest's test-file scope).
+
+host_structural_checks:
+  note: >-
+    Host-independent subset of the package kit, re-run in this session (pass=12, fail=0,
+    skip=0); it exercises the kit's failure paths and compile layout, not the Windows
+    package.
+  checks:
+    - "clang-format --dry-run --Werror tests/package/consumer/main.c -> exit 0"
+    - "python3 -m json.tool tests/package/consumer/config/cvforwin.json -> exit 0"
+    - "python3 -m json.tool tests/package/consumer/config/recipes/example.pass.json -> exit 0"
+    - "gcc -std=c11 -Wall -Wextra -Werror -I <fake-package>/include -fsyntax-only tests/package/consumer/main.c -> exit 0"
+    - "gcc -std=c11 -Wall -Wextra -Werror -I <fake-package>/include -c tests/package/consumer/main.c -> exit 0"
+    - "cmake 3.28.3 satisfies the 3.28 floor"
+    - "package_checks relative root -> exit 1, 'must be an absolute path'"
+    - "package_checks missing root -> exit 1, 'does not exist or is not a directory'"
+    - "package_checks empty root -> exit 1, 'missing required package file'"
+    - "consumer configure relative root -> exit 1, 'must be an absolute path'"
+    - "consumer configure against a fake installed package root -> exit 0"
+  limitation: >-
+    The fake root holds only the frozen public header plus empty lib/cvforwin.lib and a
+    placeholder bin/cvforwin.dll. It proves the consumer project's configure gate and
+    installed include layout only; it is not a package, link, or run.
+
+acceptance_criteria_review:
+  - criterion: "Portable WSL suite remains green."
+    state: VERIFIED
+    evidence: "wsl-gcc-debug configure/build/ctest exit 0; 263/263 passed, 0 skipped."
+  - criterion: "Kit authored and hashed."
+    state: VERIFIED
+    evidence: "5/5 CVF-008 manifest hashes match in this session; 47/47 manifest files match."
+  - criterion: "Wired for CI by the developer with execution deferred to windows-2022."
+    state: DEFERRED
+    evidence: >-
+      CI workflow contents are outside the test-engineer allowed inputs, so wiring and
+      the windows-2022 job result cannot be verified here. No Windows execution was
+      attempted or fabricated.
+
+deferred_to_windows_ci:
+  - "windows-2022 workflow job that installs the test-enabled package variant and invokes tests/package/package_checks.cmake (developer wired; unverifiable from this role)."
+  - "package_checks.cmake step 1: real package layout (bin/cvforwin.dll, lib/cvforwin.lib, include/cvforwin/cvf_api.h, config/examples/**, example recipes, docs/**, LICENSES/**)."
+  - "package_checks.cmake step 2: shipped bin/ contains no runtime DLL other than cvforwin.dll."
+  - "package_checks.cmake step 3/4: dumpbin /exports shows exactly the five approved cvf_* symbols; dumpbin /dependents shows only allowlisted Windows system DLLs."
+  - "package_checks.cmake step 6: clean consumer configure/build/link/run against the installed package with exit 0; ABI version 1 before initialize; PASS verdict and JSON shape for the synthetic input; reload and shutdown OK."
+  - "Windows ctest suite (windows-msvc-release) and package/package-verify targets."
+
+failures: []
+blockers: []
+limitations:
+  - "CMakePresets.json and cmake/** reads are denied by the sandbox read policy for this role; the canonical preset names come from the contract quality_commands and the task statement."
+  - "Harness logs under /tmp are ephemeral; all decisive output is transcribed in this report."

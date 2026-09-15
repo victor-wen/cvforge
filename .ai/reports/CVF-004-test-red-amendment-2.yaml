@@ -1,0 +1,105 @@
+change_id: CVF-004
+phase: VERIFY
+amendment: TV-2
+report: .ai/reports/CVF-004-test-red-amendment-2.yaml
+owner: test-engineer
+scope: >-
+  Test-side defect fix (no production code, no other roles' files). Deterministic
+  synchronization of the hash-pinned holder concurrency test reported by the independent
+  quality gate as TV-2.
+defect:
+  id: TV-2
+  test: "CVF-004 B6: concurrent readers never observe a partial or mixed catalog"
+  ctest_number: 192
+  observed_by: "independent quality gate under ctest --preset wsl-gcc-asan --output-on-failure"
+  failure: "tests/unit/cvf004_holder_test.cpp:112: CHECK( observations.load() > 0 ) -> 0 > 0"
+  sanitizer_diagnostics: "none (no ASan/UBSan diagnostic; violations == 0 assertion passed)"
+  root_cause: >-
+    Intermittent liveness race in the test itself: the writer thread could complete all
+    200 publish rounds (600 publishes) and set stop before the reader threads were first
+    scheduled, so the final observations counter remained 0. Under ASan the whole suite
+    ran slowly enough to expose it once. Repeating the single test 20x passed.
+fix:
+  file: tests/unit/cvf004_holder_test.cpp
+  previous_sha256: b19baa48deb34e854e3244eaafb83a4ad5df35a2dd9e78f12d7bf059b35d23a9
+  new_sha256: 7c4cd52c2ad7f5bf7acdcb9b0b27d628b1cb20950414c67d15beef43445dd465
+  description: >-
+    Deterministic start-up synchronization. Each of the 3 reader threads increments
+    readers_ready before entering its observe loop; the writer performs a bounded spin
+    (std::chrono::steady_clock deadline, 30 s timeout, std::this_thread::yield) until
+    readers_ready == 3 and observations >= 3, then records success in the atomic
+    concurrency_established and only then begins the unchanged 200 publish rounds of 3
+    catalogs. On timeout the test fails deterministically on
+    CHECK(concurrency_established.load()) instead of racing, hanging, degrading to a
+    writer-only run, or being skipped. Since observations is monotonic and the writer only
+    publishes after observations >= 3, CHECK(observations.load() > 0) is now unreachable
+    by the former race while remaining a real liveness assertion.
+  invariance:
+    - "Invariant assertions preserved exactly: every observed snapshot must be one of the three complete published id sets AND ids.size() == snapshot->size(), violations must stay 0."
+    - "No assertion removed, disabled, skipped, or weakened; concurrency coverage is still 3 concurrent readers vs. a publishing writer over 3 catalogs and 200 rounds."
+    - "Added assertion CHECK(concurrency_established.load()) only makes scheduler failure explicit."
+    - "Bounded and hardware-free; no sleeps introduced (bounded yield-spin only)."
+commands:
+  - command: "bash .ai/validation/cvf004-amendment2.sh   # export VCPKG_ROOT=$HOME/vcpkg"
+    exit_code: 0
+    counts: "all 10 gated steps exited 0"
+  - command: "clang-format --dry-run --Werror tests/unit/cvf004_holder_test.cpp"
+    exit_code: 0
+    counts: "pre-format check (hand-written code already clean); repo .clang-format present"
+  - command: "clang-format -i tests/unit/cvf004_holder_test.cpp"
+    exit_code: 0
+    counts: "formatted"
+  - command: "clang-format --dry-run --Werror tests/unit/cvf004_holder_test.cpp"
+    exit_code: 0
+    counts: "post-format check clean"
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    counts: "configure"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    counts: "build"
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "passed=204, failed=0, skipped=0; holder test #192 Passed; total 2.56 s"
+  - command: "cmake --preset wsl-gcc-asan"
+    exit_code: 0
+    counts: "configure"
+  - command: "cmake --build --preset wsl-gcc-asan --parallel"
+    exit_code: 0
+    counts: "build"
+  - command: "ctest --preset wsl-gcc-asan --output-on-failure"
+    exit_code: 0
+    counts: "passed=204, failed=0, skipped=0; holder test #192 Passed 0.03 s; total 8.71 s"
+  - command: "ctest --preset wsl-gcc-asan --output-on-failure -R '^CVF-004 B6: concurrent readers never observe a partial or mixed catalog$' --repeat until-fail:50"
+    exit_code: 0
+    counts: "50/50 repeat iterations passed (1/1 Test #192 Passed each run); no failure"
+skip_scan:
+  method: "case-insensitive grep for 'skip' and 'not run|disabled' over the full harness run log"
+  matches: 0
+sanitizer_scan:
+  method: "grep for 'ERROR: AddressSanitizer', 'runtime error', 'Test Failed', 'FAILED' over the full harness run log"
+  diagnostics: "none; the only matches are test names containing the word 'failed' and all of them Passed"
+evidence_artifacts:
+  - .ai/validation/cvf004-amendment2.sh
+  - .ai/validation/cvf004-amendment2-run.log
+  - .ai/validation/cvf004-amendment2-summary.txt
+ownership:
+  manifest: .ai/test-ownership.yaml
+  updated_by: test-engineer (owner)
+  files_rechecked:
+    - path: tests/unit/cvf004_holder_test.cpp
+      sha256: 7c4cd52c2ad7f5bf7acdcb9b0b27d628b1cb20950414c67d15beef43445dd465
+    - path: tests/unit/cvf004_test_support.h
+      sha256: 99369537f9d4f511bde4a3fbe6e68e2c91f5e20138f8a2c8f8aed4af71150aa1
+    - path: tests/unit/cvf004_error_codes_test.cpp
+      sha256: 50ac8771a36a305051ed24d69ce23546ee7ed4d164d149e7201fd516fa6aa53b
+    - path: tests/unit/cvf004_config_test.cpp
+      sha256: 58ef1e743e1724029390599d3a597d8ba777c2cd343798fa3182648ce21f0fbd
+    - path: tests/unit/cvf004_recipe_test.cpp
+      sha256: 62f9cf148db65f25db7dbdcf4c8a09dc6b11a2b614b28d9f48baadac4c377c1e
+    - path: tests/unit/cvf004_catalog_test.cpp
+      sha256: 52b5ea34dc5431218b56606c20d369ae51131c83a7e0bfac946a7f60ce5ce79b
+  manifest_note: >-
+    CVF-004 section updated with the new holder hash and an Amendment 2 note; all other
+    change sections preserved byte-exact.
+blockers: []

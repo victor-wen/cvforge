@@ -1,0 +1,261 @@
+schema_version: 1
+change_id: CVF-004
+role: developer
+status: COMPLETE
+recorded_at: 2026-09-15
+implemented_against:
+  change_contract: .ai/changes/CVF-004.yaml
+  architecture_baseline: .ai/project-contract.yaml (1.0.0, APPROVED)
+  frozen_interface: >-
+    interface_v1 (GlobalConfig + load_global_config, CaptureOverrides/ArtifactsConfig/Recipe +
+    load_recipe_file, RecipeCatalog + RecipeHolder, recipe-store error codes 1600-1623).
+    The contract revision on disk freezes ArtifactsConfig::save_policy as std::string with strict
+    token validation {always, fail_or_error, never}, which is exactly what is implemented.
+
+changed_files:
+  core_model:
+    - path: src/core/error.h
+      change: modified
+      notes: "Added config_file_missing=1600 .. config_io_error=1607 and recipe_file_missing=1610 .. recipe_io_error=1623 exactly per interface_v1."
+    - path: src/core/error.cpp
+      change: modified
+      notes: >-
+        status_for: the 21 config/recipe codes join the existing config_error case group;
+        1622 recipe_not_found maps to Status::recipe_not_found (sole use of that status).
+        error_code_name returns the frozen symbolic names. The shared case group keeps
+        bugprone-branch-clone clean.
+  recipe_store:
+    - path: src/recipes/config.h
+      change: new
+      notes: >-
+        CameraSelectorConfig, CameraCaptureConfig, LoggingConfig, RetentionConfig, GlobalConfig and
+        load_global_config exactly as frozen. Also declares the internal (recipes::detail)
+        duplicate-key-safe JSON document loader shared by config.cpp and recipe.cpp; it is not part
+        of interface_v1's public types and keeps one implementation of the strictness rule (see
+        decisions).
+    - path: src/recipes/config.cpp
+      change: new
+      notes: >-
+        Absolute-root check first (invalid_argument/path_not_absolute 1011); missing -> 1600;
+        unreadable -> 1607; parse/invalid UTF-8 -> 1601; duplicate key -> 1602; unknown key -> 1603;
+        schema_version != 1 (or non-integer) -> 1605; backend != "uvc", insufficient selector,
+        4-hex VID/PID, 256-byte string cap, all numeric/token bounds -> 1604; missing required
+        section -> 1604. Records both roots unchanged.
+    - path: src/recipes/recipe.h
+      change: new
+      notes: >-
+        CaptureOverrides, ArtifactsConfig { std::string save_policy; bool required; }, Recipe and
+        load_recipe_file exactly as frozen after the on-disk contract revision.
+    - path: src/recipes/recipe.cpp
+      change: new
+      notes: >-
+        Missing top-level key -> 1614; unknown -> 1613; duplicate -> 1612; parse -> 1611;
+        missing file -> 1610; unreadable -> 1623; schema_version != 1 -> 1615; recipe_id
+        ^[A-Za-z0-9._-]{1,128}$ bytes -> 1616; algorithm ^[a-z0-9._-]{1,64}$ then registry lookup
+        -> 1618; parameters object + registry validate_parameters with preserved message -> 1619;
+        capture (settle_frames required 0..1000, optional width/height 1..16384, frame_rate (0,1000],
+        pixel_format token, unknown key) -> 1620; artifacts (save_policy token + boolean required,
+        unknown/missing/wrong type) -> 1621.
+    - path: src/recipes/recipe_catalog.h
+      change: new
+      notes: >-
+        Immutable RecipeCatalog (move-only, owned recipe vector + sorted id index) with
+        load/find/recipe_ids/size, and RecipeHolder with noexcept publish/current over
+        std::atomic<std::shared_ptr<const RecipeCatalog>> defaulting to nullptr.
+    - path: src/recipes/recipe_catalog.cpp
+      change: new
+      notes: >-
+        Non-recursive *.json scan sorted by filename; missing dir -> 1606; directory iteration
+        failure -> 1607; zero files -> valid size-0 catalog; any invalid recipe propagates its
+        failure; duplicate recipe_id -> 1617; all-or-nothing (no catalog value on failure).
+        find(unknown) -> Status::recipe_not_found/1622; recipe_ids() is the std::map key order
+        (byte-lexicographic); holder publish/current use release/acquire.
+  build:
+    - path: CMakeLists.txt
+      change: modified
+      notes: >-
+        New cvforwin_recipes static library (config.cpp, recipe.cpp, recipe_catalog.cpp; PUBLIC
+        cvforwin_core, cvforwin_inspection, nlohmann_json::nlohmann_json). New cvf004_tests
+        executable compiling the five test-owner cvf004_* sources with tests/unit + include dirs,
+        linking cvforwin_recipes, cvforwin_algorithms, Threads::Threads and Catch2::Catch2WithMain
+        via catch_discover_tests. cvf_unit_tests gains tests/unit/test_recipes_store.cpp and links
+        cvforwin_recipes. No cmake/** change was needed (format-check and static-analysis globs
+        already cover the new paths).
+  developer_tests:
+    - path: tests/unit/test_recipes_store.cpp
+      change: new
+      notes: >-
+        9 cases: sibling objects inside array parameters are not duplicate keys; duplicate key
+        inside one array object is rejected (raw text); nested duplicate configuration key is
+        rejected (raw text; covers the case the independent fixture cannot reach); friendly_name
+        alone never satisfies the selector; selector strings capped at 256 bytes; missing config
+        section; missing recipe section; rejected parameters preserve the algorithm diagnostic
+        byte-for-byte; non-JSON-only recipes directory is a valid empty catalog.
+  evidence_harness:
+    - path: .ai/validation/cvf004-developer/
+      change: new
+      notes: >-
+        configure-gcc.log, build-gcc.log, ctest-gcc.log, format-check.log, configure-clang.log,
+        static-analysis.log, configure-asan.log, build-asan.log, ctest-asan.log,
+        cvf004-hashes.txt, syntax-check.sh (raw canonical-command evidence).
+
+verification:
+  canonical_wsl:
+    - command: "cmake --preset wsl-gcc-debug"
+      exit_code: 0
+      counts: "configured; vcpkg x64-linux manifest install up to date (OpenCV 4.12.0, nlohmann_json 3.12.0, Catch2 3.16.0)"
+    - command: "cmake --build --preset wsl-gcc-debug --parallel"
+      exit_code: 0
+      counts: "48 steps; zero warnings under -Wall -Wextra -Wpedantic -Wconversion -Werror; cvforwin_recipes, cvf004_tests and cvf_unit_tests built"
+    - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+      exit_code: 8
+      counts: "203 tests = 135 existing + 59 independent CVF-004 + 9 developer; 202 passed, 1 failed (test-side defect TV-1, see blockers)"
+    - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+      exit_code: 0
+      counts: "format-check passed: 56 file(s) conform to .clang-format"
+    - command: "cmake --preset wsl-clang-analysis"
+      exit_code: 0
+      counts: "analysis tree configured with compile_commands.json"
+    - command: "cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+      exit_code: 0
+      counts: >-
+        first run exit 1 on four bugprone-exception-escape findings (read_unsigned/read_double
+        declared noexcept although nlohmann get<T>() may throw); noexcept removed and the rerun
+        passed: 17 file(s) clean under .clang-tidy
+    - command: "cmake --preset wsl-gcc-asan"
+      exit_code: 0
+      counts: "sanitizer tree configured"
+    - command: "cmake --build --preset wsl-gcc-asan --parallel"
+      exit_code: 0
+      counts: "all targets built with AddressSanitizer/UndefinedBehaviorSanitizer, zero warnings"
+    - command: "ctest --preset wsl-gcc-asan --output-on-failure"
+      exit_code: 8
+      counts: "202/203 passed, 1 failed (same test-side defect TV-1); no sanitizer report"
+  corrections_during_session:
+    - "First canonical ctest run: 200/202 with two failures. Developer test 'duplicate key inside one array object' built the duplicate with nlohmann DOM construction, which silently collapses duplicate keys; rewritten as raw text. Second failure was independent test defect TV-1 (below). Rerun: 202/203."
+    - "First static-analysis run failed on four bugprone-exception-escape findings; fixed by removing noexcept from the guarded nlohmann accessors in config.cpp and recipe.cpp. Rerun clean."
+    - "A '/*' inside a header comment (recipes/*.json) tripped -Werror=comment during the syntax check; reworded."
+  notes:
+    - "Raw logs for every command are stored under .ai/validation/cvf004-developer/."
+    - "Test counts confirmed with ctest -N: 203 total = 135 pre-existing + 59 CVF-004 independent + 9 CVF-004 developer."
+
+independent_tests_integrity:
+  manifest: .ai/test-ownership.yaml
+  cvf004_files_unchanged:
+    - path: tests/unit/cvf004_test_support.h
+      sha256: 99369537f9d4f511bde4a3fbe6e68e2c91f5e20138f8a2c8f8aed4af71150aa1
+      matches_manifest: true
+    - path: tests/unit/cvf004_error_codes_test.cpp
+      sha256: 50ac8771a36a305051ed24d69ce23546ee7ed4d164d149e7201fd516fa6aa53b
+      matches_manifest: true
+    - path: tests/unit/cvf004_config_test.cpp
+      sha256: 35467a4b0fded08d6661ebd2b324b3c0bc9016089b97ca17a0d4fb61cd32a66e
+      matches_manifest: true
+    - path: tests/unit/cvf004_recipe_test.cpp
+      sha256: bb9d61d8221020dd043465ab05849c3d460071b86e36e6323fe207c3de6ad09f
+      matches_manifest: true
+    - path: tests/unit/cvf004_catalog_test.cpp
+      sha256: 52b5ea34dc5431218b56606c20d369ae51131c83a7e0bfac946a7f60ce5ce79b
+      matches_manifest: true
+    - path: tests/unit/cvf004_holder_test.cpp
+      sha256: b19baa48deb34e854e3244eaafb83a4ad5df35a2dd9e78f12d7bf059b35d23a9
+      matches_manifest: true
+
+decisions:
+  - id: d1
+    area: strict JSON loader sharing
+    detail: >-
+      Duplicate-key detection and missing-vs-unreadable classification live once in
+      recipes::detail::load_json_document (declared in src/recipes/config.h, defined in
+      src/recipes/config.cpp) instead of a new detail header outside the contract's allowed_files
+      list or duplicated logic in both loaders. The helper is internal (detail namespace) and does
+      not alter the frozen public types; recipe.cpp includes recipes/config.h.
+  - id: d2
+    area: duplicate-key detection
+    detail: >-
+      One nlohmann parse with a parser callback that tracks the key set of every open object.
+      nlohmann reports object keys one depth below object_start, so starting an object clears the
+      next depth's set; sibling objects inside arrays therefore never produce false positives. The
+      callback's duplicate flag is inspected after the parse. Semantics were verified against the
+      installed nlohmann 3.12.0 event stream before implementation, and both the false-positive and
+      true-positive cases are pinned by developer tests.
+  - id: d3
+    area: atomic holder
+    detail: >-
+      RecipeHolder stores std::atomic<std::shared_ptr<const RecipeCatalog>> with release store /
+      acquire load, so readers observe exactly one complete old or new catalog. The catalog is
+      immutable after load and find() returns a pointer into the owned recipe vector; the vector is
+      never mutated after construction.
+  - id: d4
+    area: catalog directory IO
+    detail: >-
+      A missing recipes directory maps to 1606; a directory iteration failure maps to 1607
+      (config_io_error) because the frozen numbering has no dedicated directory-unreadable code.
+      Not covered by the independent suite; documented for the reviewer.
+  - id: d5
+    area: save_policy spec alignment
+    detail: >-
+      The on-disk CVF-004 contract revision freezes ArtifactsConfig::save_policy as std::string
+      with strict token validation {always, fail_or_error, never}. The implementation matches it
+      and the frozen independent tests' text comparison; recorded as a spec-alignment note, not a
+      deviation.
+  - id: d6
+    area: validation ordering and defaults
+    detail: >-
+      Unknown keys are rejected before missing-key checks; schema_version must be the integer 1.
+      camera.backend is required; device_path/vendor_id/product_id/friendly_name default to empty
+      when absent and are then subject to the selector and 4-hex rules. base_capture, logging and
+      retention fields are all required. Messages are bounded ASCII literals plus validated keys.
+
+blockers:
+  - id: TV-1
+    owner: test-engineer
+    severity: blocking-for-203/203
+    evidence: ".ai/validation/cvf004-developer/ctest-gcc.log and ctest-asan.log, CTest test #153"
+    detail: >-
+      tests/unit/cvf004_test_support.h valid_config_json_text() writes logging as
+      '"max_files": 5' with no trailing comma, but tests/unit/cvf004_config_test.cpp line 154
+      (section 'nested logging duplicate') calls replace_once(..., R"("max_files": 5,)", ...).
+      replace_once therefore fails REQUIRE(position != std::string::npos) at
+      cvf004_test_support.h:115 before load_global_config is ever called (12/13 assertions pass).
+      No production change can affect this. Required action: the test owner adds the comma to the
+      fixture (or changes the anchor), re-runs the suite, and updates the CVF-004 ownership hash.
+      The intended production behavior is already covered by developer test 'CVF-004 dev: a nested
+      duplicate configuration key is rejected', which passes.
+  - id: B-1
+    owner: none (platform)
+    severity: informational
+    detail: >-
+      Windows MSVC preset was not executed in this WSL session; Windows ABI/package evidence
+      remains a CI concern per the baseline.
+
+next_phase: "independent verification (test-engineer verify run); test owner resolves TV-1 for 203/203"
+
+post_fix_addendum:
+  recorded_at: 2026-09-15
+  status: COMPLETE
+  tv1_status: RESOLVED_BY_TEST_OWNER
+  amendment_report: .ai/reports/CVF-004-test-red-amendment.yaml
+  resolution: >-
+    The test owner corrected the replace_once anchor in tests/unit/cvf004_config_test.cpp
+    (anchor R"("max_files": 5)" now injects the nested duplicate key while keeping valid JSON;
+    the assertion still requires config_error/config_duplicate_key and was not weakened) and
+    updated the CVF-004 ownership hashes. No production change was required or made.
+  developer_reverification:
+    - command: "cmake --build --preset wsl-gcc-debug --parallel"
+      exit_code: 0
+      counts: "cvf004_config_test.cpp rebuilt and linked; zero warnings"
+    - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+      exit_code: 0
+      counts: "100% tests passed, 0 failed out of 203; 68 CVF-004 entries incl. former #153"
+    - command: "sha256 manifest re-check"
+      exit_code: 0
+      counts: "6/6 tests/unit/cvf004_* match the updated .ai/test-ownership.yaml (test-owner hashes)"
+  evidence:
+    - .ai/validation/cvf004-developer/build-gcc-postfix.log
+    - .ai/validation/cvf004-developer/ctest-gcc-postfix.log
+  historical_note: >-
+    The canonical verification table and blockers section above are preserved as the historical
+    record of the run in which TV-1 was open (202/203). The final verified state is 203/203 with
+    TV-1 resolved; all other rows are unchanged and remain valid.
+  final_status: COMPLETE

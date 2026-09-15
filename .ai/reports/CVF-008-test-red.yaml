@@ -1,0 +1,157 @@
+schema_version: 1
+change_id: CVF-008
+phase: AUTHOR
+status: RED_DEFERRED
+recorded_at: 2026-09-15
+owner: test-engineer
+brief: .ai/test-briefs/CVF-008.yaml
+contract: .ai/project-contract.yaml
+headline: >-
+  The clean package-consumer kit is authored, clang-format clean, hashed, and wired for
+  the developer's windows-2022 job. No Windows execution happened and none is claimed:
+  the installed package does not exist yet and the WSL author host cannot load a
+  Windows DLL or run dumpbin. The RED/deferred state below is recorded honestly.
+
+artifacts:
+  - tests/package/package_checks.cmake
+  - tests/package/consumer/CMakeLists.txt
+  - tests/package/consumer/main.c
+  - tests/package/consumer/config/cvforwin.json
+  - tests/package/consumer/config/recipes/example.pass.json
+ownership_manifest: .ai/test-ownership.yaml
+author_harness: .ai/validation/cvf008-test-engineer-author.sh
+
+executed_evidence:
+  - command: "bash .ai/validation/cvf008-test-engineer-author.sh"
+    exit_code: 0
+    summary: "pass=12 fail=0 skip=0"
+    checks:
+      - "clang-format --dry-run --Werror tests/package/consumer/main.c -> exit 0"
+      - "python3 -m json.tool tests/package/consumer/config/cvforwin.json -> exit 0"
+      - "python3 -m json.tool tests/package/consumer/config/recipes/example.pass.json -> exit 0"
+      - "gcc -std=c11 -Wall -Wextra -Werror -I <fake-package>/include -fsyntax-only tests/package/consumer/main.c -> exit 0"
+      - "gcc -std=c11 -Wall -Wextra -Werror -I <fake-package>/include -c tests/package/consumer/main.c -> exit 0"
+      - "cmake 3.28.3 satisfies the 3.28 floor required by both CMake projects"
+      - "cmake -DCVF_PACKAGE_ROOT=relative/package -P tests/package/package_checks.cmake -> exit 1 with 'must be an absolute path'"
+      - "cmake -DCVF_PACKAGE_ROOT=<missing dir> -P tests/package/package_checks.cmake -> exit 1 with 'does not exist or is not a directory'"
+      - "cmake -DCVF_PACKAGE_ROOT=<empty dir> -P tests/package/package_checks.cmake -> exit 1 with 'missing required package file'"
+      - "cmake -S tests/package/consumer -B <tmp> -DCVF_PACKAGE_ROOT=<fake package> -> exit 0"
+      - "cmake -S tests/package/consumer -B <tmp> -DCVF_PACKAGE_ROOT=relative/package -> exit 1 with 'must be an absolute path'"
+      - "python3 YAML parse of .ai/test-ownership.yaml and .ai/reports/CVF-008-test-red.yaml -> ok"
+      - "ownership manifest audit: all 47 recorded files (CVF-001..CVF-008) re-hashed and match -> ok"
+    note: >-
+      The fake package root is a temporary directory holding a copy of the frozen public
+      header, an empty lib/cvforwin.lib, and an empty bin/cvforwin.dll; it exists only to
+      exercise the consumer project's configure-time gate and the installed include
+      layout. It is not evidence of a package build, link, or run.
+
+red_derivation:
+  - >-
+    P1/P3 execution is RED by construction until the developer installs a test-enabled
+    Windows package: on this host there is no bin/cvforwin.dll to load and no MSVC
+    import library to link, so the full run cannot reach a green state and no Windows
+    evidence is fabricated.
+  - >-
+    The package-content checks (P4) are RED against any current tree because
+    bin/cvforwin.dll, lib/cvforwin.lib, config/examples/**, docs/**, and LICENSES/** do
+    not exist yet as an installed package; the host-executed probes above confirm the
+    check script exits non-zero with a clear message for a missing or empty root.
+
+deferred_to_windows_ci:
+  - "Real package install and clean-consumer link/run: ABI query return 1, initialize, synthetic inspect with PASS verdict and JSON shape, reload, shutdown, all exit 0."
+  - "dumpbin /exports: exactly the five approved symbols (cvf_get_abi_version, cvf_initialize, cvf_inspect, cvf_reload_recipes, cvf_shutdown)."
+  - "dumpbin /dependents: every direct import is a Windows system DLL (the script fails on any non-allowlisted DLL)."
+  - "Shipped bin/ directory contains no runtime DLL other than cvforwin.dll against a real package."
+
+cases:
+  - id: P1
+    requirement: >-
+      The consumer project configures against CVF_PACKAGE_ROOT, compiles and links against
+      the installed import library only, and runs to completion with exit 0.
+    location: "tests/package/consumer/CMakeLists.txt; tests/package/package_checks.cmake step 6"
+    observable: "consumer configure exit 0, build exit 0, executable exit 0"
+    author_state: >-
+      Configure gate exercised on WSL against the fake package root (exit 0) and the
+      relative-root rejection exercised (exit 1). Real link and run deferred to Windows.
+  - id: P2
+    requirement: "ABI version query returns 1 before any initialization."
+    location: "tests/package/consumer/main.c check abi_version_before_initialize"
+    observable: "cvf_get_abi_version() == CVF_ABI_VERSION_V1 (1) as the first API call"
+    author_state: "Execution deferred to Windows; source compiles C11-clean against the installed include layout."
+  - id: P3
+    requirement: >-
+      Initialize + one inspect + reload + shutdown complete with documented statuses; a
+      PASS/FAIL verdict is produced by the example algorithm on the synthetic input
+      (never NOT_EVALUATED on success).
+    location: "tests/package/consumer/main.c; recipe config/recipes/example.pass.json"
+    observable: >-
+      initialize OK; inspect status OK with result.status OK, error_code 0, verdict PASS,
+      JSON object with white_pixels/total_pixels/pass_ratio, byte-count/NUL rules, empty
+      image path for save_policy never; reload OK with error_code 0; shutdown OK.
+    author_state: >-
+      Execution deferred to Windows. The recipe pins min_pass_ratio 0.0 so the verdict is
+      deterministically PASS for any synthetic frame (pass_ratio >= min_pass_ratio always
+      holds); this was derived from the contract and the verified CVF-003 example-algorithm
+      semantics, not from implementation source.
+  - id: P4
+    requirement: >-
+      Package checks fail (non-zero) if any required file is missing, if the export set
+      differs from the five approved symbols, if a non-system runtime DLL appears, or if
+      notices are absent.
+    location: "tests/package/package_checks.cmake steps 1-5 and the negative self-checks"
+    observable: >-
+      missing root / relative root / empty root exit 1 with a clear message; missing file,
+      export mismatch, non-system DLL, and missing-notice conditions each call cvf_fail,
+      and the script exits 1 via the final FATAL_ERROR.
+    author_state: >-
+      The three root/failure-path probes were executed on WSL and observed to exit 1 with
+      the expected messages. The export, dependency, and notice checks require a real
+      Windows package and are deferred.
+
+assumptions:
+  package_layout:
+    - "Required: bin/cvforwin.dll, lib/cvforwin.lib, include/cvforwin/cvf_api.h."
+    - "Required example configuration: config/examples/cvforwin.json; required example recipes: at least one *.json under config/examples/recipes/."
+    - "Required documentation: at least one file under docs/."
+    - "Required notices: at least one file under LICENSES/, including a LICENSE/NOTICE/COPYING-named file."
+    - "No runtime DLL other than bin/cvforwin.dll is shipped in bin/."
+  consumer_and_schema:
+    - >-
+      The synthetic backend is accepted only by a test-enabled package build
+      (CVFORWIN_BUILD_TEST_BACKENDS=ON); the release variant is uvc-only. The CI job for
+      this kit must therefore use the test-enabled package variant.
+    - >-
+      Global config schema (camera.backend/device_path/vendor_id/product_id/friendly_name,
+      top-level base_capture/logging/retention) and recipe schema
+      (schema_version/recipe_id/algorithm/parameters/capture/artifacts) follow the accepted
+      shape used by the independent CVF-006 lifecycle tests and the checked-in fixture.
+    - >-
+      The example algorithm key is example.threshold with parameters threshold (0..255) and
+      min_pass_ratio (0.0..1.0); pass_ratio >= min_pass_ratio yields PASS. The synthetic
+      frame content is not pinned, so the recipe uses min_pass_ratio 0.0 to make PASS
+      deterministic.
+    - >-
+      The inspect result JSON contains white_pixels, total_pixels, and pass_ratio; the
+      consumer asserts key presence, not numeric values, for the synthetic frame.
+  tooling:
+    - >-
+      dumpbin is resolved from CVF_DUMPBIN, then PATH, then the newest VS 2022 x64
+      toolset through vswhere; if it cannot be found, the script fails instead of
+      silently skipping the export/dependency checks.
+    - "The consumer executable is always <build>/bin/cvf_package_consumer.exe; the installed DLL is loaded by prepending <CVF_PACKAGE_ROOT>/bin to PATH."
+
+developer_wiring:
+  - "Install the test-enabled Windows package variant to a clean absolute root, then run from the repository root:"
+  - "  cmake -DCVF_PACKAGE_ROOT=<absolute package root> -P tests/package/package_checks.cmake"
+  - "Ensure dumpbin is reachable (VS developer shell, or it is found through vswhere; -DCVF_DUMPBIN=<path> overrides)."
+  - "Optional: -DCVF_WORK_DIR, -DCVF_CONSUMER_GENERATOR, and -DCVF_CONSUMER_CONFIG overrides."
+  - >-
+    Do not edit tests/package/** to make the job pass: fix the package or the CI wiring.
+    Any change to these files requires test-owner coordination and a fresh hash record.
+
+non_goals:
+  - "No WSL execution of the Windows package was attempted or claimed."
+  - "No CI workflow file was authored by the test owner; the developer wires the job."
+  - "No production source, build configuration, or other role's artifact was modified."
+
+blockers: []

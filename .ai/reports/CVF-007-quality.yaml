@@ -1,0 +1,283 @@
+schema_version: 1
+change_id: CVF-007
+role: quality-engineer
+recorded_at: "2026-09-15T06:45:20Z"
+status: PASS
+verdict: PASS
+scope: >-
+  WSL portable verification scope only (the contract canonical commands that are
+  executable on this Linux host). Windows MSVC and UVC hardware evidence are
+  explicitly DEFERRED and are NOT PASS (see deferrals).
+blocked_reason: ""
+
+session:
+  started_utc: "2026-09-15T06:20:21Z"
+  canonical_rails_ended_utc: "2026-09-15T06:45:19Z"
+  state: >-
+    Full canonical re-run on the FROZEN CVF-007 post-review state through the
+    quality-engineer's own harness; no production, test, fixture, or
+    build-configuration file was modified. The frozen digest is byte-identical
+    before and after every command. All exit codes, counts, and summaries below
+    come from real output captured in this session.
+  runner: ".ai/validation/.ai/reports/cvf-007-quality.yaml (invokes the canonical preset commands verbatim; --clean-first added to the build steps only)"
+  logs: ".ai/validation/cvf-007-quality-out/"
+  review_cross_check: >-
+    The CVF-007 re-review (APPROVE, F1/F2 resolved) stated WSL evidence
+    263/263 debug and ASan, format 82, static 21, ownership 42/0, hardware hash
+    untouched. That evidence is independently reproduced in this report with
+    fresh command output on the frozen state.
+
+environment:
+  host: "WSL2 Linux 6.18.33.2-microsoft-standard-WSL2 x86_64; euid=1000 user=administrator (non-root)"
+  VCPKG_ROOT: "/home/administrator/vcpkg"
+  cmake: "3.28.3"
+  ctest: "3.28.3"
+  ninja: "1.11.1"
+  gcc_gxx: "13.3.0"
+  clang_tidy: "Ubuntu LLVM 18.1.3"
+  clang_format: "18.1.3"
+  nm: "GNU nm (binutils) 2.42"
+  log: ".ai/validation/cvf-007-quality-out/env.log"
+
+frozen_state:
+  snapshot_files: 118
+  pre_digest: "78492c6633fce1f73bda14628235bae75c10429b15d634b736bfed0a18dc2217"
+  post_digest: "78492c6633fce1f73bda14628235bae75c10429b15d634b736bfed0a18dc2217"
+  unchanged_during_quality_session: YES
+  scope: "sha256 over src tests include cmake examples plus CMakeLists.txt, CMakePresets.json, vcpkg.json, vcpkg-configuration.json, .clang-format, .clang-tidy"
+  evidence: [freeze-pre.log, freeze-post.log, frozen-state-diff.txt, freeze-diff.log]
+  confirmation: >-
+    All commands in this report executed against the same digest
+    (78492c6633fce1f73bda14628235bae75c10429b15d634b736bfed0a18dc2217); the post-command
+    snapshot is identical, so every result certifies this frozen state only.
+
+commands:
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    summary: "Configuring done (22 s); compiler GNU 13.3.0; warnings-as-errors ON; vcpkg x64-linux deps current"
+    log: wsl-configure.log
+  - command: "cmake --build --preset wsl-gcc-debug --clean-first --parallel"
+    exit_code: 0
+    summary: "Non-incremental clean build of the complete tree (134 s); exit 0"
+    log: wsl-build-clean-first.log
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "registered=263, passed=263, failed=0, skipped=0"
+    summary: "'100% tests passed, 0 tests failed out of 263'; Total Test time (real) = 3.40 s; 263 executed 'Test #N' lines"
+    log: wsl-ctest.log
+  - command: "ctest --preset wsl-gcc-debug -N"
+    exit_code: 0
+    summary: "Total Tests: 263; entries=263; hardware/uvc_smoke/cvf_hw name matches=0; CVF-007 entry=1 (#258)"
+    log: wsl-ctest-list.log
+  - command: "ctest --preset wsl-gcc-debug -R 'cvf007|CVF-007' --output-on-failure"
+    exit_code: 0
+    counts: "passed=1, failed=0, skipped=0"
+    summary: "'100% tests passed, 0 tests failed out of 1'; Test #258 'CVF-007 developer: a uvc config fails with camera_not_found on portable builds' Passed"
+    log: wsl-ctest-cvf007.log
+  - command: "./build/wsl-gcc-debug/cvf007_developer_tests"
+    exit_code: 0
+    counts: "assertions=8, test_cases=1, failures=0"
+    summary: "'All tests passed (8 assertions in 1 test case)' — direct run of the portable factory regression"
+    log: cvf007-direct.log
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    summary: "format-check passed: 82 file(s) conform to .clang-format"
+    log: wsl-format-check.log
+  - command: "clang-format --style=file --dry-run --Werror tests/hardware/uvc_smoke.cpp"
+    exit_code: 0
+    summary: "The one CVF-007 independent test file is clang-format clean (owned-file coverage beyond the target)"
+    log: format-owned-dryrun.log
+  - command: "cmake --build --preset wsl-gcc-debug --target abi-check"
+    exit_code: 0
+    summary: "abi-check passed: exactly 5 export(s): cvf_get_abi_version;cvf_initialize;cvf_inspect;cvf_reload_recipes;cvf_shutdown"
+    log: wsl-abi-check.log
+  - command: "cmake --preset wsl-clang-analysis"
+    exit_code: 0
+    summary: "Configuring done (22 s); compiler Clang 18.1.3"
+    log: wsl-clang-analysis-configure.log
+  - command: "cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+    exit_code: 0
+    summary: "static-analysis passed: 21 file(s) clean under .clang-tidy; COVERAGE GAP: the Windows-only TU is not in the Linux compile DB (see anomalies)"
+    log: wsl-static-analysis.log
+  - command: "cmake --preset wsl-gcc-asan"
+    exit_code: 0
+    summary: "Configuring done (25 s); CVFORWIN_ENABLE_SANITIZERS=ON"
+    log: wsl-asan-configure.log
+  - command: "cmake --build --preset wsl-gcc-asan --clean-first --parallel"
+    exit_code: 0
+    summary: "Non-incremental ASan/UBSan clean build of the complete tree (183 s); exit 0"
+    log: wsl-asan-build-clean-first.log
+  - command: "ctest --preset wsl-gcc-asan --output-on-failure"
+    exit_code: 0
+    counts: "registered=263, passed=263, failed=0, skipped=0"
+    summary: "'100% tests passed, 0 tests failed out of 263'; Total Test time (real) = 18.23 sec; no ASan/UBSan findings"
+    log: wsl-asan-ctest.log
+  - command: "sha256sum recomputation of every file under changes: in .ai/test-ownership.yaml"
+    exit_code: 0
+    counts: "files_checked=42, matches=42, mismatches=0, missing=0"
+    summary: "42/42 MATCH (CVF-001 6/6, CVF-002 8/8, CVF-003 4/4, CVF-004 6/6, CVF-005 7/7, CVF-006 10/10, CVF-007 1/1); manifest_sha256=e345def830c7e5a518afeef297a033bb94cc1f8f927b424e9537b775328a8a8b"
+    log: hashes.log
+  - command: "nm -D --defined-only build/wsl-gcc-debug/libcvforwin.so"
+    exit_code: 0
+    counts: "cvf_exports=5, non_cvf_exports=0"
+    summary: "exactly five cvf_* dynamic symbols; cvf_exports_match_def=YES against src/c_api/cvforwin.def"
+    log: exports.log
+  - command: "cmake --build --preset wsl-gcc-debug --target package"
+    exit_code: 1
+    summary: "EXPECTED nonzero refusal on the portable host: 'package is Windows-only; refusing to produce portable release evidence'; 0 archives; known QE-1 shell-quoting defect still observable (see anomalies)"
+    log: windows-guard.log
+  - command: "hardware-suite registration inspection (option declaration, three CMakeCache values, ctest -N names, build artifacts, add_test scan)"
+    exit_code: 0
+    counts: "cvf_hw_uvc_smoke registered=0, artifacts=0, declared default=OFF, caches=OFF (debug/clang/asan)"
+    summary: "CVFORWIN_BUILD_HARDWARE_TESTS is OFF by default and overridden nowhere; the suite is neither built nor registered on WSL"
+    log: hw-option.log
+  - command: "g++ -std=c++20 -Wall -Wextra -Werror -fsyntax-only -I src -I include tests/hardware/uvc_smoke.cpp"
+    exit_code: 0
+    counts: "preprocessed_nonempty_lines=0"
+    summary: "The owned hardware TU is an empty translation unit on Linux (entire body inside #if defined(_WIN32)); structural only, not execution evidence"
+    log: hw-syntax.log
+  - command: "cmake --workflow --preset wsl-quality"
+    exit_code: 0
+    summary: "6/6 workflow steps green in 607 s: configure, build, test 263/263 (4.39 s), format-check 82 files, abi-check 5 exports, static-analysis 21 files"
+    log: wsl-full-quality-workflow.log
+
+ownership_verification:
+  manifest: .ai/test-ownership.yaml
+  manifest_sha256: "e345def830c7e5a518afeef297a033bb94cc1f8f927b424e9537b775328a8a8b"
+  algorithm: sha256
+  files_checked: 42
+  matches: 42
+  mismatches: []
+  missing: 0
+  per_change: {CVF-001: "6/6", CVF-002: "8/8", CVF-003: "4/4", CVF-004: "6/6", CVF-005: "7/7", CVF-006: "10/10", CVF-007: "1/1"}
+  cvf007_hash_recomputed:
+    - "tests/hardware/uvc_smoke.cpp 02141468189556cae2f71985f65a6009b63d37aeb148c2faf3eeb3feeb5ff69c"
+  skipped_or_weakened_tests: []
+  notes: >-
+    42/42 recorded digests were recomputed byte-exact in this session (hashes.log),
+    including the single CVF-007 independent file. Source scan of
+    tests/hardware/uvc_smoke.cpp found no SKIP/mayfail/shouldfail/DISABLED/XFAIL/
+    '#if 0'/[!hide]/[.] markers and no commented-out REQUIRE/CHECK assertions
+    (skipcheck.log lines 29 and 31: no matches). The manifest itself is recorded
+    by hash above; it was not modified by this role.
+
+skip_check:
+  registered: 263
+  executed_debug: 263
+  executed_asan: 263
+  skipped: 0
+  disabled: 0
+  ctest_not_run_entries: 0
+  skip_marker_matches: 0
+  cvf007_registered: 1
+  cvf007_executed_debug: 1
+  hardware_registered: 0
+  focused_selection: "ctest -R 'cvf007|CVF-007': 100% tests passed, 0 tests failed out of 1 (Test #258)"
+  direct_run: "cvf007_developer_tests: All tests passed (8 assertions in 1 test case)"
+  notes: >-
+    The debug and ASan logs each contain 263 executed 'Test #N:' lines with zero
+    ***Skipped/***Disabled/***Not Run markers and no 'did not run' section; the
+    registered list (ctest -N, Total Tests: 263) equals the executed count, and the
+    four cvf.abi.* tests plus cvf006.lifecycle ran in both presets. No test named
+    hardware/uvc_smoke/cvf_hw is registered anywhere. The independent hardware file
+    remains an empty TU on WSL and is not silently substituted by any other test.
+
+export_check:
+  library: "build/wsl-gcc-debug/libcvforwin.so"
+  artifact_identity: "ELF 64-bit LSB shared object, x86-64, version 1 (SYSV), dynamically linked, BuildID[sha1]=af62cff407c3d7e100ee6e6b0016b91a68892eac, with debug_info, not stripped"
+  cvf_dynamic_exports: 5
+  non_cvf_dynamic_exports: 0
+  symbols: [cvf_get_abi_version, cvf_initialize, cvf_inspect, cvf_reload_recipes, cvf_shutdown]
+  matches_def_allowlist: YES
+  abi_check_target: "exactly 5 export(s) per the debug abi-check target"
+
+lint_static_analysis:
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    summary: "82 files conform to .clang-format"
+  - command: "clang-format --style=file --dry-run --Werror tests/hardware/uvc_smoke.cpp"
+    exit_code: 0
+    summary: "owned test file clean"
+  - command: "cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+    exit_code: 0
+    summary: "21 project TUs reported clean under .clang-tidy; documented coverage gap for the Windows-only TU (no Linux compile command)"
+  - command: "cmake --workflow --preset wsl-quality (steps 4-6)"
+    exit_code: 0
+    summary: "format-check 82, abi-check 5, static-analysis 21 — all green in the aggregate workflow"
+
+windows_guard:
+  mingw_references: NONE
+  github_workflow_present: NO
+  windows_build_dir_present: NO
+  pe_artifacts_under_build: 0
+  package_refusal: "exit 1 (expected), no .zip/.tar.gz/.7z archives produced"
+  portable_artifact_only: YES
+  hardware_suite_present: "0 registered tests, 0 build artifacts, 0 build-log references"
+  note: >-
+    No Windows ABI/DLL/package claims are made. Windows MSVC evidence is deferred
+    to the pinned windows-2022 CI job and UVC hardware validation to a designated
+    Windows 10/11 x64 station. WSL remains portable compilation/unit evidence only
+    (contract NFR-008/NFR-009, invariant: WSL is never Windows ABI evidence).
+
+deferrals:
+  - item: "Windows MSVC x64 configure/build/test/abi-check/package/package-verify and the windows-ci workflow (windows-2022, VS2022 v143)"
+    status: DEFERRED (explicitly NOT PASS)
+    reason: >-
+      Not executable on this Linux host; no Windows toolchain, no .github workflow
+      present in the workspace, and the contract makes windows-2022 CI the
+      authoritative source for DLL exports, dependencies, and package evidence.
+  - item: "Opt-in UVC hardware smoke suite tests/hardware/uvc_smoke.cpp (H1-H6, boundary and negative cases) on a designated Windows 10/11 x64 station"
+    status: DEFERRED (explicitly NOT PASS)
+    reason: >-
+      Entire TU inside #if defined(_WIN32), target built only under WIN32 with
+      CVFORWIN_BUILD_HARDWARE_TESTS=ON (default OFF); no Windows host and no UVC
+      camera here. Execution must include the station obligations recorded by the
+      review: F1 identity clean-check (uvc_smoke --list shows NUL-free single-line
+      identity strings) and F2 planar-YUV coverage (record the negotiated media
+      subtype; exercise the I420/YV12 path on a planar-capable device).
+  - item: "MSVC /W4 hygiene risks NF-3a (frame-rate rational double arithmetic, C4244/C4305) and NF-6 (integer conversions)"
+    status: DEFERRED (explicitly NOT PASS)
+    reason: "To be resolved or confirmed during the deferred windows-2022 MSVC build; no local MSVC evidence exists."
+  - item: "Windows package dependency allowlist, notices, and clean C consumer verification"
+    status: DEFERRED (explicitly NOT PASS)
+    reason: "windows-2022 package/package-verify only; the portable package target refuses by design."
+
+anomalies:
+  - id: QE-1
+    severity: carry-over
+    area: portable package-refusal target
+    detail: >-
+      On the portable host the package target correctly refuses (exit 1, no
+      artifacts): 'package is Windows-only; refusing to produce portable release
+      evidence'. The refusal line is then interrupted by the known shell-quoting
+      defect '/bin/sh: 1: Syntax error: "(" unexpected' (unquoted parentheses in the
+      cmake -E echo argument assembled by cmake/CvfPackage.cmake), so the guard
+      fails via the shell syntax error instead of the intended cmake -E false.
+      Refusal semantics (nonzero exit, no portable package) hold. Carry-over from
+      CVF-004/CVF-005/CVF-006; tracked for CVF-008 in .ai/workflow-state.yaml.
+    evidence: windows-guard.log
+  - id: static-analysis-windows-tu-gap
+    severity: informational / coverage gap
+    area: static-analysis coverage claim
+    detail: >-
+      static-analysis reports '21 file(s) clean', but the Windows-only TU
+      src/camera/uvc_windows/uvc_backend.cpp (and tests/hardware/uvc_smoke.cpp) is
+      absent from build/wsl-clang-analysis/compile_commands.json (entry_count=63,
+      src_cpp_files=21, uvc_backend_cpp_in_db=0, uvc_smoke_cpp_in_db=0), so
+      clang-tidy cannot analyze it on this host. The 21-file count therefore
+      overstates analyzed coverage by the Windows TU. Recorded as a gap, not as a
+      pass; real analysis of that file requires the deferred Windows toolchain.
+    evidence: compile-db.log
+  - id: harness-note
+    severity: informational
+    detail: >-
+      The runner adds --clean-first to the canonical build commands (same preset
+      flags plus a non-incremental rebuild) and runs focused/direct confirmation
+      commands in addition to the canonical set; no canonical command was
+      substituted, softened, or skipped. The package target exit 1 is the expected
+      guard behavior, not a failure.
+
+final_response:
+  commands_run: 20
+  failures: 0
+  next_action: "Controller: CVF-007 quality gate PASS on the frozen WSL scope (debug and ASan 263/263 with 0 skipped, CVF-007 #258 1/1 + direct 8/8, format 82, abi 5/5, static-analysis 21 with the recorded Windows-TU coverage gap, ownership 42/42, exports 5/5, hardware suite unregistered/default-OFF, wsl-quality workflow 6/6); Windows MSVC and station hardware evidence remain DEFERRED (NOT PASS), and QE-1 plus the static-analysis gap carry to CVF-008."

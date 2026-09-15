@@ -1,0 +1,343 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 28,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "wsl-base",
+      "hidden": true,
+      "displayName": "WSL portable base (Ninja + vcpkg x64-linux)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "VCPKG_TARGET_TRIPLET": "x64-linux",
+        "VCPKG_HOST_TRIPLET": "x64-linux",
+        "VCPKG_MANIFEST_FEATURES": "test",
+        "CVFORWIN_BUILD_TESTS": "ON",
+        "CVFORWIN_WARNINGS_AS_ERRORS": "ON"
+      },
+      "environment": {
+        "VCPKG_MAX_CONCURRENCY": "6"
+      }
+    },
+    {
+      "name": "wsl-gcc-debug",
+      "inherits": "wsl-base",
+      "displayName": "WSL GCC Debug (canonical portable build and tests)",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "wsl-gcc-asan",
+      "inherits": "wsl-base",
+      "displayName": "WSL GCC Debug with AddressSanitizer and UndefinedBehaviorSanitizer",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CVFORWIN_ENABLE_SANITIZERS": "ON"
+      }
+    },
+    {
+      "name": "wsl-clang-analysis",
+      "inherits": "wsl-base",
+      "displayName": "WSL Clang static analysis (clang-tidy over the project sources)",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CVFORWIN_ENABLE_CLANG_TIDY": "OFF"
+      }
+    },
+    {
+      "name": "windows-msvc-release",
+      "displayName": "Windows MSVC v143 Release x64 (static CRT, one project DLL; test backends OFF)",
+      "generator": "Visual Studio 17 2022",
+      "architecture": {
+        "value": "x64",
+        "strategy": "set"
+      },
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-windows-static",
+        "VCPKG_MANIFEST_FEATURES": "test",
+        "CVFORWIN_BUILD_TESTS": "ON",
+        "CVFORWIN_BUILD_TEST_BACKENDS": "OFF",
+        "CVFORWIN_WARNINGS_AS_ERRORS": "ON"
+      },
+      "environment": {
+        "VCPKG_MAX_CONCURRENCY": "6"
+      }
+    },
+    {
+      "name": "windows-msvc-tests",
+      "displayName": "Windows MSVC v143 x64 test-enabled (camera/ABI suites, test backends ON)",
+      "generator": "Visual Studio 17 2022",
+      "architecture": {
+        "value": "x64",
+        "strategy": "set"
+      },
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-windows-static",
+        "VCPKG_MANIFEST_FEATURES": "test",
+        "CVFORWIN_BUILD_TESTS": "ON",
+        "CVFORWIN_BUILD_TEST_BACKENDS": "ON",
+        "CVFORWIN_WARNINGS_AS_ERRORS": "ON"
+      },
+      "environment": {
+        "VCPKG_MAX_CONCURRENCY": "6"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "wsl-gcc-debug",
+      "configurePreset": "wsl-gcc-debug",
+      "jobs": 6
+    },
+    {
+      "name": "wsl-gcc-debug-format-check",
+      "configurePreset": "wsl-gcc-debug",
+      "targets": [
+        "format-check"
+      ]
+    },
+    {
+      "name": "wsl-gcc-debug-abi-check",
+      "configurePreset": "wsl-gcc-debug",
+      "targets": [
+        "abi-check"
+      ]
+    },
+    {
+      "name": "wsl-gcc-debug-static-analysis",
+      "configurePreset": "wsl-gcc-debug",
+      "targets": [
+        "static-analysis"
+      ]
+    },
+    {
+      "name": "wsl-gcc-asan",
+      "configurePreset": "wsl-gcc-asan",
+      "jobs": 6
+    },
+    {
+      "name": "wsl-clang-analysis",
+      "configurePreset": "wsl-clang-analysis",
+      "jobs": 6
+    },
+    {
+      "name": "wsl-clang-analysis-static-analysis",
+      "configurePreset": "wsl-clang-analysis",
+      "targets": [
+        "static-analysis"
+      ]
+    },
+    {
+      "name": "windows-msvc-release",
+      "configurePreset": "windows-msvc-release",
+      "configuration": "Release",
+      "jobs": 6
+    },
+    {
+      "name": "windows-msvc-release-abi-check",
+      "configurePreset": "windows-msvc-release",
+      "configuration": "Release",
+      "targets": [
+        "abi-check"
+      ]
+    },
+    {
+      "name": "windows-msvc-release-package",
+      "configurePreset": "windows-msvc-release",
+      "configuration": "Release",
+      "targets": [
+        "package"
+      ]
+    },
+    {
+      "name": "windows-msvc-release-package-verify",
+      "configurePreset": "windows-msvc-release",
+      "configuration": "Release",
+      "targets": [
+        "package-verify"
+      ]
+    },
+    {
+      "name": "windows-msvc-release-symbols",
+      "configurePreset": "windows-msvc-release",
+      "configuration": "Release",
+      "targets": [
+        "package-symbols"
+      ]
+    },
+    {
+      "name": "windows-msvc-tests",
+      "configurePreset": "windows-msvc-tests",
+      "configuration": "Release",
+      "jobs": 6
+    },
+    {
+      "name": "windows-msvc-tests-abi-check",
+      "configurePreset": "windows-msvc-tests",
+      "configuration": "Release",
+      "targets": [
+        "abi-check"
+      ]
+    },
+    {
+      "name": "windows-msvc-tests-package",
+      "configurePreset": "windows-msvc-tests",
+      "configuration": "Release",
+      "targets": [
+        "package"
+      ]
+    },
+    {
+      "name": "windows-msvc-tests-package-verify",
+      "configurePreset": "windows-msvc-tests",
+      "configuration": "Release",
+      "targets": [
+        "package-verify"
+      ]
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "wsl-gcc-debug",
+      "configurePreset": "wsl-gcc-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "wsl-gcc-asan",
+      "configurePreset": "wsl-gcc-asan",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-msvc-release",
+      "configurePreset": "windows-msvc-release",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-msvc-tests",
+      "configurePreset": "windows-msvc-tests",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ],
+  "workflowPresets": [
+    {
+      "name": "wsl-quality",
+      "displayName": "Canonical WSL quality workflow (single build tree; CMake 3.28 workflows permit one configure step)",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "wsl-gcc-debug"
+        },
+        {
+          "type": "build",
+          "name": "wsl-gcc-debug"
+        },
+        {
+          "type": "test",
+          "name": "wsl-gcc-debug"
+        },
+        {
+          "type": "build",
+          "name": "wsl-gcc-debug-format-check"
+        },
+        {
+          "type": "build",
+          "name": "wsl-gcc-debug-abi-check"
+        },
+        {
+          "type": "build",
+          "name": "wsl-gcc-debug-static-analysis"
+        }
+      ]
+    },
+    {
+      "name": "windows-ci",
+      "displayName": "Canonical Windows CI workflow (windows-2022)",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "windows-msvc-release"
+        },
+        {
+          "type": "build",
+          "name": "windows-msvc-release"
+        },
+        {
+          "type": "test",
+          "name": "windows-msvc-release"
+        },
+        {
+          "type": "build",
+          "name": "windows-msvc-release-abi-check"
+        },
+        {
+          "type": "build",
+          "name": "windows-msvc-release-package"
+        },
+        {
+          "type": "build",
+          "name": "windows-msvc-release-package-verify"
+        },
+        {
+          "type": "build",
+          "name": "windows-msvc-release-symbols"
+        }
+      ]
+    },
+    {
+      "name": "windows-tests-quality",
+      "displayName": "Windows test-enabled quality workflow (camera/ABI suites, test-enabled package, clean consumer)",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "windows-msvc-tests"
+        },
+        {
+          "type": "build",
+          "name": "windows-msvc-tests"
+        },
+        {
+          "type": "test",
+          "name": "windows-msvc-tests"
+        },
+        {
+          "type": "build",
+          "name": "windows-msvc-tests-abi-check"
+        },
+        {
+          "type": "build",
+          "name": "windows-msvc-tests-package"
+        },
+        {
+          "type": "build",
+          "name": "windows-msvc-tests-package-verify"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+schema_version: 1
+change_id: CVF-004
+target: "Recipe store: strict global config + versioned recipes + immutable catalog + atomic holder"
+in_scope:
+  - strict JSON parsing of cvforwin.json (duplicate keys, unknown keys, invalid UTF-8, bounds, schema version)
+  - strict recipe parsing with algorithm-aware parameter validation via the compiled registry
+  - all-or-nothing catalog load with duplicate recipe_id rejection and sorted ids
+  - atomic holder semantics (readers never observe a partial catalog)
+out_of_scope:
+  - runtime reload orchestration, cameras, C ABI lifecycle, logging/persistence
+interface_reference:
+  namespace: "cvforwin::recipes"
+  error_codes: "1600 config_file_missing, 1601 config_parse_error, 1602 config_duplicate_key, 1603 config_unknown_key, 1604 config_value_invalid, 1605 config_schema_version, 1606 recipes_dir_missing, 1607 config_io_error, 1610 recipe_file_missing, 1611 recipe_parse_error, 1612 recipe_duplicate_key, 1613 recipe_unknown_key, 1614 recipe_value_invalid, 1615 recipe_schema_version, 1616 recipe_id_invalid, 1617 recipe_id_duplicate, 1618 recipe_algorithm_unknown, 1619 recipe_parameters_invalid, 1620 recipe_capture_invalid, 1621 recipe_artifacts_invalid, 1622 recipe_not_found (status recipe_not_found), 1623 recipe_io_error; all config/recipe codes map to Status::config_error except 1622 -> recipe_not_found"
+  headers:
+    - "src/recipes/config.h"
+    - "src/recipes/recipe.h"
+    - "src/recipes/recipe_catalog.h"
+  api:
+    config: "core::Result<GlobalConfig> load_global_config(const std::filesystem::path& config_root, const std::filesystem::path& output_root); GlobalConfig { schema_version; camera {backend, device_path, vendor_id, product_id, friendly_name}; base_capture {width, height, frame_rate, pixel_format}; logging {level, max_file_bytes, max_files}; retention {max_age_days, max_total_bytes}; config_root; output_root }"
+    recipe: "core::Result<Recipe> load_recipe_file(const std::filesystem::path& path, const inspection::AlgorithmRegistry& registry); Recipe { schema_version; recipe_id; algorithm; parameters (json object); capture {optional width/height/frame_rate/pixel_format; settle_frames}; artifacts {save_policy: always|fail_or_error|never; required: bool} }"
+    catalog: "RecipeCatalog::load(recipes_dir, registry) -> Result<RecipeCatalog>; find(recipe_id) -> Result<const Recipe*/>; recipe_ids() sorted; size(); RecipeHolder: publish(shared_ptr<const RecipeCatalog>) noexcept; current() -> shared_ptr<const RecipeCatalog> (default nullptr)"
+  config_bounds: "roots absolute; camera.backend == \"uvc\"; selector: device_path non-empty OR (vendor_id AND product_id) with ^[0-9A-Fa-f]{4}$; width/height 1..16384; frame_rate (0,1000]; pixel_format in any|mono8|bgr8|rgb8; level in trace|debug|info|warn|error|critical; max_file_bytes 1024..1073741824; max_files 1..1000; max_age_days 1..3650; max_total_bytes 1048576..1099511627776; schema_version == 1"
+  recipe_rules: "recipe_id ^[A-Za-z0-9._-]{1,128}$; algorithm exists in registry (^[a-z0-9._-]{1,64}$); parameters object validated by the algorithm's validate_parameters; capture.settle_frames integer 0..1000 (required); artifacts required keys save_policy + required; unknown/missing/wrong-type keys rejected"
+observable_behaviors:
+  - id: B1
+    behavior: "Valid cvforwin.json loads: every field parses to the documented value and both roots are recorded; a valid recipe file loads with parameters preserved as given."
+  - id: B2
+    behavior: "Config errors: missing file -> 1600; malformed JSON -> 1601; duplicate key -> 1602; unknown key -> 1603; schema_version != 1 -> 1605; backend != \"uvc\", insufficient selector, out-of-range width/height/frame_rate/pixel_format/level/limits -> 1604; non-absolute root -> invalid_argument/path_not_absolute (1011); unreadable file -> 1607."
+  - id: B3
+    behavior: "Recipe errors: missing top-level key -> 1614; unknown key -> 1613; duplicate key -> 1612; parse failure -> 1611; missing file -> 1610; schema_version != 1 -> 1615; invalid recipe_id (empty, >128, bad chars) -> 1616; unknown or malformed algorithm key -> 1618; parameters rejected by the algorithm -> 1619; capture errors (missing settle_frames, out of range, unknown key) -> 1620; artifacts errors (bad policy, missing/invalid required) -> 1621."
+  - id: B4
+    behavior: "Catalog: loads all *.json files directly under recipes_dir with ids sorted lexicographically; an empty directory yields a valid size-0 catalog; a missing directory -> 1606; any single invalid recipe fails the load with no catalog; duplicate recipe_id across files -> 1617 with no catalog."
+  - id: B5
+    behavior: "find(known) returns a pointer whose fields match the loaded recipe; find(unknown) -> recipe_not_found/1622; recipe_ids() and size() reflect the loaded set."
+  - id: B6
+    behavior: "RecipeHolder: default current() is nullptr; after publish it returns the published catalog; publish swaps atomically; under concurrent current() calls during repeated publishes, readers always observe a complete catalog (one of the published id sets, matching sizes), never partial or mixed state."
+  - id: B7
+    behavior: "All-or-nothing primitive: given holder holding catalog A, a failed load of candidate catalog B leaves holder.current() == A unchanged; only a fully validated catalog can be published."
+boundary_cases:
+  - "recipe_id exactly 128 bytes (allowed) and 129 bytes (rejected); algorithm key exactly 64 chars."
+  - "Numeric bounds: width 1 and 16384; width 0 and 16385; frame_rate just above 0; max_files 1 and 1000; max_age_days 1 and 3650."
+  - "Empty recipes directory; single-recipe directory; two files with the same recipe_id."
+  - "parameters empty object (valid for example.threshold defaults); extra unknown parameter key (invalid)."
+negative_cases:
+  - "Duplicate JSON keys at top level and nested levels; unknown keys at top level, camera, logging, retention, capture, artifacts."
+  - "Invalid UTF-8 bytes in a string value; JSON array where an object is required (parameters, capture, artifacts)."
+  - "Relative config_root/output_root."
+compatibility_requirements:
+  - "Tests are Catch2 v3 C++20, deterministic, hardware-free, no sleeps beyond small bounded waits in the concurrency test (> ~250 ms not allowed)."
+  - "Independent tests use the cvf004_ prefix under tests/unit/ and must be clang-format clean before hashing."
+acceptance_criteria:
+  - "After implementation, canonical WSL configure/build/ctest/format-check/static-analysis/sanitizers pass with the new tests executing inside ctest."
+allowed_context:
+  - .ai/project-contract.yaml
+  - .ai/test-briefs/CVF-004.yaml
+  - tests/unit/**, tests/fixtures/recipes/**
+  - CMakeLists.txt, CMakePresets.json
+  - "frozen interface headers once they exist (may #include, must not open .cpp files): src/recipes/config.h, src/recipes/recipe.h, src/recipes/recipe_catalog.h, src/core/{status,error,result,deadline}.h, src/camera/captured_frame.h, src/inspection/{algorithm,registry}.h, src/algorithms/example_threshold.h, src/algorithms/compiled_algorithms.h"
+  - ~/.config/opencode/skills/black-box-testing/SKILL.md
+forbidden_context:
+  - "any src/** .cpp implementation file or src/** file not listed above"
+  - .ai/changes/**
+  - .ai/reports/**
+  - "any diff, changed-file list, developer note, or root-cause description"
+allowed_test_paths:
+  - tests/unit/cvf004_*.cpp
+  - tests/unit/cvf004_*.h
+fixtures_path:
+  - tests/fixtures/recipes/**
+ownership_manifest: .ai/test-ownership.yaml
+evidence:
+  red_report: .ai/reports/CVF-004-test-red.yaml
+  verify_report: .ai/reports/CVF-004-test-verify.yaml
+suggested_red_commands:
+  - "g++ -std=c++20 -Wall -Wextra -Werror -I src -I include -isystem \"$VCPKG_ROOT/installed/x64-linux/include\" -fsyntax-only tests/unit/cvf004_<test>.cpp"
+notes: >-
+  Expect RED because the recipes interface headers do not exist yet. Extend the changes:
+  mapping in .ai/test-ownership.yaml with a CVF-004 section; preserve existing sections
+  byte-exact. For algorithm-aware checks, build an AlgorithmRegistry with
+  register_compiled_algorithms() and use example.threshold in recipe fixtures.

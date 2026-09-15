@@ -1,0 +1,58 @@
+schema_version: 1
+change_id: CVF-008
+target: "Clean package-consumer test kit (Windows CI-only execution)"
+in_scope:
+  - standalone consumer project that configures/compiles/links/runs against an installed package
+  - package content checks (DLL/import lib/header/example config/notices), export set, runtime dependency allowlist
+  - synthetic inspect through the installed package's test-enabled build
+out_of_scope:
+  - local WSL execution (package targets are Windows-only by design), CI workflow authoring (developer), examples host source (developer)
+constraints:
+  - "Execution environment: clean windows-2022 job using only the installed package; author the kit so CI can run it unattended."
+  - "No secrets, no network access beyond the checkout, no machine-specific paths (package root supplied via a CMake cache variable/argument)."
+interface_reference:
+  package_layout: "bin/cvforwin.dll, lib/cvforwin.lib, include/cvforwin/cvf_api.h, config/examples/**, docs/**, LICENSES/** (verify against the actual package manifest produced by the developer; record assumptions)"
+  consumer: "C11 translation unit including only <cvforwin/cvf_api.h>; query ABI version; initialize with a config pointing at a synthetic (test-enabled package) or file backend; inspect once and validate status/verdict/json shape; reload recipes; shutdown; deterministic exit codes."
+  checks: "package contents, exactly five cvf_* exports in the DLL (dumpbin in CI), notices present, no non-system runtime DLL (dependency allowlist), clean consumer configure/build/run exit 0."
+observable_behaviors:
+  - id: P1
+    behavior: "The consumer project configures against CVF_PACKAGE_ROOT, compiles and links against the installed import library only, and runs to completion with exit 0."
+  - id: P2
+    behavior: "ABI version query returns 1 before any initialization."
+  - id: P3
+    behavior: "Initialize + one inspect + reload + shutdown complete with documented statuses; a PASS/FAIL verdict is produced by the example algorithm on the synthetic input (never NOT_EVALUATED on success)."
+  - id: P4
+    behavior: "Package checks fail (non-zero) if any required file is missing, if the export set differs from the five approved symbols, if a non-system runtime DLL appears, or if notices are absent."
+boundary_cases:
+  - "Fresh configure in a clean build directory; no reuse of the main build tree."
+  - "Package root passed as an absolute path; relative path rejected with a clear message."
+negative_cases:
+  - "Missing package file / wrong package root -> check script exits non-zero with a clear message."
+compatibility_requirements:
+  - "Everything Windows-only; authored and formatted here, executed in windows-2022 CI only; do not fabricate execution evidence."
+  - "C11 consumer source clang-format clean before hashing; CMake/scripts self-contained."
+acceptance_criteria:
+  - "Portable WSL suite remains green; the kit is authored, hashed, and wired for CI by the developer with execution deferred to windows-2022."
+allowed_context:
+  - .ai/project-contract.yaml
+  - .ai/test-briefs/CVF-008.yaml
+  - tests/package/**
+  - CMakeLists.txt, CMakePresets.json
+  - "frozen headers (may #include, must not open .cpp files): include/cvforwin/cvf_api.h"
+  - ~/.config/opencode/skills/black-box-testing/SKILL.md
+forbidden_context:
+  - "any src/** .cpp implementation file"
+  - .ai/changes/**
+  - .ai/reports/**
+  - "any diff, changed-file list, developer note, or root-cause description"
+allowed_test_paths:
+  - tests/package/**
+ownership_manifest: .ai/test-ownership.yaml
+evidence:
+  red_report: .ai/reports/CVF-008-test-red.yaml
+  verify_report: .ai/reports/CVF-008-test-verify.yaml
+notes: >-
+  Record RED/deferred honestly: the kit cannot execute on WSL; the RED report states what the
+  developer must wire (CI job reference, CVF_PACKAGE_ROOT, test-enabled package variant) and
+  the assumptions about the package layout. Extend the changes: mapping with a CVF-008 section;
+  preserve existing sections byte-exact.

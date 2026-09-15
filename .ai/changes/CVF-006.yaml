@@ -1,0 +1,130 @@
+schema_version: 1
+change_id: CVF-006
+program: cvforwin-implementation-1.0.0
+title: "Runtime orchestrator + full C API lifecycle (initialize/inspect/reload/shutdown) with test-backend enablement"
+risk: R2
+risk_justification: >-
+  Implements the approved runtime_orchestrator module and completes the approved
+  public_c_api entry points exactly as specified by contract 1.0.0. No public symbol,
+  layout, status, calling-convention, ownership, or timeout semantics change. One bounded,
+  documented extension: test-enabled builds additionally accept camera.backend values
+  "file"/"synthetic" (release builds remain "uvc"-only), so WSL/CI can exercise the full
+  lifecycle without hardware.
+intent: >-
+  Own the single process context (camera session, recipe snapshot, registry, diagnostics,
+  artifacts, serialization gate), run one complete inspection cycle under one deadline with
+  rollback-safe initialization and atomic reload, wire all five C ABI entry points to the
+  runtime, and map internal results/warnings to the frozen public structures.
+scope:
+  allowed_files:
+    production:
+      - src/runtime/**
+      - src/c_api/**
+      - src/recipes/config.h
+      - src/recipes/config.cpp
+      - src/diagnostics/diagnostics.h
+      - src/diagnostics/diagnostics.cpp
+      - src/core/error.h
+      - src/core/error.cpp
+      - CMakeLists.txt
+      - cmake/**
+      - include/cvforwin/cvf_api.h   # comments only; no symbol/layout/constant changes
+    independent_tests:
+      - tests/abi/cvf006_*.c
+      - tests/abi/cvf006_*.h
+      - tests/unit/cvf006_*.cpp
+      - tests/unit/cvf006_*.h
+    developer_tests:
+      - tests/unit/** (files not matching cvf006_*)
+    fixtures:
+      - tests/fixtures/runtime/**
+    evidence_harness:
+      - .ai/validation/**
+  out_of_scope:
+    - src/camera/**
+    - src/recipes/** (except config.h/.cpp backend extension)
+    - src/inspection/**
+    - src/algorithms/**
+    - src/artifacts/**
+    - examples/**
+    - docs/**
+    - .github/**
+    - .ai/project-contract.yaml
+interface_v1:
+  authority_note: >-
+    Internal runtime interface frozen for tests, plus the public lifecycle semantics that
+    complete the v1 C ABI. Header paths and spellings are exact.
+  runtime_error_codes_new:
+    - "runtime_queue_timeout = 1900 -> Status::timeout"
+    - "runtime_result_too_large = 1901 -> Status::buffer_too_small"
+    - "runtime_required_artifact_failed = 1902 -> Status::required_artifact_error"
+    - "runtime_reload_failed = 1903 -> Status::config_error"
+    - "runtime_context_closed = 1904 -> Status::invalid_context"
+  runtime:
+    header: "src/runtime/context.h"
+    types: >-
+      struct RuntimeOptions { std::filesystem::path config_root; std::filesystem::path output_root;
+      bool enable_file_logging = true; bool enable_callback_logging = false;
+      diagnostics::CallbackBinding log_callback{}; std::shared_ptr<camera::ICameraBackend>
+      camera_override; /* testing hook; when set, config-driven backend construction is skipped */ };
+    api:
+      - "class Context { static core::Result<std::unique_ptr<Context>> create(RuntimeOptions options);
+         core::Result<InspectionOutcome> inspect(const InspectionRequest& request);
+         core::Result<void> reload_recipes(); std::uint32_t warning_flags() const noexcept;
+         ~Context(); };"
+      - "class TimeoutMs { TimeoutMs(); TimeoutMs(std::uint32_t ms); TimeoutMs(std::chrono::milliseconds ms); assignment from both; std::uint32_t value() const noexcept; };"
+      - "struct InspectionRequest { std::string recipe_id; std::string request_id; TimeoutMs timeout_ms;
+         std::optional<std::string> input_json; };"
+      - "struct InspectionOutcome { core::Status status; core::Verdict verdict; core::ErrorCode error_code;
+         std::uint32_t warning_flags; std::uint32_t elapsed_ms; nlohmann::json output_json;
+         std::string image_path; std::string error_message; };"
+    rules:
+      - "create: load global config -> load recipe catalog -> create diagnostics -> build/resolve/open the camera -> publish. Any failure rolls back every already-created resource (no leaks, no half state) and returns Failure."
+      - "Camera selection: RuntimeOptions.camera_override wins when set; otherwise config camera.backend picks the backend. backend \"uvc\" is always valid in the schema; \"file\" and \"synthetic\" are valid only when the library is built with CVFORWIN_BUILD_TEST_BACKENDS=ON (release builds reject them with config_value_invalid)."
+      - "inspect: starts one deadline (timeout_ms, zero -> 5000 ms) covering the serialized queue wait, recipe lookup, capture with at most one reconnect/recapture, algorithm dispatch, encoding, and required persistence; each stage receives only the remaining deadline. Concurrent inspect calls serialize on one timed gate; a deadline that expires while waiting -> TIMEOUT."
+      - "inspect order: recipe lookup -> capture_with_one_retry -> registry dispatch (recipe.algorithm) -> serialize measurements+defects JSON -> verdict -> optional image save per recipe.artifacts.save_policy/required. Unknown recipe -> RECIPE_NOT_FOUND; algorithm/registry failures -> ALGORITHM_ERROR; camera failures -> CAMERA_IO/TIMEOUT; output_json capacity below the required 65536 or serialized JSON larger than the caller capacity -> BUFFER_TOO_SMALL."
+      - "Image save: decide_capture_save(save_policy, verdict, execution_ok); optional save failure adds warning_image_save_failed (public bit 1u<<1) and keeps the verdict; required save failure -> REQUIRED_ARTIFACT_ERROR + NOT_EVALUATED. Diagnostics sink failure adds warning_log_sink_failed (1u<<0). Retention enforcement runs after saves; failure adds warning_image_save_failed."
+      - "reload_recipes: validate a complete candidate catalog; on success atomically replace the snapshot (readers see old or new, never partial); on failure keep the old snapshot and return CONFIG_ERROR with a detail code and message."
+      - "Context::inspect returns a valued Result<InspectionOutcome> carrying the true status for every execution outcome (timeout, camera, algorithm, artifact failures included); Result failure is reserved for misuse such as a closed context."
+      - "~Context: orderly shutdown of camera, diagnostics, artifacts; no further calls are valid."
+  diagnostics_extension:
+    - "DiagnosticsConfig gains one trailing additive field: bool enable_file_sink = true; (existing designated initializers remain valid). When false, no file sink is created and warning_log_sink_failed is not set for file absence."
+  public_c_api:
+    functions: "All five v1 entry points per contract interface cvforwin_c_abi_v1; validation order frozen in CVF-001 remains (struct_size first, then abi_version/reserved/pointers, then context state), and no exception may cross the boundary."
+    mapping:
+      - "cvf_initialize: copies options, creates diagnostics per flags (file logging flag -> enable_file_sink; callback flag requires non-null callback), loads config+recipes, opens the camera, stores the single context; failures set error info and leave out_context NULL. A second live context -> CONTEXT_LIMIT."
+      - "cvf_inspect: validates context, request, and result (struct_size, abi_version, reserved, buffers >= required capacities: output_json 65536, image_path 4096, error_message 1024) before side effects; an undersized buffer returns BUFFER_TOO_SMALL with bytes_required set to the required capacity (the C API performs this pre-check itself; src/core/abi_validation.* is out of scope); fills result per outcome; non-OK -> verdict NOT_EVALUATED, output_json/image_path cleared, error_message + status + error_code set; return value mirrors result.status."
+      - "cvf_reload_recipes: context + error validation; runtime reload; error info per failure."
+      - "cvf_shutdown: close resources and invalidate the opaque context; a second shutdown -> INVALID_CONTEXT."
+  test_backend_addressing:
+    - "synthetic: fixed descriptor { backend_key \"synthetic\", device_path \"synthetic0\", vendor_id \"0000\", product_id \"0000\", friendly_name \"Synthetic camera\" }; base_capture width/height configure the frame size."
+    - "file: descriptor device_path = absolute frames directory; frames are the regular files directly under it sorted by filename; empty directory fails captures with frames_exhausted."
+invariants:
+  - "One live context per process; inspect calls are thread-safe but execute serially; callbacks never re-enter the API."
+  - "Timeout covers queue wait, capture, one reconnect/recapture, algorithm, encoding, required persistence, and return; each stage receives only the remaining deadline."
+  - "Technical errors are NOT_EVALUATED and never FAIL; product defects are FAIL with OK execution status; warnings never change a valid verdict."
+  - "Recipe reload is all-or-nothing; readers observe one immutable old or new snapshot."
+  - "No exception crosses the C ABI; caller memory owns every request/result/string/JSON buffer; only the opaque context is DLL-managed."
+  - "Release behavior is unchanged: without test backends enabled, only backend \"uvc\" is accepted and only Windows provides it."
+verification:
+  canonical_wsl:
+    - "cmake --preset wsl-gcc-debug"
+    - "cmake --build --preset wsl-gcc-debug --parallel"
+    - "ctest --preset wsl-gcc-debug --output-on-failure"
+    - "cmake --build --preset wsl-gcc-debug --target format-check"
+    - "cmake --preset wsl-clang-analysis && cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+    - "cmake --preset wsl-gcc-asan && cmake --build --preset wsl-gcc-asan --parallel && ctest --preset wsl-gcc-asan --output-on-failure"
+acceptance_reference: >-
+  Contract acceptance_checks 3, 5, 6, 7, 8 (C11 lifecycle, malformed input rejection, status/verdict
+  separation, one-retry camera faults, atomic reload) as applicable on WSL through the test backends.
+rollback: "Remove src/runtime/**, revert src/c_api to the CVF-001 validating shell, remove the backend extension and the CVF-006 tests."
+reporting:
+  developer_report: .ai/reports/CVF-006-implementation.yaml
+  test_red_report: .ai/reports/CVF-006-test-red.yaml
+  test_verify_report: .ai/reports/CVF-006-test-verify.yaml
+  review_report: .ai/reviews/CVF-006.yaml
+  quality_report: .ai/reports/CVF-006-quality.yaml
+notes:
+  - "The CVF-004 negative test that rejects backend \"file\" must become build-mode-aware (accept \"file\"/\"synthetic\" when test backends are enabled, reject in release mode) via a CMake definition on the test target; the test owner updates it with hash records."
+  - "Windows UVC + package/consumer evidence remains for CVF-007/CVF-008 and windows-2022 CI."
+  - "Independent tests: C11 lifecycle tests in tests/abi/cvf006_*; internal runtime/fault/deadline/serialization tests in tests/unit/cvf006_*."

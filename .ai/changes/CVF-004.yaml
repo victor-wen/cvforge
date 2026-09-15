@@ -1,0 +1,164 @@
+schema_version: 1
+change_id: CVF-004
+program: cvforwin-implementation-1.0.0
+title: "Recipe store: strict global configuration + versioned recipes + immutable catalog + atomic holder"
+risk: R2
+risk_justification: >-
+  Implements the approved recipe_store module inside the baseline using approved
+  dependencies (core_model, nlohmann-json, the inspection registry validation contract).
+  No public ABI, schema-compatibility, dependency-family, or invariant change.
+intent: >-
+  Provide strict, bounded, duplicate-key-safe parsing of cvforwin.json and recipes/*.json,
+  algorithm-aware parameter validation through the compiled registry, an immutable catalog
+  indexed by recipe_id, and an atomic holder that swaps complete catalogs only after full
+  validation so readers never observe a partial set.
+scope:
+  allowed_files:
+    production:
+      - src/recipes/config.h
+      - src/recipes/config.cpp
+      - src/recipes/recipe.h
+      - src/recipes/recipe.cpp
+      - src/recipes/recipe_catalog.h
+      - src/recipes/recipe_catalog.cpp
+      - src/core/error.h
+      - src/core/error.cpp
+      - CMakeLists.txt
+      - cmake/**
+    independent_tests:
+      - tests/unit/cvf004_*.cpp
+      - tests/unit/cvf004_*.h
+    developer_tests:
+      - tests/unit/** (files not matching cvf004_*)
+    fixtures:
+      - tests/fixtures/recipes/**
+    evidence_harness:
+      - .ai/validation/**
+  out_of_scope:
+    - include/cvforwin/**
+    - src/c_api/**
+    - src/camera/**
+    - src/inspection/**
+    - src/algorithms/**
+    - src/diagnostics/**
+    - src/artifacts/**
+    - src/runtime/**
+    - examples/**
+    - docs/**
+    - config/examples/** (created in CVF-008)
+    - .github/**
+    - .ai/project-contract.yaml
+interface_v1:
+  authority_note: >-
+    Frozen internal interface for tests and implementation in this change.
+    Namespace cvforwin::recipes. Header paths and spellings are exact.
+  headers:
+    - "src/recipes/config.h"
+    - "src/recipes/recipe.h"
+    - "src/recipes/recipe_catalog.h"
+  error_codes_new:
+    - "config_file_missing = 1600 -> Status::config_error"
+    - "config_parse_error = 1601 -> Status::config_error"
+    - "config_duplicate_key = 1602 -> Status::config_error"
+    - "config_unknown_key = 1603 -> Status::config_error"
+    - "config_value_invalid = 1604 -> Status::config_error"
+    - "config_schema_version = 1605 -> Status::config_error"
+    - "recipes_dir_missing = 1606 -> Status::config_error"
+    - "config_io_error = 1607 -> Status::config_error"
+    - "recipe_file_missing = 1610 -> Status::config_error"
+    - "recipe_parse_error = 1611 -> Status::config_error"
+    - "recipe_duplicate_key = 1612 -> Status::config_error"
+    - "recipe_unknown_key = 1613 -> Status::config_error"
+    - "recipe_value_invalid = 1614 -> Status::config_error"
+    - "recipe_schema_version = 1615 -> Status::config_error"
+    - "recipe_id_invalid = 1616 -> Status::config_error"
+    - "recipe_id_duplicate = 1617 -> Status::config_error"
+    - "recipe_algorithm_unknown = 1618 -> Status::config_error"
+    - "recipe_parameters_invalid = 1619 -> Status::config_error"
+    - "recipe_capture_invalid = 1620 -> Status::config_error"
+    - "recipe_artifacts_invalid = 1621 -> Status::config_error"
+    - "recipe_not_found = 1622 -> Status::recipe_not_found"
+    - "recipe_io_error = 1623 -> Status::config_error"
+  global_config:
+    header: "src/recipes/config.h"
+    types: >-
+      struct CameraSelectorConfig { std::string backend; std::string device_path; std::string vendor_id;
+      std::string product_id; std::string friendly_name; }; struct CameraCaptureConfig { std::uint32_t width;
+      std::uint32_t height; double frame_rate; std::string pixel_format; }; struct LoggingConfig {
+      std::string level; std::uint64_t max_file_bytes; std::uint32_t max_files; }; struct RetentionConfig {
+      std::uint32_t max_age_days; std::uint64_t max_total_bytes; }; struct GlobalConfig { std::uint32_t
+      schema_version; CameraSelectorConfig camera; CameraCaptureConfig base_capture; LoggingConfig logging;
+      RetentionConfig retention; std::filesystem::path config_root; std::filesystem::path output_root; };
+    function: "core::Result<GlobalConfig> load_global_config(const std::filesystem::path& config_root, const std::filesystem::path& output_root);"
+    rules:
+      - "Reads <config_root>/cvforwin.json. Missing file -> config_error/config_file_missing; unreadable -> config_error/config_io_error."
+      - "Both roots must be absolute; otherwise invalid_argument/path_not_absolute."
+      - "Strict UTF-8 JSON: parse failure (including invalid UTF-8) -> config_error/config_parse_error; duplicate keys -> config_error/config_duplicate_key; unknown keys -> config_error/config_unknown_key."
+      - "schema_version must equal 1 -> else config_schema_version."
+      - "camera.backend must equal \"uvc\" -> else config_value_invalid."
+      - "camera.selector requires a non-empty device_path OR both vendor_id and product_id non-empty; friendly_name alone is insufficient -> else config_value_invalid. Strings <= 256 bytes; vendor_id/product_id match ^[0-9A-Fa-f]{4}$."
+      - "camera.base_capture: width/height in 1..16384; frame_rate in (0, 1000]; pixel_format in {\"any\",\"mono8\",\"bgr8\",\"rgb8\"}."
+      - "logging.level in {\"trace\",\"debug\",\"info\",\"warn\",\"error\",\"critical\"}; max_file_bytes in 1024..1073741824; max_files in 1..1000."
+      - "retention.max_age_days in 1..3650; max_total_bytes in 1048576..1099511627776."
+  recipe:
+    header: "src/recipes/recipe.h"
+    types: >-
+      struct CaptureOverrides { std::optional<std::uint32_t>
+      width, height; std::optional<double> frame_rate; std::optional<std::string> pixel_format; std::uint32_t
+      settle_frames; }; struct ArtifactsConfig { std::string save_policy; bool required; }; struct Recipe {
+      std::uint32_t schema_version; std::string recipe_id; std::string algorithm; nlohmann::json parameters;
+      CaptureOverrides capture; ArtifactsConfig artifacts; };
+    function: "core::Result<Recipe> load_recipe_file(const std::filesystem::path& path, const inspection::AlgorithmRegistry& registry);"
+    rules:
+      - "Required top-level keys: schema_version, recipe_id, algorithm, parameters, capture, artifacts. Missing -> recipe_value_invalid; unknown top-level keys -> recipe_unknown_key; duplicate keys -> recipe_duplicate_key; parse failure -> recipe_parse_error; unreadable -> recipe_io_error; missing file -> recipe_file_missing."
+      - "schema_version must equal 1 -> else recipe_schema_version."
+      - "recipe_id must match ^[A-Za-z0-9._-]{1,128}$ (bytes <= 128) -> else recipe_id_invalid."
+      - "algorithm must match the registry key pattern ^[a-z0-9._-]{1,64}$ and exist in the registry -> unknown -> recipe_algorithm_unknown."
+      - "parameters must be an object and must pass the referenced algorithm's validate_parameters -> failure -> recipe_parameters_invalid (message preserved)."
+      - "capture must be an object; settle_frames required, integer 0..1000; optional width/height (1..16384), frame_rate ((0,1000]), pixel_format (same enum as global); unknown capture keys -> recipe_capture_invalid; wrong types/ranges -> recipe_capture_invalid."
+      - "artifacts must be an object with save_policy in {always, fail_or_error, never} and required boolean; anything else -> recipe_artifacts_invalid."
+  catalog:
+    header: "src/recipes/recipe_catalog.h"
+    types: >-
+      class RecipeCatalog { ... }; class RecipeHolder { ... };
+    api:
+      - "static core::Result<RecipeCatalog> RecipeCatalog::load(const std::filesystem::path& recipes_dir, const inspection::AlgorithmRegistry& registry);"
+      - "core::Result<const Recipe*> RecipeCatalog::find(std::string_view recipe_id) const;"
+      - "std::vector<std::string> RecipeCatalog::recipe_ids() const;  // sorted lexicographically"
+      - "std::size_t RecipeCatalog::size() const noexcept;"
+      - "void RecipeHolder::publish(std::shared_ptr<const RecipeCatalog> catalog) noexcept;"
+      - "std::shared_ptr<const RecipeCatalog> RecipeHolder::current() const noexcept;"
+    rules:
+      - "Loads every *.json directly under recipes_dir (non-recursive, sorted by filename). Missing directory -> recipes_dir_missing. Zero files -> valid empty catalog (size 0)."
+      - "All-or-nothing: any invalid recipe or duplicate recipe_id -> failure with no catalog produced (duplicate -> recipe_id_duplicate)."
+      - "find(known) returns a stable pointer into the catalog; find(unknown) -> Failure(recipe_not_found, recipe_not_found)."
+      - "recipe_ids() sorted lexicographically; catalog is immutable after load."
+      - "RecipeHolder: default current() is nullptr; publish atomically replaces the shared catalog; concurrent current() calls always observe a complete old or new catalog (never partial)."
+invariants:
+  - "Global and recipe JSON is strict, bounded, UTF-8, versioned, duplicate-key-safe, and validated before activation."
+  - "Recipe reload is all-or-nothing: readers observe one immutable old or new snapshot and never a partial set (holder semantics)."
+  - "Unknown algorithm keys and invalid parameters reject the whole candidate set."
+  - "recipe_store does not include camera implementations or the public C ABI; identifiers cannot form paths."
+verification:
+  canonical_wsl:
+    - "cmake --preset wsl-gcc-debug"
+    - "cmake --build --preset wsl-gcc-debug --parallel"
+    - "ctest --preset wsl-gcc-debug --output-on-failure"
+    - "cmake --build --preset wsl-gcc-debug --target format-check"
+    - "cmake --preset wsl-clang-analysis && cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+    - "cmake --preset wsl-gcc-asan && cmake --build --preset wsl-gcc-asan --parallel && ctest --preset wsl-gcc-asan --output-on-failure"
+acceptance_reference: >-
+  Contract acceptance_checks 5 (initialization rejects malformed configuration, duplicate/invalid
+  recipes, unknown algorithms) and 8 (recipe reload all-or-nothing with old-snapshot preservation),
+  and portable_unit coverage for recipes.
+rollback: "Remove src/recipes/**, the CVF-004 tests/fixtures, and the new error codes."
+reporting:
+  developer_report: .ai/reports/CVF-004-implementation.yaml
+  test_red_report: .ai/reports/CVF-004-test-red.yaml
+  test_verify_report: .ai/reports/CVF-004-test-verify.yaml
+  review_report: .ai/reviews/CVF-004.yaml
+  quality_report: .ai/reports/CVF-004-quality.yaml
+notes:
+  - "Independent tests use the cvf004_ prefix under tests/unit/ and must be clang-format clean before hashing."
+  - "Test fixtures (valid/invalid cvforwin.json and recipes) live under tests/fixtures/recipes/**; tests may also build temp trees at runtime."
+  - "No runtime reload orchestration here: the holder provides the atomic primitive the runtime will use."

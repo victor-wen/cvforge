@@ -1,0 +1,298 @@
+schema_version: 1
+change_id: CVF-005
+role: quality-engineer
+recorded_at: "2026-09-15T03:35:00Z"
+status: PASS
+verdict: PASS
+blocked_reason: ""
+
+session:
+  started_utc: "2026-09-15T03:19:49Z"
+  canonical_rails_ended_utc: "2026-09-15T03:33:18Z"
+  state: >-
+    Full canonical re-run on the FROZEN post-amendment-2 state (test owner fixed TD-1/TD-2
+    and recorded fresh hashes). All commands below were executed in this session through the
+    quality-engineer's own harness; no production, test, fixture, or build-configuration file
+    was modified. The frozen-state digest is byte-identical before and after every command.
+  runner: ".ai/validation/.ai/reports/cvf-005-quality.yaml (runs the canonical preset commands verbatim)"
+  logs: ".ai/validation/cvf-005-quality-out/"
+  log_note: >-
+    summary.tsv contains two skip-check rows: the first (exit 1) is a harness assertion defect
+    (my initial count expected a "CVF-005 dev:" ctest-name prefix that the four developer cases
+    do not use); the corrected rerun exits 0 (second row). No canonical build/test/lint rail was
+    affected, and no product or test file was touched to correct it.
+
+environment:
+  host: "WSL2 Linux 6.18.33.2-microsoft-standard-WSL2 x86_64; euid=1000 user=administrator (non-root)"
+  VCPKG_ROOT: "/home/administrator/vcpkg"
+  cmake: "3.28.3"
+  ctest: "3.28.3"
+  ninja: "1.11.1"
+  gcc_gxx: "13.3.0"
+  clang: "18.1.3"
+  clang_format: "18.1.3"
+  nm: "GNU nm (binutils) 2.42"
+  log: ".ai/validation/cvf-005-quality-out/env.log"
+
+frozen_state:
+  snapshot_files: 101
+  pre_digest: "38d2e0c86cc2c669043c45234b0a3070031a400dc8ab109af47157724cb2acf6"
+  post_digest: "38d2e0c86cc2c669043c45234b0a3070031a400dc8ab109af47157724cb2acf6"
+  unchanged_during_quality_session: YES
+  scope: "sha256 over src tests include cmake examples plus CMakeLists.txt, CMakePresets.json, vcpkg.json, vcpkg-configuration.json, .clang-format, .clang-tidy"
+  evidence: [frozen-state-pre.txt, frozen-state-post.txt, freeze-diff.log]
+  confirmation: >-
+    All commands in this report executed against the same digest
+    (38d2e0c86cc2c669043c45234b0a3070031a400dc8ab109af47157724cb2acf6); the post-command
+    snapshot is identical, so every result certifies the frozen state only.
+
+commands:
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    summary: "Configuring done (17.6s); compiler GNU 13.3.0; warnings-as-errors ON; vcpkg x64-linux deps current"
+    log: wsl-configure.log
+  - command: "cmake --build --preset wsl-gcc-debug --clean-first --parallel"
+    exit_code: 0
+    summary: "Cleaning 76 files; 71/71 build steps; includes src/diagnostics/diagnostics.cpp, src/artifacts/capture_store.cpp, cvf005_tests link"
+    log: wsl-build-clean-first.log
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "passed=242, failed=0, skipped=0"
+    summary: "'100% tests passed, 0 tests failed out of 242'; Total Test time (real) = 2.52 s"
+    log: wsl-ctest.log
+  - command: "ctest --preset wsl-gcc-debug -N"
+    exit_code: 0
+    summary: "Total Tests: 242; CVF-005 named 38 = 4 developer (#10-#13) + 34 independent (#205-#238)"
+    log: wsl-ctest-list.log
+  - command: "ctest --preset wsl-gcc-debug -R CVF-005 --output-on-failure"
+    exit_code: 0
+    counts: "passed=38, failed=0, skipped=0"
+    summary: "'100% tests passed, 0 tests failed out of 38' — the 38 CVF-005 cases executed and passed"
+    log: wsl-ctest-cvf005.log
+  - command: "clang-format --style=file --dry-run --Werror tests/unit/cvf005_test_support.h tests/unit/cvf005_error_codes_test.cpp tests/unit/cvf005_diagnostics_config_test.cpp tests/unit/cvf005_diagnostics_logging_test.cpp tests/unit/cvf005_capture_store_test.cpp tests/unit/cvf005_save_policy_test.cpp tests/unit/cvf005_retention_test.cpp"
+    exit_code: 0
+    summary: "All 7 independent CVF-005 files clang-format clean (explicit post-amendment coverage)"
+    log: format-owned-dryrun.log
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    summary: "format-check passed: 69 file(s) conform to .clang-format"
+    log: wsl-format-check.log
+  - command: "cmake --build --preset wsl-gcc-debug --target abi-check"
+    exit_code: 0
+    summary: "abi-check passed: exactly 5 export(s): cvf_get_abi_version;cvf_initialize;cvf_inspect;cvf_reload_recipes;cvf_shutdown"
+    log: wsl-abi-check.log
+  - command: "cmake --preset wsl-clang-analysis"
+    exit_code: 0
+    summary: "Configuring done (18.3s); compiler Clang 18.1.3"
+    log: wsl-clang-analysis-configure.log
+  - command: "cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+    exit_code: 0
+    summary: "static-analysis passed: 19 file(s) clean under .clang-tidy (warnings are errors)"
+    log: wsl-static-analysis.log
+  - command: "cmake --preset wsl-gcc-asan"
+    exit_code: 0
+    summary: "Configuring done (17.7s); CVFORWIN_ENABLE_SANITIZERS=ON"
+    log: wsl-asan-configure.log
+  - command: "cmake --build --preset wsl-gcc-asan --clean-first --parallel"
+    exit_code: 0
+    summary: "Cleaning 76 files; 71/71 build steps"
+    log: wsl-asan-build-clean-first.log
+  - command: "ctest --preset wsl-gcc-asan --output-on-failure"
+    exit_code: 0
+    counts: "passed=242, failed=0, skipped=0"
+    summary: "'100% tests passed, 0 tests failed out of 242'; Total Test time (real) = 10.35 s; no ASan/UBSan findings"
+    log: wsl-asan-ctest.log
+  - command: "cmake --workflow --preset wsl-quality"
+    exit_code: 0
+    summary: "6/6 workflow steps green in 298 s: configure, build, test 242/242, format-check 69 files, abi-check 5 exports, static-analysis 19 files"
+    log: wsl-full-quality-workflow.log
+  - command: "nm -D --defined-only build/wsl-gcc-debug/libcvforwin.so"
+    exit_code: 0
+    summary: "nm_exit=0; exactly 5 cvf_* dynamic exports; 0 non-cvf dynamic exports; cvf_exports_match_def=YES (src/c_api/cvforwin.def, 5 entries)"
+    log: exports.log
+  - command: "sha256sum recomputation of all files under changes: in .ai/test-ownership.yaml"
+    exit_code: 0
+    counts: "files_checked=31, matches=31, mismatches=0, missing=0"
+    summary: "31/31 MATCH (CVF-001 6/6, CVF-002 8/8, CVF-003 4/4, CVF-004 6/6, CVF-005 7/7)"
+    log: hashes.log
+  - command: "skip/registered/source scan (parse ctest logs; grep the 7 independent files)"
+    exit_code: 0
+    counts: "registered=242, executed=242 (debug and ASan), skipped=0, disabled=0; CVF-005=38=34 independent+4 developer"
+    summary: "registered == executed; no skip/disabled output; no SKIP/DISABLED/#if 0 tags and no commented-out assertions in the 7 owned files"
+    log: skipcheck.log
+  - command: "cmake --build --preset wsl-gcc-debug --target package"
+    exit_code: 1
+    summary: "EXPECTED nonzero refusal on portable host: 'package is Windows-only; refusing to produce portable release evidence'; no .zip/.tar.gz/.7z produced; known QE-1 shell-quoting defect"
+    log: windows-guard.log
+  - command: "read-only guard inspection (Win32/MSVC guards, MinGW scan, .github, PE artifacts, artifact identity)"
+    exit_code: 0
+    summary: "mingw_reference_found=NO; .github absent; build/windows-msvc-release absent; no PE artifacts; libcvforwin.so is ELF 64-bit only"
+    log: guards.log
+
+independent_cvf005_cases:
+  count: 38
+  independent_test_engineer_cases: 34
+  developer_cases: 4
+  evidence:
+    - "ctest -N: CVF-005 names 38 = developer #10-#13 (docs: test-verify developer_case_names_observed) + independent #205-#238"
+    - "ctest -R CVF-005: 38/38 passed, 0 failed, 0 skipped (debug)"
+    - "Full debug and ASan ctest runs each executed all 38 named CVF-005 cases within 242/242"
+    - "Focused-run and full-run summaries both read '100% tests passed, 0 tests failed'"
+  suite_files:
+    - tests/unit/cvf005_test_support.h
+    - tests/unit/cvf005_error_codes_test.cpp
+    - tests/unit/cvf005_diagnostics_config_test.cpp
+    - tests/unit/cvf005_diagnostics_logging_test.cpp
+    - tests/unit/cvf005_capture_store_test.cpp
+    - tests/unit/cvf005_save_policy_test.cpp
+    - tests/unit/cvf005_retention_test.cpp
+
+ownership_verification:
+  manifest: .ai/test-ownership.yaml
+  manifest_sha256: "549e0066aa38d9f053d130ae4e8c8251666be0cdb00d264713b4a17d397c754c"
+  algorithm: sha256
+  files_checked: 31
+  matches: 31
+  mismatches: []
+  missing: 0
+  per_change: {CVF-001: "6/6", CVF-002: "8/8", CVF-003: "4/4", CVF-004: "6/6", CVF-005: "7/7"}
+  skipped_or_weakened_tests: []
+  notes: >-
+    Every recorded digest was recomputed byte-exact in this session, including the CVF-005
+    post-amendment-2 files (cvf005_diagnostics_logging_test.cpp 645437c7...
+    and cvf005_capture_store_test.cpp b40bdbc5...). No assertion removal, skip, disable, or
+    weakening detected: the scan found no SKIP/DISABLED/XFAIL/mayfail/#if 0/[!hide]/[.] tags
+    in the 7 owned files and no commented-out REQUIRE/CHECK.
+
+skip_check:
+  registered: 242
+  executed_debug: 242
+  executed_asan: 242
+  skipped: 0
+  disabled: 0
+  ctest_not_run_entries: 0
+  cvf005_registered: 38
+  cvf005_executed_debug: 38
+  cvf005_executed_asan: 38
+  cvf005_developer_cases: 4
+  cvf005_independent_cases: 34
+  focused_selection: "ctest -R CVF-005: 100% tests passed, 0 tests failed out of 38"
+  source_scan: "no skip/disable markers; no commented assertions"
+  notes: >-
+    The debug and ASan logs each contain 242 executed 'Test #N:' lines with zero
+    skipped/disabled matches; registered (-N) equals executed; the 4 ABI tests
+    cvf.abi.* also ran in both presets.
+
+export_check:
+  library: "build/wsl-gcc-debug/libcvforwin.so"
+  artifact_identity: "ELF 64-bit LSB shared object, x86-64, version 1 (SYSV), dynamically linked, BuildID[sha1]=6b8b1c0b4e10f858a67045eba606df2fee14ce2f, with debug_info, not stripped"
+  library_sha256: "3a11183ad9719ea53c211e2b9d58efbcf2d7cea3688f519bda1a7b9662161ebf"
+  cvf_dynamic_exports: 5
+  non_cvf_dynamic_exports: 0
+  symbols: [cvf_get_abi_version, cvf_initialize, cvf_inspect, cvf_reload_recipes, cvf_shutdown]
+  matches_def_allowlist: YES
+  abi_check_target: "exactly 5 export(s) per the debug abi-check target"
+
+lint_static_analysis:
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    summary: "69 files conform to .clang-format"
+  - command: "clang-format --dry-run --Werror over the 7 independent CVF-005 files"
+    exit_code: 0
+    summary: "all 7 clean"
+  - command: "cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+    exit_code: 0
+    summary: "19 project TUs clean under .clang-tidy, warnings are errors"
+  - command: "cmake --workflow --preset wsl-quality (steps 4-6)"
+    exit_code: 0
+    summary: "format-check 69, abi-check 5, static-analysis 19 — all green in the aggregate workflow"
+
+windows_guard:
+  mingw_references: NONE
+  github_workflow_present: NO
+  windows_build_dir_present: NO
+  pe_artifacts_under_build: NONE
+  package_refusal: "exit 1 (expected), no package artifacts"
+  portable_artifact_only: YES
+  note: >-
+    No Windows ABI/DLL/package claims are made. Windows MSVC evidence is deferred to the
+    pinned windows-2022 CI job (see deferrals).
+
+non_blocking_findings_confirmation:
+  NB-1:
+    status: ACKNOWLEDGED_NOT_ACCEPTANCE_RELEVANT
+    evidence: >-
+      Reviewer residual hardening note (managed-root link resolution). interface_v1 does not
+      specify root-link rejection and the deployment controls output_root; no rework required
+      for CVF-005 per the review. Carried to the runtime change (CVF-006+).
+  NB-2:
+    status: ACKNOWLEDGED_NOT_ACCEPTANCE_RELEVANT
+    evidence: >-
+      Reviewer observation on retention delete accounting (concurrent external removal can
+      overcount by one). Optional follow-up; no path or safety impact; not acceptance-relevant.
+  NB-3:
+    status: SATISFIED
+    evidence: >-
+      Reviewer required the quality owner to execute the canonical command set unmodified on
+      the frozen state and persist raw zero-exit output. Done in this session: configure/build/
+      ctest debug (242/242), format-check (69), static-analysis (19), ASan configure/clean
+      build/ctest (242/242), plus the 6/6 wsl-quality workflow, with raw logs under
+      .ai/validation/cvf-005-quality-out/ and this report.
+  NB-4:
+    status: ACKNOWLEDGED_INFORMATIONAL
+    evidence: >-
+      spdlog max_files-1 adaptation (developer D1) keeps the frozen <= max_files bound and is
+      test-verified; NFR-012 reading to be confirmed by the architect at the next revision.
+  NB-5:
+    status: ACKNOWLEDGED_INFORMATIONAL
+    evidence: >-
+      Contract-note inconsistency (128-byte suggestion vs normative 1024 minimum) remains
+      documentation-only; production follows the normative rule; no code/test change.
+  NB-6:
+    status: ACKNOWLEDGED_DEFERRED_TO_CI
+    evidence: >-
+      The two symlink-retention cases are POSIX-only; a Windows junction-based equivalent is
+      an optional follow-up when the MSVC suite runs in CI.
+
+deferrals:
+  - "Windows MSVC evidence (windows-msvc-release configure/build/test/abi-check/package/package-verify and the windows-ci workflow) is not runnable on Linux; per contract NFR-009 and acceptance_check 11 it is deferred to the pinned windows-2022 CI job. No Windows claims are made in this report."
+  - "Opt-in physical UVC hardware validation remains a pre-deployment activity, not a hosted-CI gate."
+  - "NB-6 junction-retention coverage and NB-1/NB-2 hardening are follow-ups outside CVF-005 acceptance."
+
+anomalies:
+  - id: QE-1
+    severity: carry-over
+    area: portable package-refusal target
+    detail: >-
+      On the portable host the package target correctly refuses (exit 1, no artifacts):
+      'package is Windows-only; refusing to produce portable release evidence'. The refusal
+      output is then interrupted by the known shell-quoting defect
+      '/bin/sh: 1: Syntax error: "(" unexpected' (unquoted parentheses in the cmake -E echo
+      argument in cmake/CvfPackage.cmake), so the guard fails via the shell syntax error
+      instead of the intended cmake -E false. Refusal semantics (nonzero exit, no portable
+      package) hold. Carry-over from CVF-004; tracked for CVF-008 per .ai/workflow-state.yaml.
+    evidence: windows-guard.log
+  - id: NB-3-evidence-note
+    severity: informational
+    detail: >-
+      The reviewer NB-3 finding (final-state zero-exit evidence lived only in test-owner
+      harness scripts and /tmp) is resolved by this session: every canonical command was rerun
+      on the frozen state and raw output with exit codes/durations is persisted under
+      .ai/validation/cvf-005-quality-out/ (summary.tsv + per-step logs).
+  - id: harness-note
+    severity: informational
+    detail: >-
+      The skip-check step initially exited 1 because the harness expected a "CVF-005 dev:"
+      ctest-name prefix that the four developer cases do not carry; corrected to match the
+      four known case names. The rerun exits 0; no canonical command and no production/test
+      file was affected (frozen digest unchanged).
+  - id: log-hygiene
+    severity: informational
+    detail: >-
+      summary.tsv retains the superseded first skip-check row (exit 1, harness assertion);
+      this report cites only the corrected run plus the canonical step logs.
+
+final_response:
+  commands_run: 20
+  failures: 0
+  next_action: "Release/controller: CVF-005 quality gate PASS on the frozen WSL state (242/242 debug and ASan, 38/38 CVF-005, 31/31 ownership hashes, 5/5 exports); proceed with the Windows CI deferral per NFR-009."

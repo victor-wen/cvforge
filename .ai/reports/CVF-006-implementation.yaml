@@ -1,0 +1,243 @@
+schema_version: 1
+change_id: CVF-006
+phase: IMPLEMENT
+recorded_at: 2026-09-15
+author: developer
+baseline:
+  path: .ai/project-contract.yaml
+  contract_version: 1.0.0
+  status: APPROVED
+change_file: .ai/changes/CVF-006.yaml
+harness: .ai/validation/cvf006-developer/
+
+summary: >-
+  Implemented the runtime orchestrator (src/runtime/context.h + context.cpp),
+  completed all five public C ABI entry points on top of it, extended the
+  global-config backend schema for test-enabled builds, added the trailing
+  additive DiagnosticsConfig.enable_file_sink field, added the frozen runtime
+  error codes 1900-1904, wired the new runtime library and CVF-006 test targets
+  into CMake, and executed the full canonical WSL chain with all 262 tests
+  passing (242 pre-existing + 20 new CVF-006 entries) in debug and ASan.
+  No test-owner file was modified: all 41 hash-pinned independent test files
+  match .ai/test-ownership.yaml (0 mismatches) and the 10 CVF-006 pins were
+  re-verified after the final run.
+
+files:
+  created:
+    - src/runtime/context.h
+    - src/runtime/context.cpp
+    - tests/unit/test_runtime_lifecycle.cpp
+  modified:
+    - src/core/error.h
+    - src/core/error.cpp
+    - src/diagnostics/diagnostics.h
+    - src/diagnostics/diagnostics.cpp
+    - src/recipes/config.cpp
+    - src/c_api/cvf_context.h
+    - src/c_api/cvf_entry_points.cpp
+    - CMakeLists.txt
+
+implementation:
+  runtime_orchestrator:
+    - >-
+      Context::create initializes in dependency order (global config ->
+      compiled registry -> recipe catalog -> diagnostics -> managed capture
+      store -> camera backend -> enumerate/resolve/open) with RAII rollback:
+      each resource is a local smart pointer until the Context is published
+      last, so every failure destroys exactly what was created and returns the
+      precise Failure.
+    - >-
+      inspect() runs one cycle under one Deadline: a timed serialization gate
+      (std::timed_mutex, try_lock_for(remaining) -> runtime_queue_timeout),
+      recipe lookup by recipe_id from the atomic snapshot, capture through
+      camera::capture_with_one_retry (at most one reconnect/recapture),
+      settle_frames additional captures, registry dispatch, measurements+defects
+      merge into one JSON object, save policy (always/fail_or_error/never) with
+      optional warning versus required REQUIRED_ARTIFACT_ERROR + NOT_EVALUATED,
+      and retention after saves (failure adds the image-save warning). Every
+      execution outcome is a valued Result<InspectionOutcome>; a Result failure
+      is returned only for a closed context.
+    - >-
+      reload_recipes() loads and validates a complete candidate catalog against
+      the compiled registry and publishes it with one atomic store
+      (RecipeHolder); on any rejection the previous snapshot stays active and
+      the caller receives config_error/runtime_reload_failed with the candidate
+      diagnostic.
+    - >-
+      warning_flags() = accumulated per-call warnings | Diagnostics::warnings(),
+      so the degraded file sink (1u<<0) and optional image/retention failures
+      (1u<<1) are observable without changing a valid verdict.
+    - >-
+      Test-backend addressing: synthetic uses the fixed descriptor
+      {backend_key "synthetic", device_path "synthetic0", vendor_id "0000",
+      product_id "0000", friendly_name "Synthetic camera"} with base_capture
+      width/height; file uses device_path = absolute frames directory with the
+      regular files directly under it sorted by filename (empty existing
+      directory is a valid camera that fails captures with frames_exhausted;
+      a missing directory fails initialization with camera_not_found).
+    - >-
+      Camera selection honors RuntimeOptions.camera_override first; otherwise
+      the config camera.backend drives construction ("uvc" always known,
+      "file"/"synthetic" only under CVFORWIN_TEST_BACKENDS_ENABLED). The
+      Windows-only uvc backend is not compiled in baseline 1.0.0 and reports
+      config_error/subsystem_unavailable outside test builds.
+  public_c_api:
+    - >-
+      All five entry points are wired to the runtime. cvf_initialize validates
+      the error struct and options, checks the single-live-context slot under
+      the lifecycle mutex, maps flags to enable_file_logging/enable_callback_logging
+      and the callback binding, creates the runtime, and publishes the opaque
+      context only after complete success.
+    - >-
+      cvf_inspect validates context -> null pointers -> result struct_size ->
+      result reserved -> v1 required capacities -> request struct before any
+      side effect. Undersized output_json (<65536), image_path (<4096), or
+      error_message (<1024) returns CVF_STATUS_BUFFER_TOO_SMALL with the field's
+      bytes_required set to the required capacity; malformed structures are
+      never modified. Result text is written with the v1 byte rules
+      (bytes_written excludes NUL, bytes_required includes it), and a serialized
+      result that exceeds the caller capacity reports the real required size.
+    - >-
+      cvf_reload_recipes and cvf_shutdown follow the frozen validation order;
+      shutdown atomically removes and deletes the context (orderly camera /
+      diagnostics / artifacts teardown) under the lifecycle mutex; a second
+      shutdown on NULL returns INVALID_CONTEXT. Every exported function contains
+      a catch-all, so no exception crosses the ABI.
+  recipes_backend_extension:
+    - >-
+      validate_camera accepts "uvc" always and "file"/"synthetic" only when
+      CVFORWIN_TEST_BACKENDS_ENABLED is defined nonzero; the message is
+      build-mode aware. CMake defines it on cvforwin_recipes (PRIVATE when
+      CVFORWIN_BUILD_TEST_BACKENDS=ON).
+  diagnostics_extension:
+    - >-
+      DiagnosticsConfig gained the trailing additive field
+      bool enable_file_sink = true; when false, open_file_sink() creates no
+      directory/sink and records no warning. Existing CVF-005 tests and
+      designated initializers remain valid.
+  error_codes:
+    - "runtime_queue_timeout = 1900 -> Status::timeout"
+    - "runtime_result_too_large = 1901 -> Status::buffer_too_small"
+    - "runtime_required_artifact_failed = 1902 -> Status::required_artifact_error"
+    - "runtime_reload_failed = 1903 -> Status::config_error"
+    - "runtime_context_closed = 1904 -> Status::invalid_context"
+    - "All five have stable error_code_name() strings and status_for() mappings."
+  cmake:
+    - >-
+      cvforwin_runtime static library (all internal modules + nlohmann) linked
+      into the shared cvforwin library; CVFORWIN_TEST_BACKENDS_ENABLED=1 on
+      cvforwin_runtime when the option is ON.
+    - >-
+      cvf006_lifecycle C11 target (cvforwin + Threads::Threads,
+      CVF_TEST_FIXTURES_DIR/CVF_TEST_TMP_DIR absolute definitions) and
+      cvf006_tests C++ target (runtime, test backends, opencv_imgcodecs,
+      Threads, Catch2), plus cvf006_developer_tests for the developer-owned
+      regression file. All three are registered only when test backends are ON.
+    - "CVFORWIN_TEST_BACKENDS_ENABLED=1 is also defined on cvf004_tests when test backends are ON."
+
+commands:
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    counts: "configure finished (19.0 s); vcpkg x64-linux manifest restored"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    counts: "all targets built; final build log .ai/validation/cvf006-developer/logs/build_wsl-gcc-debug_final.log"
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "262/262 tests passed, 0 failed (242 pre-existing + 20 CVF-006); log .../logs/ctest_wsl-gcc-debug_final.log"
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    counts: "format-check passed: 79 file(s) conform to .clang-format"
+  - command: "cmake --preset wsl-clang-analysis"
+    exit_code: 0
+  - command: "cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+    exit_code: 0
+    counts: "static-analysis passed: 20 file(s) clean under .clang-tidy"
+  - command: "cmake --preset wsl-gcc-asan"
+    exit_code: 0
+  - command: "cmake --build --preset wsl-gcc-asan --parallel"
+    exit_code: 0
+    counts: "all targets built with ASan/UBSan"
+  - command: "ctest --preset wsl-gcc-asan --output-on-failure"
+    exit_code: 0
+    counts: "262/262 tests passed, 0 failed; no sanitizer reports"
+  - command: "./build/wsl-gcc-debug/cvf006_lifecycle"
+    exit_code: 0
+    counts: "cvf006_lifecycle: checks=178 failures=0"
+  - command: "cmake --build --preset wsl-gcc-debug --target abi-check"
+    exit_code: 0
+    counts: "exactly 5 exports: cvf_get_abi_version;cvf_initialize;cvf_inspect;cvf_reload_recipes;cvf_shutdown"
+
+new_tests:
+  independent:
+    - "cvf006.lifecycle (C11, tests/abi/cvf006_lifecycle.c): 178 checks, 0 failures"
+    - "15 Catch2 cases from tests/unit/cvf006_{deadline,reconnect,save_policy,degraded_log,rollback,serialization}_test.cpp"
+  developer:
+    - "4 Catch2 cases in tests/unit/test_runtime_lifecycle.cpp (rollback, valued outcome + never policy, atomic reload old-snapshot preservation, optional-save warning)"
+  total_new_ctest_entries: 20
+  total_suite: "262 tests, 0 skipped/failed in debug and ASan"
+
+independent_test_integrity:
+  pinned_files_checked: 41
+  mismatches: 0
+  cvf006_pins_rechecked_after_final_run: 10
+  notes: >-
+    No test-owner file was edited. The B13 input_json fixture defect reported
+    during implementation was fixed by the test owner before the final run (the
+    flip recipe now passes without input and FAILs with invert, matching the
+    frozen example.threshold semantics); the suite passed without any
+    production change for it.
+
+decisions_and_deviations:
+  - id: D1
+    item: "RuntimeOptions.camera_override type"
+    decision: "std::shared_ptr<camera::ICameraBackend> (frozen in the change contract)"
+    reason: "The independent harness keeps its own reference and asserts counters after the calls, so the runtime must share ownership."
+  - id: D2
+    item: "InspectionRequest.timeout_ms type"
+    decision: "TimeoutMs wrapper assignable from std::uint32_t and std::chrono::milliseconds; value() returns the millisecond count"
+    reason: >-
+      tests/unit/cvf006_test_support.h assigns both spellings in two branches
+      of an if constexpr in a non-template function, where both branches are
+      hard-checked; no single standard type satisfies both assignments.
+      Observable semantics stay the frozen millisecond count (0 -> 5000 ms).
+  - id: D3
+    item: "InspectionOutcome.output_json type"
+    decision: "nlohmann::json, dumped to text once at the C API boundary"
+    reason: >-
+      The same test header calls .dump() and .is_object() on the field in
+      non-template if constexpr branches; the frozen 'JSON object' semantics are
+      preserved and the public buffer still receives UTF-8 text with the v1 byte
+      rules. Failure outcomes carry a null JSON object.
+  - id: D4
+    item: "Error code 1900-1904 names"
+    decision: "runtime_queue_timeout/runtime_result_too_large/runtime_required_artifact_failed/runtime_reload_failed/runtime_context_closed with the mappings listed above"
+    reason: "The change file fixed the numbers and mappings but not the spellings; names follow the existing subsystem numbering convention."
+  - id: D5
+    item: "Result capacity pre-check"
+    decision: "The C API performs the capacity check itself (src/core/abi_validation.* untouched) and publishes bytes_required = 65536/4096/1024"
+    reason: "The frozen CVF-006 buffer rule maps undersized result buffers to BUFFER_TOO_SMALL, which the CVF-001 validator did not express."
+  - id: D6
+    item: "cvf006_tests warning policy"
+    decision: "The independent C++ target adds -Wno-narrowing (GCC/Clang) after the standard test policy"
+    reason: >-
+      tests/unit/cvf006_test_support.h passes int frame dimensions into the
+      uint32_t SyntheticCameraConfig fields; the read-only test file is warning
+      clean under its documented syntax check but not under -Werror. No other
+      test target is affected.
+  - id: D7
+    item: "uvc backend"
+    decision: "config_error/subsystem_unavailable outside test builds"
+    reason: "src/camera/uvc_windows/** is CVF-007 scope and is not compiled in baseline 1.0.0."
+
+invariants_verified:
+  - "One live context per process; inspect calls serialize on the timed gate (B6/B12 tests)."
+  - "One deadline covers queue wait, capture+retry, dispatch, encoding, required persistence (B7/B8 tests)."
+  - "Technical errors are NOT_EVALUATED, never FAIL; warnings never change a valid verdict (B9/B10 tests)."
+  - "Recipe reload is all-or-nothing with old-snapshot preservation (B5 and developer test)."
+  - "No exception crosses the ABI; validation precedes side effects (B4/B13 and CVF-001 ABI tests)."
+  - "Public export set unchanged: exactly the five cvf_* symbols."
+
+blockers: []
+notes:
+  - "Windows MSVC DLL/package/consumer evidence remains deferred to the windows-2022 CI workflow (CVF-007/CVF-008), per the plan."

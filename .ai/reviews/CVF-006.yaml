@@ -1,0 +1,207 @@
+schema_version: 1
+change_id: CVF-006
+reviewed_at: 2026-09-15
+reviewer: reviewer
+verdict: APPROVE
+
+reviewed_artifacts:
+  - .ai/project-contract.yaml
+  - .ai/changes/CVF-006.yaml
+  - .ai/reports/CVF-006-implementation.yaml
+  - .ai/reports/CVF-006-test-red.yaml
+  - .ai/reports/CVF-006-test-red-amendment.yaml
+  - .ai/reports/CVF-006-test-verify.yaml
+  - .ai/test-ownership.yaml
+  - .ai/test-briefs/CVF-006.yaml
+  - src/runtime/context.h
+  - src/runtime/context.cpp
+  - src/c_api/cvf_context.h
+  - src/c_api/cvf_context.cpp
+  - src/c_api/cvf_entry_points.cpp
+  - src/recipes/config.h
+  - src/recipes/config.cpp
+  - src/diagnostics/diagnostics.h
+  - src/diagnostics/diagnostics.cpp
+  - src/core/error.h
+  - src/core/error.cpp
+  - src/core/status.h
+  - src/core/status.cpp
+  - src/core/abi_validation.h
+  - src/core/abi_validation.cpp
+  - src/core/warnings.h
+  - src/core/text.h
+  - src/recipes/recipe_catalog.h
+  - src/camera/camera_backend.h
+  - src/camera/camera_backend.cpp
+  - src/artifacts/capture_store.h
+  - src/inspection/algorithm.h
+  - src/inspection/registry.h
+  - src/inspection/registry.cpp
+  - include/cvforwin/cvf_api.h
+  - CMakeLists.txt
+  - tests/abi/cvf006_lifecycle.c
+  - tests/unit/cvf006_test_support.h
+  - tests/unit/cvf006_deadline_test.cpp
+  - tests/unit/cvf006_reconnect_test.cpp
+  - tests/unit/cvf006_save_policy_test.cpp
+  - tests/unit/cvf006_degraded_log_test.cpp
+  - tests/unit/cvf006_rollback_test.cpp
+  - tests/unit/cvf006_serialization_test.cpp
+  - tests/unit/test_runtime_lifecycle.cpp
+
+summary: >-
+  The full v1 public C ABI lifecycle is wired to the runtime orchestrator with
+  catch-all containment and the frozen validation order/capacity pre-checks
+  preserved: cvf_initialize validates the error struct and options, enforces the
+  single live context under the lifecycle mutex, and publishes only after
+  complete success; cvf_inspect pre-checks context, pointers, result struct_size,
+  reserved fields and the 65536/4096/1024 required capacities before any side
+  effect, reports BUFFER_TOO_SMALL with the required capacity in bytes_required,
+  mirrors the status into result.status, and always leaves NOT_EVALUATED with
+  cleared output_json/image_path on non-OK outcomes; cvf_reload_recipes and
+  cvf_shutdown follow the frozen order with shutdown invalidating and freeing the
+  context. The runtime provides rollback-safe create (publish last, RAII), one
+  deadline covering the serialized gate, capture-with-one-retry and settlement,
+  dispatch, encoding, persistence and retention, an atomic old-or-new recipe
+  snapshot, save policy plus required-artifact semantics, warning accumulation
+  for the log-sink (1<<0) and image-save (1<<1) bits, and the frozen runtime
+  error codes 1900-1904 with their mappings and names. Backend gating is correct:
+  "file"/"synthetic" are accepted only in builds with
+  CVFORWIN_TEST_BACKENDS_ENABLED (the define is PRIVATE on the recipes and
+  runtime targets only when CVFORWIN_BUILD_TEST_BACKENDS is ON), release
+  behavior remains "uvc"-only, and the test-backend addressing matches the
+  CVF-002 descriptors. The judged deviations are acceptable: TimeoutMs,
+  nlohmann::json output_json and shared_ptr camera_override are explicitly
+  frozen by the change contract, the diagnostics enable_file_sink field is
+  trailing and additive, and -Wno-narrowing is target-scoped on the cvf006 test
+  target only, so it cannot mask production-library defects. TV-4 and the verdict
+  boundary addition are owner-made, assertion-preserving and hash-recorded, no
+  independent file was touched by the developer, and the changed production
+  files are exactly the allowed scope. Evidence is internally consistent
+  (242 + 20 = 262; the cvf006 subset is 15 Catch2 + 1 C lifecycle + 4 developer
+  cases; lifecycle 178 -> 186 after the owner's boundary extension; format 79;
+  static analysis 20; ASan 262/262). No blocking finding was identified;
+  the two test SETS are meaningful, behavior-derived, and the independent set is
+  intact apart from the owner-recorded amendments.
+
+blocking_findings: []
+
+non_blocking_findings:
+  - id: NB-1
+    severity: minor
+    area: runtime_orchestrator
+    finding: >-
+      input_json parsing happens before the Deadline is constructed, so that
+      (bounded, max 65536 byte) stage is technically outside the single
+      end-to-end deadline even though the contract lists encoding and dispatch
+      stages as covered.
+    evidence: >-
+      src/runtime/context.cpp:283-298 - started and parse run before
+      Deadline::from_timeout_ms at line 286; the input size is bounded by
+      CVF_INPUT_JSON_MAX_UTF8_BYTES at the C ABI, so the impact is
+      microseconds.
+    required_action: >-
+      None required for CVF-006. If the deadline semantics are ever tightened,
+      construct the Deadline before parsing input_json.
+  - id: NB-2
+    severity: minor
+    area: public_c_api
+    finding: >-
+      The C ABI now performs the required-capacity pre-check itself and no
+      longer calls core::abi_validation::validate_inspection_result, which
+      leaves two implementations of the same buffers rule that could diverge
+      later. This is the deviation recorded as D5 and matches the change
+      contract ("src/core/abi_validation.* is out of scope"), and the validator
+      is still exercised by developer unit tests.
+    evidence: >-
+      src/c_api/cvf_entry_points.cpp:296-340 (result_capacity_problem) versus
+      src/core/abi_validation.cpp:173-196 (validate_inspection_result);
+      validate_inspection_result is referenced only by
+      tests/unit/test_core_abi_validation.cpp.
+    required_action: >-
+      None required for CVF-006. Consider a follow-up that makes the C ABI use
+      the shared validator or records the duplication as an explicit invariant.
+  - id: NB-3
+    severity: minor
+    area: public_c_api
+    finding: >-
+      cvf_inspect checks the context before the request/result struct_size
+      fields, while the CVF-006 note describes a struct_size-first order. The
+      CVF-001 independent test explicitly documents the null-context plus
+      malformed-struct ordering as underdetermined, and no test asserts the
+      opposite, so the observable contract is preserved.
+    evidence: >-
+      src/c_api/cvf_entry_points.cpp:463-496; tests/abi/test_abi_runtime.c:421-426
+      ("has an underdetermined exact status in the brief ... only the derivable
+      properties are asserted").
+    required_action: >-
+      None required. If the ordering is meant to be authoritative, it should be
+      fixed in a contract clarification rather than inferred from the change
+      note.
+  - id: NB-4
+    severity: minor
+    area: public_c_api
+    finding: >-
+      A second cvf_shutdown with the original (now freed) pointer is undefined
+      behavior because shutdown deletes the context; the defined
+      INVALID_CONTEXT result applies only to NULL or to a non-live pointer the
+      host no longer holds. This matches the frozen header semantics (the host
+      must stop calling once shutdown returns), and the lifecycle tests only
+      exercise NULL and fresh contexts.
+    evidence: >-
+      src/c_api/cvf_entry_points.cpp:544-561 (unique_ptr reclaims the context);
+      tests/abi/cvf006_lifecycle.c:594-608 (shutdown(NULL) and re-initialize).
+    required_action: >-
+      None required; keep the header's host-quiescence rule as the documented
+      precondition.
+  - id: NB-5
+    severity: info
+    area: evidence
+    finding: >-
+      The 41/41 manifest and 10/10 CVF-006 hash claims could not be
+      independently recomputed in this review session (read-only, no command
+      execution), so they rest on the owner's recorded SHA-256 values and the
+      verify report's re-hash statements.
+    evidence: >-
+      .ai/test-ownership.yaml CVF-006 section;
+      .ai/reports/CVF-006-test-verify.yaml ownership block;
+      .ai/reports/CVF-006-test-red-amendment.yaml hash_update.
+    required_action: >-
+      Quality gate to recompute every manifest hash with real sha256sum output
+      and record the canonical WSL chain (configure/build/ctest/format-check/
+      static-analysis/sanitizers) on this frozen state in
+      .ai/reports/CVF-006-quality.yaml. This is the standard independent
+      quality-owner step, not a change defect.
+
+required_actions:
+  - owner: quality_owner
+    action: >-
+      Recompute all .ai/test-ownership.yaml hashes (41 files overall, 10 in the
+      CVF-006 section, including the amended tests/abi/cvf006_lifecycle.c at
+      ebecb06e9412fb1558f4cfd0a50c6ff20be6e7ff7d19f485203e4609b181b442) with
+      real command output, run the full canonical WSL chain on the frozen
+      state, and record exit codes plus counts in .ai/reports/CVF-006-quality.yaml.
+    blocking: false
+
+independence_notes: >-
+  The two test sets are distinct and intact. The developer created only
+  tests/unit/test_runtime_lifecycle.cpp (an allowed developer_tests file) and
+  modified no test-owner file; the independent C++ suite drives the runtime only
+  through RuntimeOptions.camera_override and the CVF-002 synthetic backend, and
+  the independent C lifecycle suite drives the public ABI in strict C11 with
+  behavior-derived assertions. The only changes to hash-pinned files are the
+  owner's TV-4 fixture correction and the B3 verdict-ratio boundary extension in
+  tests/abi/cvf006_lifecycle.c, each with a recorded previous/new SHA-256, no
+  assertion removed or weakened, and a preserved documented intent; both are
+  recorded in the ownership manifest and the amend/verify reports. No assertion
+  was disabled, skipped, or softened in the CVF-001..CVF-006 independent files,
+  and no implementation detail leaked into the independent suites. The reviewer
+  did not participate in authoring, implementing, or testing this change.
+
+review_limitations:
+  - Commands were not executed in this session (read-only reviewer boundary);
+    all PASS counts above are the recorded claims of the developer/test-verify
+    reports and require the quality-owner recomputation listed in
+    required_actions.
+  - Windows MSVC DLL, export, package, and consumer evidence remains deferred to
+    CVF-007/CVF-008 (windows-2022 CI), as planned by the change file.

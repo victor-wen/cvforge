@@ -1,0 +1,73 @@
+change_id: CVF-006
+phase: AUTHOR
+amendment: TV-4
+recorded_at: 2026-09-15
+author: test-engineer
+defect:
+  id: TV-4
+  file: tests/abi/cvf006_lifecycle.c
+  case: case_b13_input_json_passthrough
+  description: >-
+    The case's documented intent is that an all-white frame PASSES with the
+    recipe and that {"invert": true} flips it to FAIL. It used kFailParameters
+    (threshold 255, min_pass_ratio 1.0). Under the frozen example.threshold
+    semantics (white = gray > threshold, and invert flips the mask), an all-white
+    frame with threshold 255 yields pass_ratio 0.0 -> FAIL, and inverting it
+    yields 1.0 -> PASS: the exact opposite of the documented intent and of the
+    assertions (no input -> PASS, invert -> FAIL).
+fix: >-
+  Added the new kFlipParameters constant {"threshold": 128, "min_pass_ratio": 0.5}
+  and used it only in case_b13_input_json_passthrough. All-white with threshold
+  128 yields pass_ratio 1.0 >= 0.5 -> PASS, and invert flips it to 0.0 < 0.5 ->
+  FAIL. The two assertions (b13_uniform_frame_without_input_passes ->
+  CVF_VERDICT_PASS, b13_invert_flips_verdict -> CVF_VERDICT_FAIL) are unchanged,
+  the intent is preserved, and the cases that intentionally use kFailParameters
+  are untouched (case_b3_inspect_happy_path still writes "example.fail" with
+  kFailParameters).
+intent_preserved: true
+hash_update:
+  file: tests/abi/cvf006_lifecycle.c
+  previous_sha256: 0773c9e7c3f1893855f49bb790c04002cd175efbe995fdeeee583bab323883a4
+  new_sha256: 93a6699b3724d3c548620a87c5458673b131be09d12b997556c58b85832e0c49
+
+commands:
+  - command: "bash .ai/validation/cvf006-test-engineer-amendment-tv4.sh"
+    exit_code: 0
+    counts: >-
+      clang-format -i exit 0; clang-format --dry-run --Werror exit 0; gcc -std=c11
+      -Wall -Wextra -Werror -pthread -I include -DCVF_TEST_FIXTURES_DIR=...
+      -DCVF_TEST_TMP_DIR=... -fsyntax-only tests/abi/cvf006_lifecycle.c exit 0
+  - command: "grep -n kFlipParameters tests/abi/cvf006_lifecycle.c"
+    exit_code: 0
+    counts: "definition at line 63 and use at line 1352 (the flip case only)"
+  - command: "grep -n kFailParameters tests/abi/cvf006_lifecycle.c"
+    exit_code: 0
+    counts: "definition at line 61 and use at line 692 (example.fail, B3) - untouched"
+  - command: "sha256sum tests/abi/cvf006_lifecycle.c"
+    exit_code: 0
+    counts: "93a6699b3724d3c548620a87c5458673b131be09d12b997556c58b85832e0c49"
+
+checks:
+  - name: b13_uniform_frame_without_input_passes
+    expected: "CVF_STATUS_OK and CVF_VERDICT_PASS"
+    changed: false
+  - name: b13_invert_flips_verdict
+    expected: "CVF_STATUS_OK and CVF_VERDICT_FAIL"
+    changed: false
+
+ownership:
+  manifest: .ai/test-ownership.yaml
+  files_checked: 10
+  mismatches: []
+  note: >-
+    Only the tests/abi/cvf006_lifecycle.c hash changed in the CVF-006 section;
+    every other CVF-006 entry and every other change section is byte-exact. The
+    amendment harness .ai/validation/cvf006-test-engineer-amendment-tv4.sh is
+    author tooling, not a test file, and is not hash-pinned.
+
+blockers: []
+notes: >-
+  Per the amendment instructions the suite is not re-run against the
+  mid-implementation library here; the strict C11 syntax-only compile is the
+  required evidence for this change. The full RED/verify runs remain owned by
+  the normal CVF-006 test cycle.

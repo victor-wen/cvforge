@@ -1,0 +1,89 @@
+schema_version: 1
+change_id: CVF-003
+target: "Inspection algorithm contract + registry + deterministic example algorithm"
+in_scope:
+  - AlgorithmRegistry add/find/keys semantics with stable keys (duplicates rejected, unknown keys fail)
+  - dispatch containment: deadline before invoke, empty-frame rejection, exception conversion, JSON output bound
+  - example.threshold parameter validation strictness and deterministic inspect outcomes (cv2-style mapping)
+  - input_json handling for the example algorithm
+out_of_scope:
+  - recipes, runtime orchestrator, C ABI lifecycle, cameras, logging, persistence
+interface_reference:
+  namespace: "cvforwin::inspection / cvforwin::algorithms (internal, frozen for this change)"
+  error_codes: "algorithm_not_found=1500 (algorithm_error), algorithm_duplicate_key=1501 (algorithm_error), algorithm_key_invalid=1502 (invalid_argument), algorithm_parameters_invalid=1503 (config_error), algorithm_output_too_large=1504 (algorithm_error), algorithm_deadline_exceeded=1505 (timeout), algorithm_exception=1506 (algorithm_error), algorithm_frame_invalid=1507 (algorithm_error), algorithm_input_invalid=1508 (invalid_argument)"
+  headers:
+    - "src/inspection/algorithm.h"
+    - "src/inspection/registry.h"
+    - "src/algorithms/example_threshold.h"
+    - "src/algorithms/compiled_algorithms.h"
+  types:
+    AlgorithmRequest: "{ const camera::CapturedFrame& frame; const nlohmann::json& parameters; const std::optional<nlohmann::json>& input_json; core::Deadline deadline; }"
+    AlgorithmResult: "{ core::Verdict verdict; nlohmann::json measurements (object); nlohmann::json defects (array); std::string diagnostics; }"
+    IInspectionAlgorithm: "{ std::string_view key() const noexcept; core::Result<void> validate_parameters(const nlohmann::json&) const; core::Result<AlgorithmResult> inspect(const AlgorithmRequest&); }"
+    AlgorithmRegistry: "{ Result<void> add(std::unique_ptr<IInspectionAlgorithm>); Result<const IInspectionAlgorithm*> find(std::string_view) const; std::vector<std::string> keys() const; size(); empty(); }"
+    dispatch: "Result<AlgorithmResult> dispatch(const IInspectionAlgorithm&, const AlgorithmRequest&); k_max_result_json_bytes = 65536"
+    example: "ExampleThresholdAlgorithm key example.threshold; params threshold (int 0..255, default 128) and min_pass_ratio (number 0..1, default 0.5); optional input_json key invert (bool, default false); verdict PASS iff pass_ratio >= min_pass_ratio"
+    registration: "Result<void> register_compiled_algorithms(AlgorithmRegistry&)"
+observable_behaviors:
+  - id: B1
+    behavior: "Registry: valid add succeeds; add(nullptr) -> invalid_argument/algorithm_key_invalid; empty, >64-char, or character-invalid keys ([a-z0-9._-] only) -> same; duplicate key -> algorithm_error/algorithm_duplicate_key and the original entry is retained; find(unknown) -> algorithm_error/algorithm_not_found; find returns the exact added instance; keys() is in registration order; size/empty reflect adds."
+  - id: B2
+    behavior: "register_compiled_algorithms(registry) succeeds on a fresh registry and 'example.threshold' is findable; a second call on the same registry fails with algorithm_duplicate_key (no replacement)."
+  - id: B3
+    behavior: "Example validate_parameters: default and explicit valid parameters succeed; unknown keys, wrong types (threshold non-integer, min_pass_ratio non-number), and out-of-range values (threshold <0 or >255, min_pass_ratio <0 or >1) -> config_error/algorithm_parameters_invalid."
+  - id: B4
+    behavior: "Example inspect on an all-white BGR frame with default threshold: white_pixels == total_pixels, pass_ratio == 1.0, verdict PASS; on an all-black frame: white_pixels == 0, pass_ratio == 0.0, verdict FAIL; measurements is an object with white_pixels/total_pixels/pass_ratio; defects is an empty array; diagnostics is non-empty; verdict is never NOT_EVALUATED on success."
+  - id: B5
+    behavior: "Example inspect with input_json {invert: true} flips the mask: an all-white frame yields white_pixels == 0 and FAIL; an all-black frame yields white_pixels == total and PASS (with a low min_pass_ratio)."
+  - id: B6
+    behavior: "Example input_json validation: absent -> ok; non-object (array/number/string) -> invalid_argument/algorithm_input_invalid; object with an unsupported key or non-boolean invert -> invalid_argument/algorithm_input_invalid."
+  - id: B7
+    behavior: "Example inspect with an expired deadline -> timeout/algorithm_deadline_exceeded."
+  - id: B8
+    behavior: "dispatch: expired deadline -> timeout/algorithm_deadline_exceeded and the algorithm is NOT invoked (observable via a test-double counter); empty frame pixels -> algorithm_error/algorithm_frame_invalid and NOT invoked; a throwing algorithm -> algorithm_error/algorithm_exception; a result whose serialized measurements+defects exceed 65536 bytes -> algorithm_error/algorithm_output_too_large; a successful result is returned unchanged (verdict/measurements/defects/diagnostics preserved)."
+  - id: B9
+    behavior: "dispatch end-to-end with the example algorithm on a small uniform frame returns OK with a PASS/FAIL verdict consistent with the threshold parameters."
+  - id: B10
+    behavior: "Uniform-frame outcomes are exact (all-white -> PASS with pass_ratio 1.0; all-black -> FAIL with 0.0) and pass_ratio == min_pass_ratio yields PASS (greater-or-equal boundary)."
+boundary_cases:
+  - "Key length exactly 64 (allowed) vs 65 (rejected)."
+  - "threshold 0 and 255 (allowed); min_pass_ratio 0.0 and 1.0 (allowed)."
+  - "1x1 frames; pass_ratio exactly equal to min_pass_ratio."
+  - "dispatch result JSON just under and over the 65536-byte bound."
+negative_cases:
+  - "add(nullptr), duplicate add, unknown find."
+  - "Invalid keys: empty string, uppercase, space, 65 chars."
+  - "Wrong-type and out-of-range parameters; unsupported input_json keys and types."
+compatibility_requirements:
+  - "Tests are Catch2 v3 C++20, deterministic, hardware-free; no sleeps."
+  - "Independent test files use the cvf003_ prefix under tests/unit/ and must be clang-format clean before hashing (run clang-format -i, then clang-format --dry-run --Werror, then record sha256)."
+acceptance_criteria:
+  - "After implementation, canonical WSL configure/build/ctest/format-check/static-analysis/sanitizers pass with the new tests executing inside ctest."
+allowed_context:
+  - .ai/project-contract.yaml
+  - .ai/test-briefs/CVF-003.yaml
+  - tests/unit/** (your cvf003_* files and existing tests for context)
+  - CMakeLists.txt, CMakePresets.json
+  - "frozen interface headers once they exist (may #include, must not open .cpp files): src/inspection/algorithm.h, src/inspection/registry.h, src/algorithms/example_threshold.h, src/algorithms/compiled_algorithms.h, src/core/{status,error,result,deadline}.h, src/camera/captured_frame.h"
+  - ~/.config/opencode/skills/black-box-testing/SKILL.md
+forbidden_context:
+  - "any src/** .cpp implementation file or src/** file not listed above"
+  - .ai/changes/**
+  - .ai/reports/**
+  - "any diff, changed-file list, developer note, or root-cause description"
+allowed_test_paths:
+  - tests/unit/cvf003_*.cpp
+  - tests/unit/cvf003_*.h
+fixtures_path:
+  - tests/fixtures/algorithm/**
+ownership_manifest: .ai/test-ownership.yaml
+evidence:
+  red_report: .ai/reports/CVF-003-test-red.yaml
+  verify_report: .ai/reports/CVF-003-test-verify.yaml
+suggested_red_commands:
+  - "g++ -std=c++20 -Wall -Wextra -Werror -I src -I include -isystem \"$VCPKG_ROOT/installed/x64-linux/include\" -fsyntax-only tests/unit/cvf003_<test>.cpp"
+notes: >-
+  Expect RED because the inspection/algorithms interface headers do not exist yet. RED must
+  fail for exactly that reason. Extend the changes: mapping in .ai/test-ownership.yaml with a
+  CVF-003 section; preserve existing sections byte-exact. The developer wires tests/unit files
+  into the existing unit-test target.

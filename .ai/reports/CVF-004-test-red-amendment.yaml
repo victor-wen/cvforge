@@ -1,0 +1,92 @@
+schema_version: 1
+change_id: CVF-004
+phase: AUTHOR
+owner: test-engineer
+recorded_at: 2026-09-15
+amendment_of: .ai/reports/CVF-004-test-red.yaml
+defect:
+  id: TV-1
+  reported_by: developer run
+  artifact: tests/unit/cvf004_config_test.cpp
+  case: >-
+    CVF-004 B2 negative: duplicate keys are rejected at top level and nested levels
+    (nested logging duplicate), CTest #153
+  summary: >-
+    The replace_once anchor R"("max_files": 5,)" expected a trailing comma, but
+    valid_config_json_text() emits '"max_files": 5' as the last key of the logging
+    object. REQUIRE(position != std::string::npos) failed inside replace_once
+    (tests/unit/cvf004_test_support.h) before load_global_config ran, so CTest #153
+    reported 12/13 assertions passing.
+  root_cause: "Test-owned fixture/anchor text mismatch, not a production defect."
+fix:
+  file: tests/unit/cvf004_config_test.cpp
+  change: >-
+    Anchor corrected to R"("max_files": 5)" and the replacement now injects
+    R"("max_files": 5, "max_files": 5)" so the resulting document contains the nested
+    logging duplicate key while remaining valid JSON.
+  assertion_preserved: >-
+    The case still requires rejection with config_error / config_duplicate_key; no
+    assertion was removed, skipped, disabled, or weakened.
+  anchor_audit:
+    tool: .ai/validation/cvf004_anchor_check.py
+    scope: "all replace_once() anchors in the six CVF-004 test files"
+    pre_fix: "anchors=15, bad=1 ('\"max_files\": 5,', occurrences=0)"
+    post_fix: "anchors=15, bad=0"
+evidence:
+  - command: "bash .ai/validation/cvf004_anchor_check.sh (pre-fix)"
+    exit_code: 1
+    counts: "anchors=15, bad=1"
+  - command: "bash .ai/validation/cvf004_anchor_check.sh (post-fix)"
+    exit_code: 0
+    counts: "anchors=15, bad=0"
+  - command: >-
+      clang-format -i tests/unit/cvf004_test_support.h tests/unit/cvf004_error_codes_test.cpp
+      tests/unit/cvf004_config_test.cpp tests/unit/cvf004_recipe_test.cpp
+      tests/unit/cvf004_catalog_test.cpp tests/unit/cvf004_holder_test.cpp
+    exit_code: 0
+    counts: "formatting applied"
+  - command: >-
+      clang-format --dry-run --Werror tests/unit/cvf004_test_support.h
+      tests/unit/cvf004_error_codes_test.cpp tests/unit/cvf004_config_test.cpp
+      tests/unit/cvf004_recipe_test.cpp tests/unit/cvf004_catalog_test.cpp
+      tests/unit/cvf004_holder_test.cpp
+    exit_code: 0
+    counts: "no format drift"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    counts: "cvf004_config_test.cpp.o rebuilt; cvf004_tests linked"
+  - command: "ctest --preset wsl-gcc-debug -R CVF-004 --output-on-failure"
+    exit_code: 0
+    counts: "passed=68, failed=0 (includes CTest #153)"
+    log: .ai/validation/logs/ctest_cvf004_after_fix.log
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "passed=203, failed=0"
+  - command: "ctest --preset wsl-gcc-debug -R cvf004 --output-on-failure"
+    exit_code: 0
+    counts: >-
+      matched=0: CTest case names use the CVF-004 prefix, so the literal cvf004 selector
+      selects nothing; the targeted run above used -R CVF-004 instead.
+ownership:
+  manifest: .ai/test-ownership.yaml
+  changed_files:
+    - path: tests/unit/cvf004_config_test.cpp
+      previous_sha256: 35467a4b0fded08d6661ebd2b324b3c0bc9016089b97ca17a0d4fb61cd32a66e
+      sha256: f0bdfc16ce5a5bf2862d997a5b8ef53ffac98c0a2eff54aacf1a868aed7cf117
+  unchanged_files:
+    - path: tests/unit/cvf004_test_support.h
+      sha256: 99369537f9d4f511bde4a3fbe6e68e2c91f5e20138f8a2c8f8aed4af71150aa1
+    - path: tests/unit/cvf004_error_codes_test.cpp
+      sha256: 50ac8771a36a305051ed24d69ce23546ee7ed4d164d149e7201fd516fa6aa53b
+    - path: tests/unit/cvf004_recipe_test.cpp
+      sha256: bb9d61d8221020dd043465ab05849c3d460071b86e36e6323fe207c3de6ad09f
+    - path: tests/unit/cvf004_catalog_test.cpp
+      sha256: 52b5ea34dc5431218b56606c20d369ae51131c83a7e0bfac946a7f60ce5ce79b
+    - path: tests/unit/cvf004_holder_test.cpp
+      sha256: b19baa48deb34e854e3244eaafb83a4ad5df35a2dd9e78f12d7bf059b35d23a9
+  mismatches: []
+notes:
+  - "CVF-001, CVF-002 and CVF-003 ownership sections were not touched."
+  - "No production code and no other role's file was modified."
+  - "The pre-existing author assumptions and RED evidence in CVF-004-test-red.yaml remain valid."
+blockers: []

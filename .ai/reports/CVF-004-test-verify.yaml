@@ -1,0 +1,129 @@
+change_id: CVF-004
+phase: VERIFY
+session: "fresh verify session; implementation-blind (no production .cpp, no .ai/changes/**, no .ai/reports/** read)"
+scope: >-
+  Independent black-box verification of the CVF-004 recipe store (strict global config,
+  versioned recipes, immutable catalog, atomic holder) against
+  .ai/test-briefs/CVF-004.yaml and .ai/project-contract.yaml only.
+environment:
+  vcpkg_root: "$HOME/vcpkg (exported before every run)"
+  runner: "canonical CMake preset wsl-gcc-debug; direct cmake invocations were denied by
+    the top-level sandbox, so the canonical commands were executed verbatim from the
+    owner's harness .ai/validation/cvf004-test-engineer-verify.sh"
+  harness: .ai/validation/cvf004-test-engineer-verify.sh
+  logs:
+    - .ai/validation/cvf004-test-engineer-verify-run.log
+    - .ai/validation/cvf004-test-engineer-verify-tests.txt
+    - .ai/validation/cvf004-test-engineer-verify-summary.txt
+commands:
+  - command: "bash .ai/validation/cvf004-test-engineer-verify.sh   # export VCPKG_ROOT=$HOME/vcpkg; cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    counts: "configure step exit_code=0"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    counts: "build step exit_code=0"
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "passed=204, failed=0, skipped=0; '100% tests passed, 0 tests failed out of 204'; total test time 2.70 s"
+independent_tests:
+  prefix_selector: "CVF-004"
+  independent_named_tests:
+    count: 69
+    breakdown: "60 test-engineer files (CTest #141-#200) plus 9 pre-existing developer-authored
+      tests named 'CVF-004 dev: ...' (CTest #1-#9) that are not part of the ownership manifest"
+  independent_tests_run: 60
+  independent_tests_passed: 60
+  prior_run_before_verify_extension:
+    note: "First verify run (pre-extension) on the pristine ownership-manifest files:
+      203/203 passed, 59 independent tests (#141-#199), 0 skips. Evidence recorded in the
+      same harness logs before the requirement-derived extension below."
+  new_case_confirmation:
+    - "CTest #147: 'CVF-004 B2 boundary: a frame_rate just above zero is accepted' Passed"
+    - "CTest #166: 'CVF-004 B3 boundary: capture overrides are inclusive at their documented
+      bounds' Passed (contains the new frame_rate-just-above-zero SECTION)"
+skip_scan:
+  method: "case-insensitive grep for 'skip' and for 'not run|disabled' over the full ctest run log"
+  matches: 0
+  ctest_not_run_entries: 0
+  catch2_skips_observed: 0
+  notes: >-
+    The unreadable-file cases (config/recipe/catalog) are guarded by ::geteuid() == 0 and
+    ran normally in this session (non-root); no SKIP output appeared.
+short_circuit_review:
+  files_reviewed:
+    - tests/unit/cvf004_test_support.h
+    - tests/unit/cvf004_error_codes_test.cpp
+    - tests/unit/cvf004_config_test.cpp
+    - tests/unit/cvf004_recipe_test.cpp
+    - tests/unit/cvf004_catalog_test.cpp
+    - tests/unit/cvf004_holder_test.cpp
+  findings: >-
+    No disabled, commented-out, or short-circuited assertions. check_failure uses
+    REQUIRE_FALSE + CHECK on status and code; boundary and negative loops assert per
+    iteration with INFO context. The holder concurrency case is bounded (3 readers, 200
+    publish rounds, no sleeps) and asserts violations == 0 and observations > 0.
+    Two tests intentionally accept a small set of frozen error codes for invalid UTF-8
+    (parser-level vs value-level classification), which is consistent with the brief.
+failures: []
+ownership:
+  manifest: .ai/test-ownership.yaml
+  files_checked: 6
+  initial_recompute: "all 6 CVF-004 sha256 values matched the manifest exactly; mismatches: []"
+  mismatches: []
+  final_recompute: "all 6 sha256 values match the updated manifest after the owner-recorded
+    verify-phase extension; mismatches: []"
+  fixture_check: "tests/fixtures/recipes/** is not present; fixtures are generated in
+    per-test temporary directories at run time, so there are no fixture files to hash"
+verify_phase_extension:
+  reason: >-
+    The brief's boundary_cases list names 'frame_rate just above 0'. The authored suite
+    accepted 0.5 and 15.0 but did not probe the open lower bound precisely, so the
+    verify-phase requirement-derived edge case was added (skill: add requirement-derived
+    edge cases only). No assertion was removed, skipped, disabled, or weakened.
+  added:
+    - file: tests/unit/cvf004_config_test.cpp
+      case: "CVF-004 B2 boundary: a frame_rate just above zero is accepted (0.001 accepted and preserved)"
+      previous_sha256: f0bdfc16ce5a5bf2862d997a5b8ef53ffac98c0a2eff54aacf1a868aed7cf117
+      new_sha256: 58ef1e743e1724029390599d3a597d8ba777c2cd343798fa3182648ce21f0fbd
+    - file: tests/unit/cvf004_recipe_test.cpp
+      case: "CVF-004 B3 boundary: capture overrides ... (new SECTION: capture frame_rate 0.001 accepted and preserved)"
+      previous_sha256: bb9d61d8221020dd043465ab05849c3d460071b86e36e6323fe207c3de6ad09f
+      new_sha256: 62f9cf148db65f25db7dbdcf4c8a09dc6b11a2b614b28d9f48baadac4c377c1e
+  manifest_update: ".ai/test-ownership.yaml updated by owner: test-engineer with new hashes
+    and an explanation; all other change sections preserved byte-exact"
+  post_extension_rerun: "full canonical configure/build/ctest executed again in this
+    session: all three steps exit_code=0, 204/204 passed, 0 skips"
+coverage_summary:
+  - "B1 valid config and recipe values preserved; both roots recorded; all pixel_format
+    and level tokens; empty parameters and minimal recipe; save_policy tokens"
+  - "B2 1600/1601/1602/1603/1604/1605/1607 cases; backend token, selector sufficiency,
+    VID/PID 4-hex rule (upper and lower case), numeric bounds at 1/16384, 0/16385,
+    (0,1000], 1024..1073741824, 1..1000, 1..3650, 1048576..1099511627776; type errors;
+    invalid UTF-8; relative roots -> 1011 path_not_absolute; frozen 1600 numbering and
+    broad status mapping"
+  - "B3 all six top-level keys missing; unknown/duplicate keys (top level, parameters,
+    capture); parse error; missing file; schema_version != 1; recipe_id empty/129/bad
+    chars vs 128-byte acceptance; algorithm unknown/malformed/65 chars/non-string vs
+    64-char registered key; algorithm-delegated parameter rejection and registry
+    consultation count; non-object parameters; capture settle_frames missing/out of
+    range/wrong type, unknown key, non-object, width/height/frame_rate bounds, bad
+    pixel_format; artifacts save_policy/required/unknown key/non-object; invalid UTF-8;
+    io error"
+  - "B4 all *.json direct files, sorted ids, empty dir size 0, single-recipe dir,
+    nested/other extensions ignored, missing dir 1606, one invalid recipe fails whole
+    load, duplicate recipe_id 1617, unreadable file io error"
+  - "B5 find(known) fields, find(unknown) -> recipe_not_found/1622, recipe_ids()/size()"
+  - "B6 publish noexcept, default nullptr, atomic replacement, concurrent readers never
+    observe partial/mixed catalogs"
+  - "B7 failed candidate loads (malformed, duplicate id, missing dir) leave the published
+    catalog unchanged; valid candidate replaces it"
+forbidden_input_compliance:
+  production_sources_read: none
+  .ai/changes_read: none
+  .ai/reports_read: none
+  notes: >-
+    Direct reading of CMakePresets.json was denied by the session permission policy
+    (only CMakeLists.txt is allowlisted); the canonical preset command names were taken
+    from the approved contract's quality_commands instead. No implementation knowledge
+    was used in any decision in this session.
+blockers: []

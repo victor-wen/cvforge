@@ -1,0 +1,33 @@
+# Scripted body of the static-analysis target.
+
+set(compile_commands "${CVF_BUILD_DIR}/compile_commands.json")
+if(NOT EXISTS "${compile_commands}")
+    message(FATAL_ERROR "static-analysis: ${compile_commands} is missing; the preset must export compile commands")
+endif()
+
+file(GLOB_RECURSE sources
+    "${CVF_SOURCE_DIR}/src/*.cpp"
+)
+
+set(failed "")
+foreach(source IN LISTS sources)
+    execute_process(
+        COMMAND "${CVF_CLANG_TIDY}" "-p" "${CVF_BUILD_DIR}" "--warnings-as-errors=*" "${source}"
+        WORKING_DIRECTORY "${CVF_BUILD_DIR}"
+        RESULT_VARIABLE result
+        OUTPUT_VARIABLE output
+        ERROR_VARIABLE error_output
+    )
+    if(NOT result EQUAL 0)
+        list(APPEND failed "${source}")
+        message(STATUS "${output}${error_output}")
+    endif()
+endforeach()
+
+if(failed)
+    list(LENGTH failed count)
+    message(FATAL_ERROR "static-analysis failed for ${count} translation unit(s)")
+endif()
+
+list(LENGTH sources count)
+message(STATUS "static-analysis passed: ${count} file(s) clean under .clang-tidy")
