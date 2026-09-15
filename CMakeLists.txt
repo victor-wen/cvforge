@@ -423,6 +423,25 @@ if(WIN32)
         ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
         WINDOWS_EXPORT_ALL_SYMBOLS OFF
     )
+
+    if(MSVC)
+        # CI round 4 (run 34965200127): CMAKE_MSVC_DEBUG_INFORMATION_FORMAT
+        # ProgramDatabase adds the compiler /Zi only, and CMake's Windows-MSVC
+        # platform module puts /debug on the link line for Debug and
+        # RelWithDebInfo, while Release gets /INCREMENTAL:NO alone. link.exe
+        # without /debug writes no PDB, so package-symbols had no file to
+        # archive. Link /debug explicitly for Release and pin the linker PDB
+        # next to the DLL, which is where $<TARGET_PDB_FILE:cvforwin> reports it
+        # (bin/<config> under a multi-config generator).
+        #
+        # COMPILE_PDB_OUTPUT_DIRECTORY is deliberately left at its default:
+        # pinning it here too would resolve the compiler /Fd file and the linker
+        # /PDB file to the same bin/<config>/cvforwin.pdb path.
+        target_link_options(cvforwin PRIVATE "$<$<CONFIG:Release>:/debug>")
+        set_target_properties(cvforwin PROPERTIES
+            PDB_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+        )
+    endif()
 else()
     # Portable builds hide everything except the five explicitly exported
     # symbols, so the WSL export check is meaningful.

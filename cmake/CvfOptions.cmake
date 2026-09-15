@@ -32,9 +32,13 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
 if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-    # Emit a linker PDB in every configuration so the release symbols archive
-    # (package-symbols) always has content; the PDB is never copied into the
-    # package ZIP. Requires CMake 3.25+ (the project requires 3.28).
+    # ProgramDatabase selects the compiler /Zi only; it does not put /debug on
+    # the link line, and CMake's Windows-MSVC platform module links /debug for
+    # Debug and RelWithDebInfo only. The Release target that package-symbols
+    # archives therefore gets an explicit /debug link option and a pinned
+    # linker PDB directory in the root CMakeLists.txt (cvforwin, WIN32/MSVC
+    # branch); the PDB is never copied into the package ZIP. Requires CMake
+    # 3.25+ (the project requires 3.28).
     set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "ProgramDatabase")
 endif()
 

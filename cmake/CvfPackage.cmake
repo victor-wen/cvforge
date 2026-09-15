@@ -90,8 +90,13 @@ function(cvforwin_add_package_targets)
     )
 
     # The release symbols PDB travels in its own archive and never enters the
-    # package ZIP. MSVC emits the PDB in every configuration because
-    # CvfOptions.cmake pins CMAKE_MSVC_DEBUG_INFORMATION_FORMAT.
+    # package ZIP. The root CMakeLists.txt (WIN32/MSVC) links Release with
+    # /debug and pins the linker PDB to bin/<config>, so $<TARGET_PDB_FILE>
+    # names the file link.exe actually writes; CMake's platform module alone
+    # would link /debug only for Debug and RelWithDebInfo (CI round 4, run
+    # 34965200127). The cmake -P check below fails with the missing path,
+    # configuration, and /debug requirement before the copy, instead of the
+    # bare "Error copying file" from copy_if_different.
     #
     # CI round 3 (run 34960459232): no WORKING_DIRECTORY may point at a
     # directory that the target itself creates. Build tools change into the
@@ -105,6 +110,11 @@ function(cvforwin_add_package_targets)
     file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/symbols")
     add_custom_target(package-symbols
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/symbols"
+        COMMAND "${CMAKE_COMMAND}"
+            -D "CVF_PDB=$<TARGET_PDB_FILE:cvforwin>"
+            -D "CVF_TARGET=cvforwin"
+            -D "CVF_CONFIG=$<CONFIG>"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CvfCheckPdb.cmake"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "$<TARGET_PDB_FILE:cvforwin>" "${CMAKE_BINARY_DIR}/symbols/"
         COMMAND "${CMAKE_COMMAND}" -E chdir "${CMAKE_BINARY_DIR}/symbols"

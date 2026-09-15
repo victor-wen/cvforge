@@ -59,7 +59,16 @@ ci:
     package DLL next to the consumer exe or use path_list_prepend; add a local syntax probe);
     (b) package-symbols WORKING_DIRECTORY points at ${CMAKE_BINARY_DIR}/symbols created by
     its own first command; Ninja probe reproduces 'cd: can't cd' -> developer fix (create the
-    dir at configure time or use absolute paths).attempts:
+    dir at configure time or use absolute paths).
+  run_4: >-
+    34965200127 failure (windows-ci, 12m20s): test-enabled job FULLY GREEN (188/188 tests +
+    clean package consumer PASS). Release job green through package-verify; package-symbols
+    now fails copying the expected PDB because the file was never produced: verified in
+    /usr/share/cmake-3.28/Modules/Platform/Windows-MSVC.cmake that only Debug and
+    RelWithDebInfo link with /debug; Release links with /INCREMENTAL:NO only, while
+    CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=ProgramDatabase affects the compiler (/Zi) only.
+    Fix: link /debug for Release on the shared target + pin PDB_OUTPUT_DIRECTORY so the genex
+    and the linker agree; add a clear missing-PDB error. vcpkg cache steps ran successfully.attempts:
   CVF-001: 1
 completed_gates:
   - change: CVF-001

@@ -1,0 +1,219 @@
+schema_version: 1
+change_id: CVF-008
+phase: AMENDMENT
+amendment: windows-ci round 4 (run 34965200127) Release linker PDB for package-symbols
+recorded_at: 2026-09-15
+author: developer
+baseline:
+  path: .ai/project-contract.yaml
+  contract_version: 1.0.0
+  status: APPROVED
+
+ci_evidence:
+  workflow_run: windows-2022 CI run 34965200127 (round 4, 12m20s)
+  diagnostics:
+    - id: CI-4A
+      job: windows-tests-consumer
+      status: GREEN
+      observed: >-
+        188/188 Windows tests passed and the independent clean package consumer step passed.
+        No developer action.
+    - id: CI-4B
+      job: windows-release
+      target: package-symbols
+      reported_by: MSBuild on windows-2022
+      observed: >-
+        The release job passed configure/build/test/abi-check/package/package-verify and
+        failed only at package-symbols: `cmake -E copy_if_different
+        "$<TARGET_PDB_FILE:cvforwin>" build/windows-msvc-release/symbols/` reported
+        "Error copying file ... bin/Release/cvforwin.pdb": the generator expression and the
+        linker agreed on the path, but link.exe never wrote the file.
+      cause: >-
+        In the Release configuration MSVC links without /debug, so no PDB is produced, while
+        package-symbols archives the linker PDB. The dependency was latent until round 3
+        removed the earlier working-directory failure, exposing this next defect.
+
+root_cause:
+  statement: >-
+    CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=ProgramDatabase (cmake/CvfOptions.cmake) only adds
+    the compiler /Zi flag. CMake's Windows-MSVC platform module appends /debug to the link
+    flags of the Debug and RelWithDebInfo configurations only; Release gets /INCREMENTAL:NO
+    alone. link.exe therefore writes no cvforwin.pdb in Release and the unconditional
+    copy_if_different in package-symbols fails.
+  local_module_verification:
+    file: /usr/share/cmake-3.28/Modules/Platform/Windows-MSVC.cmake
+    host: cmake 3.28.3
+    evidence_log: .ai/validation/ci-round-4-cmake-module-evidence.log
+    lines:
+      - '322: LINKER_FLAGS_DEBUG_INIT " /debug /pdbtype:sept ..."'
+      - '323: LINKER_FLAGS_RELWITHDEBINFO_INIT " /debug /pdbtype:sept ..."'
+      - '325/326: non-sept variants of the same two configurations'
+      - '330: LINKER_FLAGS_RELEASE_INIT " /INCREMENTAL:NO" (no /debug)'
+      - '503: COMPILE_OPTIONS_MSVC_DEBUG_INFORMATION_FORMAT_ProgramDatabase -Zi (compiler-only)'
+    genex_doc: >-
+      cmake --help-property PDB_OUTPUT_DIRECTORY: "Multi-configuration generators append a
+      per-configuration subdirectory to the specified directory unless a generator
+      expression is used" — so setting it to ${CMAKE_BINARY_DIR}/bin keeps the linker PDB at
+      bin/<config>/cvforwin.pdb, the path $<TARGET_PDB_FILE:cvforwin> already reported in
+      the failing CI step.
+
+changes:
+  - file: CMakeLists.txt
+    defect: CI-4B
+    change: >-
+      In the cvforwin WIN32 branch, added an MSVC-guarded block:
+      `target_link_options(cvforwin PRIVATE "$<$<CONFIG:Release>:/debug>")` and
+      `set_target_properties(cvforwin PROPERTIES PDB_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")`.
+      Debug and RelWithDebInfo keep the platform-module /debug; Release now links /debug
+      explicitly and the linker PDB is pinned next to the DLL (bin/<config>), matching
+      $<TARGET_PDB_FILE:cvforwin>.
+    preserved:
+      - "RUNTIME_OUTPUT_DIRECTORY/LIBRARY_OUTPUT_DIRECTORY/ARCHIVE_OUTPUT_DIRECTORY and the .def export allowlist unchanged"
+      - "portable (non-WIN32) branch untouched: hidden visibility plus version script"
+      - "COMPILE_PDB_OUTPUT_DIRECTORY intentionally left at its default; pinning it to bin/ would resolve the compiler /Fd file and the linker /PDB file to the same bin/<config>/cvforwin.pdb path"
+  - file: cmake/CvfOptions.cmake
+    defect: CI-4B
+    change: >-
+      Replaced the inaccurate "emits a linker PDB in every configuration" comment with the
+      verified behaviour: ProgramDatabase selects the compiler /Zi only, and the explicit
+      Release /debug link option plus PDB directory live in the root CMakeLists.txt.
+      CMAKE_MSVC_DEBUG_INFORMATION_FORMAT itself is unchanged.
+  - file: cmake/CvfCheckPdb.cmake
+    defect: "failure mode of CI-4B (bare 'Error copying file')"
+    change: >-
+      New `cmake -P` check invoked by package-symbols after make_directory and before
+      copy_if_different. Inputs: CVF_PDB (resolved $<TARGET_PDB_FILE:cvforwin>),
+      CVF_TARGET, CVF_CONFIG. It fails non-zero when the path is unset/empty, and when the
+      file is missing it names the target, the configuration, the expected path, the MSVC
+      /debug requirement, and where the policy is defined.
+  - file: cmake/CvfPackage.cmake
+    defect: CI-4B
+    change: >-
+      package-symbols now runs `cmake -D CVF_PDB=$<TARGET_PDB_FILE:cvforwin>
+      -D CVF_TARGET=cvforwin -D CVF_CONFIG=$<CONFIG> -P
+      ${CMAKE_CURRENT_SOURCE_DIR}/cmake/CvfCheckPdb.cmake` before copy_if_different, and
+      the comment records the round-4 root cause.
+    preserved:
+      - "archive at exactly ${CMAKE_BINARY_DIR}/symbols/cvforwin-${PROJECT_VERSION}-symbols.zip"
+      - "zip entry layout: cvforwin.pdb at the archive root (cmake -E chdir tar)"
+      - "configure-time file(MAKE_DIRECTORY) and the no-WORKING_DIRECTORY rule from round 3"
+      - "DEPENDS cvforwin and VERBATIM"
+      - "the non-Windows refusal targets package and package-verify are untouched"
+      - "five-symbol package logic, package-verify, .def allowlist, and the vcpkg cache steps are untouched"
+  - file: .ai/validation/ci-round-3-package-symbols-probe.sh
+    defect: "round-4 check command added to the real package-symbols block"
+    change: >-
+      Section 3 now stages cmake/CvfCheckPdb.cmake into the derived project (the derived
+      block references it through ${CMAKE_CURRENT_SOURCE_DIR}/cmake); all 31 structural and
+      functional checks otherwise unchanged and still green.
+  - file: .ai/validation/ci-round-4-release-pdb-check.sh
+    defect: "local detector for CI-4B (MSVC link output cannot be produced locally)"
+    change: >-
+      New executable harness (53 checks): (1) host platform-module evidence for the
+      /debug-only-for-Debug-and-RelWithDebInfo and compiler-only ProgramDatabase behaviour;
+      (2) structural wiring — MSVC-guarded Release /debug, pinned PDB_OUTPUT_DIRECTORY, no
+      COMPILE_PDB_OUTPUT_DIRECTORY, cmake -P check ordered before copy_if_different, archive
+      name/entry/DEPENDS/VERBATIM/no-WORKING_DIRECTORY preserved; an execution check that
+      extracts the production MSVC block into a scratch project and asserts the generated
+      Release link command carries /debug while Debug does not (genex condition proven on a
+      non-MSVC host); (3) CvfCheckPdb.cmake behaviour for missing/present/unset/empty;
+      (4) end-to-end build of the REAL extracted package-symbols block: archive with the
+      single root-level cvforwin.pdb entry, and with the PDB removed a failure carrying the
+      new message and never reaching "Error copying file".
+
+commands:
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    summary: "Configure complete (GNU 13.3.0); only the pre-existing vcpkg default-registry warning. Log .ai/validation/ci-round-4-configure.log"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    summary: >-
+      No work to do: the fix is inside the WIN32/MSVC branches, so the Linux build graph is
+      unchanged. Log .ai/validation/ci-round-4-build.log
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "passed=263, failed=0"
+    summary: "100% tests passed, 263/263. Log .ai/validation/ci-round-4-ctest.log"
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    summary: "format-check passed: 83 file(s) conform to .clang-format. Log .ai/validation/ci-round-4-format-check.log"
+  - command: "bash .ai/validation/ci-round-4-release-pdb-check.sh"
+    exit_code: 0
+    counts: "checks=53, failures=0"
+    summary: >-
+      Platform evidence, structural wiring, extracted-block execution (Release /debug
+      present, Debug absent), check-script behaviour, and the real-block end-to-end archive
+      all pass. Log .ai/validation/ci-round-4-release-pdb-probe.log
+  - command: >-
+      CVF_CMAKE_LISTS_FILE=/tmp/opencode/cvf-round4-negative/CMakeLists.txt
+      CVF_PACKAGE_FILE=/tmp/opencode/cvf-round4-negative/CvfPackage.cmake
+      bash .ai/validation/ci-round-4-release-pdb-check.sh
+      > .ai/validation/ci-round-4-release-pdb-probe-negative-control.log 2>&1
+    exit_code: 1
+    counts: "checks=53, failures=14"
+    summary: >-
+      Negative control (expected failure): fixture with the pre-fix CMakeLists (no Release
+      /debug, no pinned PDB directory) and pre-fix CvfPackage (no check command). It flags
+      both structural absences, the missing check command/inputs and ordering, and the old
+      e2e failure mode ("Error copying file" instead of the clear message), so the harness is
+      red-sensitive to a reverted fix.
+  - command: "bash .ai/validation/ci-round-3-package-symbols-probe.sh"
+    exit_code: 0
+    counts: "checks=31, failures=0"
+    summary: >-
+      Previous-amendment probe re-run unchanged against the final sources (derived project
+      now stages the new check script); archive path and single root-level cvforwin.pdb entry
+      confirmed. Log .ai/validation/ci-round-3-package-symbols-probe-rerun.log
+  - command: >-
+      grep -n 'LINKER_FLAGS_DEBUG_INIT ...
+      /LINKER_FLAGS_RELWITHDEBINFO_INIT ... /LINKER_FLAGS_RELEASE_INIT ...
+      /MSVC_DEBUG_INFORMATION_FORMAT_ProgramDatabase -Zi'
+      /usr/share/cmake-3.28/Modules/Platform/Windows-MSVC.cmake
+    exit_code: 0
+    summary: "Module lines 322/323/325/326, 330, 503 captured in .ai/validation/ci-round-4-cmake-module-evidence.log"
+
+probe_summary:
+  harness: .ai/validation/ci-round-4-release-pdb-check.sh
+  checks: 53
+  real_sources: "PASS (53/53, exit 0)"
+  negative_control: "RED-SENSITIVE: exit 1 with checks=53 failures=14 on the pre-fix wiring"
+  previous_probe: "ci-round-3-package-symbols-probe.sh PASS (31/31, exit 0)"
+
+deferred_to_ci:
+  - topic: Release PDB production and symbols archive on MSBuild
+    status: deferred
+    statement: >-
+      No Windows/MSVC host locally: the linker PDB itself cannot be produced or inspected
+      here. The next windows-2022 run must show (a) package-symbols succeeding, (b) the MSVC
+      link command for the Release cvforwin target containing /debug, (c) the "Upload release
+      symbols archive" step finding
+      build/windows-msvc-release/symbols/cvforwin-1.0.0-symbols.zip, and (d) exactly one
+      cvforwin.pdb entry at the archive root.
+  - topic: PDB path agreement with $<TARGET_PDB_FILE:cvforwin>
+    status: deferred
+    statement: >-
+      PDB_OUTPUT_DIRECTORY is documented to receive the per-configuration subdirectory from
+      multi-config generators, so the linker output should stay bin/Release/cvforwin.pdb,
+      the path the genex reported in the failing step. This is reasoned from CMake's documented
+      behaviour plus the prior CI path, but only the next MSBuild run can confirm the linker
+      actually writes that file.
+  - topic: vcpkg binary cache effectiveness
+    status: deferred
+    statement: >-
+      Unchanged from round 3; the vcpkg cache steps were reported running successfully in run
+      34965200127. The run after the next one with unchanged manifests should show a cache
+      restore instead of a full rebuild.
+
+blockers: []
+notes: >-
+  Scope respected: only CMakeLists.txt, cmake/CvfOptions.cmake, cmake/CvfPackage.cmake, the
+  new cmake/CvfCheckPdb.cmake, the two .ai/validation harnesses, and this report were edited;
+  no tests/**, src/**, .github/**, CMakePresets.json, or other role artifact was touched
+  (.ai/workflow-state.yaml was already dirty before this session and was not modified).
+  Deliberate adjustment to the suggested fix: COMPILE_PDB_OUTPUT_DIRECTORY is NOT pinned to
+  bin/ because it would make the compiler /Fd file and the linker /PDB file the same
+  bin/<config>/cvforwin.pdb path; PDB_OUTPUT_DIRECTORY alone keeps the linker output and the
+  generator expression in agreement. WSL canonical chain is fully green on the final sources
+  (configure 0, build 0, ctest 263/263, format-check 83 files) and both harnesses are green
+  with a red-sensitive negative control. Remaining acceptance gate: the next windows-2022 CI
+  run (symbols archive upload), then the vcpkg cache-hit confirmation on the run after that.
