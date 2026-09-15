@@ -92,13 +92,25 @@ function(cvforwin_add_package_targets)
     # The release symbols PDB travels in its own archive and never enters the
     # package ZIP. MSVC emits the PDB in every configuration because
     # CvfOptions.cmake pins CMAKE_MSVC_DEBUG_INFORMATION_FORMAT.
+    #
+    # CI round 3 (run 34960459232): no WORKING_DIRECTORY may point at a
+    # directory that the target itself creates. Build tools change into the
+    # working directory before running the first command, so the batch failed
+    # before `cmake -E make_directory` could run (MSBuild: "The system cannot
+    # find the path specified."; Ninja: "cd: can't cd to .../symbols"). The
+    # directory is created at configure time, every command runs from the
+    # always-existing build root, and the tar step uses `cmake -E chdir` into
+    # the symbols directory so the archive keeps its root-level cvforwin.pdb
+    # entry (absolute tar paths would record symbols/cvforwin.pdb instead).
+    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/symbols")
     add_custom_target(package-symbols
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/symbols"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "$<TARGET_PDB_FILE:cvforwin>" "${CMAKE_BINARY_DIR}/symbols/"
-        COMMAND "${CMAKE_COMMAND}" -E tar cf
-            "cvforwin-${PROJECT_VERSION}-symbols.zip" --format=zip "cvforwin.pdb"
-        WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/symbols"
+        COMMAND "${CMAKE_COMMAND}" -E chdir "${CMAKE_BINARY_DIR}/symbols"
+            "${CMAKE_COMMAND}" -E tar cf
+                "cvforwin-${PROJECT_VERSION}-symbols.zip" --format=zip
+                "cvforwin.pdb"
         DEPENDS cvforwin
         COMMENT "Archiving the release PDB separately from the package"
         VERBATIM

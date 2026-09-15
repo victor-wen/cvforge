@@ -342,9 +342,9 @@ changes:
     algorithm: sha256
     files:
       - path: tests/package/package_checks.cmake
-        sha256: 3f23084482a3098d6be35d31673db61cd9ab2784d6a0077fb977788f713f4f78
+        sha256: 371855a65c10c435c3f4913cb546b8652054d5ee93a7a44a63de14455b826e9d
       - path: tests/package/consumer/CMakeLists.txt
-        sha256: 0f48932b501f3913f68460bbe92dec5c6210437f56d501a8c5846d7cb6e0eace
+        sha256: e5b40efbbf0e6bbadc49e590ff3b3cb51f49d7ea65d69a8445bc3e77ddb4c10a
       - path: tests/package/consumer/main.c
         sha256: 7dba7464da5d88f460cef2c0cfd78f1e8f75186c192b809dbf0e21e5c36dce12
       - path: tests/package/consumer/config/cvforwin.json
@@ -364,3 +364,28 @@ changes:
       assumptions are listed in the RED report. Hashes are not to be updated by
       anyone other than the test owner; a mismatch at verify time is an
       independence violation.
+      Amendment (2026-09-15, owner: test-engineer; report
+      .ai/reports/CVF-008-test-red-amendment-3.yaml): CI round 3 (run 34960459232)
+      failed at the clean consumer step with "consumer run failed with exit 1:" and
+      empty output because package_checks.cmake launched the consumer through
+      "cmake -E env --modify PATH=prepend:${CVF_PACKAGE_ROOT}/bin"; `prepend` is not
+      a valid --modify operation, so cmake refused the invocation (exit 1) and the
+      consumer was never launched. The run step now deploys the installed
+      bin/cvforwin.dll next to the consumer executable with cmake -E copy_if_different
+      (under the default SafeDllSearchMode the Windows loader searches the application
+      directory before PATH, so the installed DLL is pinned deterministically and the
+      check still uses only the installed package) and no longer manipulates PATH.
+      Configure/build/deploy/run failures now report the exact executed command line
+      and mark an empty output capture explicitly; the consumer CMakeLists.txt header
+      comment was updated to match. Previous sha256 values: package_checks.cmake
+      3f23084482a3098d6be35d31673db61cd9ab2784d6a0077fb977788f713f4f78 and
+      consumer/CMakeLists.txt 0f48932b501f3913f68460bbe92dec5c6210437f56d501a8c5846d7cb6e0eace;
+      the new values are recorded above. No assertion, check, or coverage was
+      weakened. Fresh WSL evidence (amendment report
+      .ai/reports/CVF-008-test-red-amendment-3.yaml): author harness pass=17 fail=0
+      skip=0 with the new cmake -E operation scan, the env --modify positive/negative
+      controls, and the DLL-deploy emulation; verify harness configure/build/ctest
+      exit 0 and 263/263 tests passed; direct ctest 263/263; manifest audit 47/47.
+      The real Windows consumer run remains deferred to CI (not claimed). Harness
+      sha256: author 7858ef83dbe99f1b6734e7e547b4d926ba67e1e982bcb00b340a81c338f08bfc,
+      verify 3bd8a82d462677704410a8035c11784ba6ed52dbdc3a1fa035ee8fc7d750d510.

@@ -5,6 +5,9 @@
 #   - runner: windows-2022 with Visual Studio 2022 v143 and x64 tools;
 #   - immutable action references (full commit SHAs with version comments);
 #   - least permissions (contents: read) and no secrets anywhere;
+#   - vcpkg binary cache: a job-level VCPKG_DEFAULT_BINARY_CACHE plus one
+#     actions/cache@v4 step per job, both keyed by the vcpkg manifest hashes,
+#     so built ports are restored instead of rebuilt from source;
 #   - the canonical windows commands only: the release job runs
 #     `cmake --workflow --preset windows-ci` (windows_full_quality), which
 #     chains configure/build/test/abi-check/package/package-verify plus the
@@ -37,11 +40,30 @@ jobs:
     name: Release build, tests, abi-check, package
     runs-on: windows-2022
     timeout-minutes: 90
+    env:
+      # vcpkg binary cache. Both jobs use the same key, so the cache saved by
+      # one job is reused by the other and by later runs instead of rebuilding
+      # OpenCV and the other ports from source (~9-10 min per round).
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg_cache
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+
+      # vcpkg needs VCPKG_DEFAULT_BINARY_CACHE to exist before it runs; the
+      # directory is created first so actions/cache restore and save behave.
+      - name: Create vcpkg binary cache directory
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force -Path "${{ env.VCPKG_DEFAULT_BINARY_CACHE }}" | Out-Null
+
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ github.workspace }}/vcpkg_cache
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
 
       # windows_full_quality: configure windows-msvc-release, build, ctest,
       # abi-check, package, package-verify, package-symbols.
@@ -66,11 +88,28 @@ jobs:
     name: Test-enabled suite and clean package consumer
     runs-on: windows-2022
     timeout-minutes: 90
+    env:
+      # Same vcpkg binary cache key as the release job; see that job's comment.
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg_cache
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+
+      # vcpkg needs VCPKG_DEFAULT_BINARY_CACHE to exist before it runs; the
+      # directory is created first so actions/cache restore and save behave.
+      - name: Create vcpkg binary cache directory
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force -Path "${{ env.VCPKG_DEFAULT_BINARY_CACHE }}" | Out-Null
+
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ github.workspace }}/vcpkg_cache
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
 
       # configure windows-msvc-tests (CVFORWIN_BUILD_TEST_BACKENDS=ON), build,
       # ctest (camera/ABI/lifecycle suites), abi-check, then build and verify

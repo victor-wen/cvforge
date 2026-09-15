@@ -14,8 +14,11 @@
 # <build>/bin independently of the generator configuration.
 #
 # At run time the installed DLL must be reachable: the normal driver,
-# tests/package/package_checks.cmake, prepends <CVF_PACKAGE_ROOT>/bin to PATH.
-# For a manual run, do the same (or run the executable next to cvforwin.dll).
+# tests/package/package_checks.cmake, deploys <CVF_PACKAGE_ROOT>/bin/cvforwin.dll
+# next to the consumer executable before running it, so the Windows loader finds
+# the installed DLL in the application directory (its first search location)
+# regardless of PATH. For a manual run, copy the DLL next to the executable as
+# well, or prepend <CVF_PACKAGE_ROOT>/bin to PATH.
 
 cmake_minimum_required(VERSION 3.28)
 

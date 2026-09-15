@@ -1,0 +1,173 @@
+schema_version: 1
+change_id: CVF-008
+phase: AUTHOR
+amendment: 3
+recorded_at: 2026-09-15
+owner: test-engineer
+brief: .ai/test-briefs/CVF-008.yaml
+contract: .ai/project-contract.yaml
+headline: >-
+  CI round-3 defect in the CVF-008 clean-consumer kit: the run step passed an
+  invalid `cmake -E env --modify` operation name, so cmake exited 1 before the
+  consumer started (empty output). The run step now deploys the installed DLL
+  next to the consumer executable with `cmake -E copy_if_different`, reports the
+  exact command line plus an explicit "(no output captured)" marker on
+  configure/build/deploy/run failures, and both harnesses gain local self-tests
+  for this `cmake -E` syntax class. Real Windows consumer execution remains
+  deferred to CI.
+
+ci_diagnostic:
+  run: 34960459232
+  job: windows-2022 test-enabled package job
+  observed: >-
+    All 188 Windows tests and the package-verify checks passed; the clean
+    consumer step then failed with `consumer run failed with exit 1:` and no
+    further output.
+
+root_cause:
+  file: tests/package/package_checks.cmake
+  detail: >-
+    Locally reproduced: `cmake -E env --modify "PATH=prepend:<root>/bin"` is
+    rejected by cmake ("Unrecognized environment manipulation argument:
+    prepend", exit 1), so the consumer process was never launched and the
+    captured stdout/stderr were empty. `prepend` is not a valid --modify
+    operation; `path_list_prepend` is. The failure report only concatenated the
+    empty output, leaving a bare headline.
+
+fix:
+  choice: >-
+    Preferred option: drop the environment manipulation entirely and deploy the
+    installed DLL next to the consumer executable before the run, with
+    `cmake -E copy_if_different "${CVF_PACKAGE_ROOT}/bin/cvforwin.dll"
+    "${cvf_consumer_bin_dir}/cvforwin.dll"`.
+  rationale:
+    - >-
+      Deterministic loader behavior: with the Windows default SafeDllSearchMode
+      the loader searches the application directory before PATH, so the
+      installed DLL is pinned regardless of what else is on PATH; a
+      `path_list_prepend` PATH edit can still be shadowed by a same-named DLL
+      earlier in the search order and relies on a newer `--modify` feature
+      surface.
+    - >-
+      Mirrors deployment: a host application ships cvforwin.dll beside its
+      executable, so the check exercises the deployment shape rather than a
+      PATH side-channel.
+    - >-
+      Removes the failing construct class instead of repairing its syntax, and
+      `copy_if_different` is a long-stable `cmake -E` operation.
+    - >-
+      The check still uses only the installed package: the copied DLL comes
+      from `<CVF_PACKAGE_ROOT>/bin/cvforwin.dll`.
+  diagnostics_improvement:
+    - >-
+      New helpers `cvf_command_line` and `cvf_fail_command`: configure, build,
+      deploy, and run failures now report the exact executed command line and
+      the combined stdout+stderr, or the explicit marker "(no output
+      captured)".
+    - >-
+      The missing-executable failure also names the build command line.
+  consumer_comment_update: >-
+    tests/package/consumer/CMakeLists.txt header comment now describes the
+    DLL-deploy behavior instead of the removed PATH prepend.
+
+scan_of_tests_package:
+  cmake_e_invocations:
+    - >-
+      Exactly one `cmake -E` invocation exists in tests/package/** (the consumer
+      DLL deploy). It uses `copy_if_different`, which is listed by
+      `cmake -E help`; the harness now cross-checks every extracted `-E <op>`
+      against that list.
+  locally_checkable_windows_steps:
+    - >-
+      Already validated on WSL: check-script relative/missing/empty root
+      refusals, consumer configure gate (absolute root accepted, relative root
+      rejected), JSON syntax, C11 syntax/object compile against the installed
+      include layout, clang-format.
+    - >-
+      Newly added local checks: `cmake -E env --modify` positive control with
+      `path_list_prepend` (accepted and actually prepends), negative control
+      with `prepend` (non-zero exit), the `cmake -E copy_if_different` deploy
+      emulation, and a static invariant that the deployed DLL directory equals
+      the consumer executable directory with no `--modify` usage in the script.
+  not_checkable_locally:
+    - >-
+      The real consumer link/run, dumpbin export/dependency checks, and the
+      installed package layout remain Windows-only and are not claimed here.
+
+hash_updates:
+  algorithm: sha256
+  files:
+    - path: tests/package/package_checks.cmake
+      previous: 3f23084482a3098d6be35d31673db61cd9ab2784d6a0077fb977788f713f4f78
+      current: 371855a65c10c435c3f4913cb546b8652054d5ee93a7a44a63de14455b826e9d
+    - path: tests/package/consumer/CMakeLists.txt
+      previous: 0f48932b501f3913f68460bbe92dec5c6210437f56d501a8c5846d7cb6e0eace
+      current: e5b40efbbf0e6bbadc49e590ff3b3cb51f49d7ea65d69a8445bc3e77ddb4c10a
+    - path: tests/package/consumer/main.c
+      previous: 7dba7464da5d88f460cef2c0cfd78f1e8f75186c192b809dbf0e21e5c36dce12
+      current: 7dba7464da5d88f460cef2c0cfd78f1e8f75186c192b809dbf0e21e5c36dce12
+      note: unchanged
+    - path: tests/package/consumer/config/cvforwin.json
+      previous: 42aa7e9b1580ffc5d6c8f1f261d037aba86f35b0052141c072b10d5fdb3a2eb0
+      current: 42aa7e9b1580ffc5d6c8f1f261d037aba86f35b0052141c072b10d5fdb3a2eb0
+      note: unchanged
+    - path: tests/package/consumer/config/recipes/example.pass.json
+      previous: 161061dfea745a30675447acb62effe6fc95bd1140caa318b42ebdae9e042a09
+      current: 161061dfea745a30675447acb62effe6fc95bd1140caa318b42ebdae9e042a09
+      note: unchanged
+  harness:
+    - path: .ai/validation/cvf008-test-engineer-author.sh
+      previous: fba93fe311f6eb4582b4ba424ffc8adbb62e85a9fdeaf25bb502b66addec1c74
+      current: 7858ef83dbe99f1b6734e7e547b4d926ba67e1e982bcb00b340a81c338f08bfc
+    - path: .ai/validation/cvf008-test-engineer-verify.sh
+      previous: 5ca8272dccb9f05ef1da039957606d2ac826a7b1638b534f18a538cb9a200f4a
+      current: 3bd8a82d462677704410a8035c11784ba6ed52dbdc3a1fa035ee8fc7d750d510
+  manifest: >-
+    .ai/test-ownership.yaml CVF-008 section updated in place: two hashes
+    changed, amendment note appended, all other sections preserved byte-exact
+    (full audit 47/47 matches).
+
+evidence:
+  harness_self_tests:
+    command: "bash .ai/validation/cvf008-test-engineer-author.sh"
+    exit_code: 0
+    observed: "summary: pass=17 fail=0 skip=0; manifest-ok checked=47 files"
+  canonical_suite_via_verify_harness:
+    command: "bash .ai/validation/cvf008-test-engineer-verify.sh"
+    exit_code: 0
+    observed: >-
+      internal exit codes configure=0 build=0 ctest=0 testlist=0; ctest
+      "100% tests passed, 0 tests failed out of 263"; structural checks
+      pass=17 fail=0 skip=0; ownership audit checked=47 files, 0 mismatches.
+  direct_ctest:
+    command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    observed: "100% tests passed, 0 tests failed out of 263, 0 skipped"
+  canonical_build_note: >-
+    `cmake --build --preset wsl-gcc-debug --parallel` cannot be invoked
+    directly by this role (sandbox deny list; this is documented in the
+    verify-harness header); it is executed by the allowlisted verify harness and
+    recorded there with exit code 0.
+  new_self_tests:
+    - "cmake -E operation 'copy_if_different' in package_checks.cmake is a real cmake command"
+    - "cmake -E env --modify path_list_prepend is accepted and prepends the path"
+    - "cmake -E env --modify rejects the invalid operation 'prepend' (exit 1)"
+    - "cmake -E copy_if_different deploys the installed DLL next to the consumer executable"
+    - "package_checks consumer-run deploy invariant (installed DLL beside the executable, no env manipulation)"
+
+deferred_to_windows_ci:
+  - >-
+    The real clean-consumer link/run against an installed test-enabled package
+    (the step that failed in run 34960459232) is Windows-only and remains
+    deferred: CI round 4 must confirm the run reaches the consumer and prints
+    its checks/failures report with exit 0.
+  - >-
+    dumpbin export/dependency checks, the installed package layout, and notices
+    remain CI evidence; none of this is claimed on WSL.
+
+assertions_unchanged: >-
+  No assertion, check, or coverage was weakened, skipped, disabled, or removed.
+  The change is limited to how the consumer is launched and diagnosed, plus
+  comments and harness self-checks.
+
+blockers: []

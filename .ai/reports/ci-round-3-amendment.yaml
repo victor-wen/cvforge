@@ -1,0 +1,224 @@
+schema_version: 1
+change_id: CVF-008
+phase: AMENDMENT
+amendment: windows-ci round 3 (run 34960459232) package-symbols fix + vcpkg binary cache
+recorded_at: 2026-09-15
+author: developer
+baseline:
+  path: .ai/project-contract.yaml
+  contract_version: 1.0.0
+  status: APPROVED
+
+ci_evidence:
+  workflow_run: windows-2022 CI run 34960459232 (round 3, 12m1s)
+  diagnostics:
+    - id: CI-3A
+      file: cmake/CvfPackage.cmake
+      target: package-symbols
+      reported_by: MSBuild on windows-2022
+      observed: >-
+        The release job passed configure/build/test/abi-check/package/package-verify and
+        failed only at package-symbols with "The system cannot find the path specified.".
+      cause: >-
+        The target set WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/symbols" while that directory
+        was created only by the target's own first command. Build tools change into the
+        working directory BEFORE running the command batch, so no command ever ran.
+    - id: CI-3B
+      file: tests/package/package_checks.cmake
+      owner: test-engineer
+      observed: >-
+        The test-enabled job's clean consumer step used
+        `cmake -E env --modify PATH=prepend:...`; 'prepend' is not a valid op, so env exited
+        1 before the consumer ran.
+      developer_action: none
+      note: >-
+        tests/package/** is test-owner property and was not touched by this role; recorded
+        here only as context for the round-3 failure.
+
+root_cause:
+  statement: >-
+    A custom target may not use a WORKING_DIRECTORY that its own commands create: Ninja
+    emits `cd <dir> && <commands>` and MSBuild changes directory before executing the
+    custom build step. The first command (`cmake -E make_directory`) therefore never got
+    the chance to create the directory, and the batch failed before any command ran.
+  local_repro: >-
+    Scratch Ninja project mirroring the original target: build fails with
+    "/bin/sh: 1: cd: can't cd to .../scratch" (exit 1), no archive produced. Root cause
+    confirmed before any fix (see .ai/validation/ci-round-3-package-symbols-probe.log
+    section 1).
+
+changes:
+  - file: cmake/CvfPackage.cmake
+    defect: CI-3A
+    change: >-
+      Added `file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/symbols")` before
+      add_custom_target(package-symbols) and removed WORKING_DIRECTORY. The commands now run
+      from the always-existing build root; the tar step runs through
+      `cmake -E chdir "${CMAKE_BINARY_DIR}/symbols" "${CMAKE_COMMAND}" -E tar cf
+      "cvforwin-${PROJECT_VERSION}-symbols.zip" --format=zip "cvforwin.pdb"`.
+    rationale: >-
+      cmake -E chdir is executed inside the cmake process, so the directory is created by
+      the immediately preceding make_directory command first. Absolute tar input paths were
+      rejected because `cmake -E tar` records CWD-relative entries and would have produced
+      symbols/cvforwin.pdb instead of the root-level cvforwin.pdb entry.
+    preserved:
+      - "archive at exactly ${CMAKE_BINARY_DIR}/symbols/cvforwin-${PROJECT_VERSION}-symbols.zip"
+      - "zip entry layout: cvforwin.pdb at the archive root"
+      - "copy_if_different of $<TARGET_PDB_FILE:cvforwin>"
+      - "DEPENDS cvforwin and VERBATIM"
+      - "runtime `cmake -E make_directory` kept as the first command, so a symbols/ directory deleted after configure is recreated safely"
+      - "the if(NOT WIN32) refusal targets package and package-verify are byte-identical"
+    not_changed: "no test, src/**, CMakePresets.json, or other role artifact was touched"
+  - file: .github/workflows/windows.yml
+    defect: "CI duration (vcpkg rebuilt from source every run, ~9-10 min per job)"
+    change: >-
+      Job-level env VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg_cache added to
+      both jobs. Each job gets, right after checkout and before the quality workflow,
+      (1) a pwsh step `New-Item -ItemType Directory -Force -Path "${{ env.VCPKG_DEFAULT_BINARY_CACHE }}" | Out-Null`
+      and (2) an actions/cache step pinned to
+      actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4 with
+      path ${{ github.workspace }}/vcpkg_cache,
+      key vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }},
+      and restore-keys prefix vcpkg-${{ runner.os }}-.
+    rationale: >-
+      vcpkg requires VCPKG_DEFAULT_BINARY_CACHE to exist before use; both jobs share one key
+      so cached ports are reused across jobs and runs. Header comment updated; immutable
+      refs (full commit SHA with # v4 comment), least permissions (contents: read) and the
+      no-secrets property are unchanged.
+  - file: .ai/validation/ci-round-3-package-symbols-probe.sh
+    defect: "local detection of the WORKING_DIRECTORY-on-self-created-dir class"
+    change: >-
+      New executable harness (31 checks). Section 1 builds the original pattern with Ninja
+      and requires the cd failure; section 2 builds the fixed pattern and checks configure-time
+      directory creation, archive path, single root-level cvforwin.pdb entry, and recovery
+      after deleting symbols/; section 3 extracts the REAL package-symbols block from
+      cmake/CvfPackage.cmake, substitutes the PDB generator expression, configures/builds it
+      with Ninja and checks the archive; section 4 asserts the structural invariants
+      (no WORKING_DIRECTORY, cmake -E chdir, configure-time mkdir before the target,
+      DEPENDS/VERBATIM, archive name, refusal targets).
+    rationale: >-
+      Section 3 makes the harness test the production text, not a hand-copied pattern, so a
+      future regression in CvfPackage.cmake fails locally without a Windows host.
+
+cache_recipe:
+  source: "vcpkg documented GitHub Actions binary-cache recipe"
+  key_files:
+    - vcpkg.json
+    - vcpkg-configuration.json
+  snippet: |
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg_cache
+    steps:
+      - run: New-Item -ItemType Directory -Force -Path "${{ env.VCPKG_DEFAULT_BINARY_CACHE }}" | Out-Null
+        shell: pwsh
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ github.workspace }}/vcpkg_cache
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
+  pin_verification: >-
+    refs/tags/v4 resolves to commit 0057852bfaa89a56745cba8c7296529d2fc39830
+    ("Merge pull request #1655 from actions/Link-/prepare-4.3.0", 2025-09-24), confirmed via
+    git ls-remote and the GitHub API; newest v4.x line commit, matching the full-SHA +
+    version-comment style already used in this workflow.
+
+commands:
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    summary: "Configure complete (GNU 13.3.0); log .ai/validation/ci-round-3-configure.log"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    summary: >-
+      No work to do: the CvfPackage.cmake change is inside the WIN32-only branch, so the
+      Linux build graph is unchanged. Log .ai/validation/ci-round-3-build.log
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "passed=263, failed=0, skipped=0"
+    summary: "100% tests passed, 263/263. Log .ai/validation/ci-round-3-ctest.log"
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    summary: "format-check passed: 83 file(s) conform to .clang-format. Log .ai/validation/ci-round-3-format-check.log"
+  - command: "bash .ai/validation/ci-round-3-package-symbols-probe.sh"
+    exit_code: 0
+    counts: "checks=31, failures=0"
+    summary: >-
+      Original pattern fails with "cd: can't cd to" (exit 1, no archive); fixed pattern and
+      the derived real package-symbols target both build and produce
+      build/symbols/cvforwin-1.0.0-symbols.zip containing exactly cvforwin.pdb; deleted-dir
+      recovery passes; all structural invariants pass. Log
+      .ai/validation/ci-round-3-package-symbols-probe.log
+  - command: >-
+      CVF_REAL_CMAKE=/tmp/opencode/cvf-neg-control.XCCJA6/CvfPackage-defective.cmake
+      bash .ai/validation/ci-round-3-package-symbols-probe.sh
+      > .ai/validation/ci-round-3-package-symbols-probe-negative-control.log 2>&1
+    exit_code: 1
+    counts: "checks=31, failures=8"
+    summary: >-
+      Negative control (expected failure): the fixture contains the pre-fix package-symbols
+      block (WORKING_DIRECTORY on the self-created symbols directory, no configure-time
+      file(MAKE_DIRECTORY)). The derived real-block project fails with "cd: can't cd to" and
+      the structural checks flag WORKING_DIRECTORY/chdir/missing configure-time mkdir, so
+      the harness is red-sensitive and catches a reverted fix. Log
+      .ai/validation/ci-round-3-package-symbols-probe-negative-control.log
+  - command: >-
+      python3 yaml.safe_load(.github/workflows/windows.yml) + assertions on jobs, env,
+      step order, cache key, pinned 40-hex action refs, permissions contents:read, no secrets
+    exit_code: 0
+    summary: >-
+      Both jobs have VCPKG_DEFAULT_BINARY_CACHE, create-dir before cache step before the
+      quality workflow, identical key/restore-keys, actions/cache pinned to
+      0057852bfaa89a56745cba8c7296529d2fc39830; all six `uses:` refs are 40-hex pinned.
+
+probe_summary:
+  checks: 31
+  original_pattern: "FAIL as required (exit 1, cd: can't cd to .../symbols)"
+  fixed_pattern: "PASS; archive <build>/symbols/cvforwin-1.0.0-symbols.zip, listing=[cvforwin.pdb]"
+  derived_from_real_file: "PASS; target built from the extracted real block, same archive and listing"
+  deleted_dir_recovery: "PASS; symbols/ recreated after configure-time dir was removed"
+  negative_control: >-
+    RED-SENSITIVE: run against a fixture carrying the pre-fix block, the harness exits 1 with
+    checks=31 failures=8 (derived target fails with "cd: can't cd to"; structural checks flag
+    WORKING_DIRECTORY, missing cmake -E chdir, missing configure-time mkdir), proving the
+    harness catches a reverted fix.
+
+deferred_to_ci:
+  - topic: MSBuild behavior
+    status: deferred
+    statement: >-
+      No Windows host locally; the fix is reasoned from the generator mechanics (the batch's
+      directory change is removed entirely, and cmake -E chdir runs inside the cmake
+      process). Next windows-2022 run must show the release job's package-symbols target
+      succeeding and "Upload release symbols archive" finding
+      build/windows-msvc-release/symbols/cvforwin-1.0.0-symbols.zip. The archive should
+      contain cvforwin.pdb at its root.
+  - topic: vcpkg binary cache effectiveness
+    status: deferred
+    statement: >-
+      Round 4 is the first run with the new cache key, so it is expected to be a cache miss
+      and still compile OpenCV; actions/cache saves the vcpkg_cache directory at job end.
+      The following run with unchanged vcpkg.json/vcpkg-configuration.json must restore it
+      (CI log: "Cache restored from key: vcpkg-Windows-..."; vcpkg log: cached binary
+      packages) and cut the install phase from ~9-10 min to seconds/minutes. Because the two
+      jobs run in parallel, cross-job reuse within the same run is only possible if one job
+      saves before the other restores; the reliable win is across runs. Cache edits to the
+      manifest rotate the key and force one rebuild by design. GitHub Actions cache is
+      limited to 10 GB per repository with 7-day unused eviction; the x64-windows-static
+      binary cache is large but single-instance, so watch quota in later rounds.
+  - topic: CI-3B clean consumer
+    status: deferred
+    statement: >-
+      The test-enabled job's clean consumer failure is owned by the test-engineer
+      (tests/package/package_checks.cmake `cmake -E env --modify PATH=prepend:` invalid op).
+      This developer amendment deliberately does not touch it; the next run must confirm the
+      test-owner fix.
+
+blockers: []
+notes: >-
+  Scope respected: only cmake/CvfPackage.cmake, .github/workflows/windows.yml and the
+  .ai/validation harness were edited; no tests/**, src/**, CMakePresets.json, or other
+  role artifact was modified (.ai/workflow-state.yaml was already dirty before this
+  session and was not touched). WSL canonical chain is fully green after the change
+  (configure 0, build 0, ctest 263/263, format-check 83 files) and the new probe is green
+  (31/31). Remaining acceptance gate: next windows-2022 CI run (symbols archive upload,
+  then cache-hit confirmation on the run after that).

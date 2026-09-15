@@ -27,7 +27,8 @@
 #   3. cvforwin.dll exports exactly the five approved cvf_* symbols (dumpbin);
 #   4. every dependent DLL of cvforwin.dll is a Windows system DLL (dumpbin);
 #   5. the clean consumer configures, builds, and runs with exit 0, printing
-#      its ABI/initialize/inspect/reload/shutdown report.
+#      its ABI/initialize/inspect/reload/shutdown report; the installed DLL is
+#      deployed next to the consumer executable so the loader pins it.
 #
 # Negative behavior is self-checked on every run: the script re-invokes itself
 # with a relative root, a missing root, and an empty root and requires all
@@ -49,6 +50,33 @@ endfunction()
 function(cvf_fail text)
     message(SEND_ERROR "package checks FAILED: ${text}")
     set_property(GLOBAL PROPERTY CVF_CHECKS_FAILED TRUE)
+endfunction()
+
+# Renders a command as one diagnostic line. Arguments containing spaces are
+# quoted so the reported line can be pasted into a shell.
+function(cvf_command_line out_var)
+    set(cvf_rendered "")
+    foreach(cvf_arg IN LISTS ARGN)
+        if("${cvf_arg}" MATCHES "[ ]")
+            string(APPEND cvf_rendered " \"${cvf_arg}\"")
+        else()
+            string(APPEND cvf_rendered " ${cvf_arg}")
+        endif()
+    endforeach()
+    string(STRIP "${cvf_rendered}" cvf_rendered)
+    set("${out_var}" "${cvf_rendered}" PARENT_SCOPE)
+endfunction()
+
+# Fails a step reporting the exact executed command line and its combined
+# output; an empty capture is called out explicitly so an empty CI log is
+# never the whole diagnostic.
+function(cvf_fail_command headline command_line combined_output)
+    if("${combined_output}" STREQUAL "")
+        set(cvf_combined_output "(no output captured)")
+    else()
+        set(cvf_combined_output "${combined_output}")
+    endif()
+    cvf_fail("${headline}\n  command: ${command_line}\n  output: ${cvf_combined_output}")
 endfunction()
 
 # --- arguments --------------------------------------------------------------
@@ -284,7 +312,8 @@ endif()
 # --- 6. clean consumer configure / build / run ------------------------------
 
 set(cvf_consumer_build "${cvf_work_root}/consumer-build")
-set(cvf_consumer_exe "${cvf_consumer_build}/bin/cvf_package_consumer.exe")
+set(cvf_consumer_bin_dir "${cvf_consumer_build}/bin")
+set(cvf_consumer_exe "${cvf_consumer_bin_dir}/cvf_package_consumer.exe")
 
 set(cvf_consumer_configure_args
     -S "${cvf_consumer_source}"
@@ -295,44 +324,73 @@ if(NOT "${CVF_CONSUMER_GENERATOR}" STREQUAL "")
     list(APPEND cvf_consumer_configure_args -G "${CVF_CONSUMER_GENERATOR}")
 endif()
 
+cvf_command_line(cvf_configure_display "${CMAKE_COMMAND}" ${cvf_consumer_configure_args})
+
 execute_process(
     COMMAND "${CMAKE_COMMAND}" ${cvf_consumer_configure_args}
     RESULT_VARIABLE cvf_configure_result
     OUTPUT_VARIABLE cvf_configure_output
     ERROR_VARIABLE cvf_configure_error)
 if(NOT cvf_configure_result EQUAL 0)
-    cvf_fail("consumer configure failed with exit ${cvf_configure_result}:\n"
-             "${cvf_configure_output}${cvf_configure_error}")
+    cvf_fail_command("consumer configure failed with exit ${cvf_configure_result}"
+        "${cvf_configure_display}" "${cvf_configure_output}${cvf_configure_error}")
 else()
     cvf_note("consumer configure succeeded against the installed package")
 
+    cvf_command_line(cvf_build_display
+        "${CMAKE_COMMAND}" --build "${cvf_consumer_build}" --config Release)
     execute_process(
         COMMAND "${CMAKE_COMMAND}" --build "${cvf_consumer_build}" --config Release
         RESULT_VARIABLE cvf_build_result
         OUTPUT_VARIABLE cvf_build_output
         ERROR_VARIABLE cvf_build_error)
     if(NOT cvf_build_result EQUAL 0)
-        cvf_fail("consumer build failed with exit ${cvf_build_result}:\n"
-                 "${cvf_build_output}${cvf_build_error}")
+        cvf_fail_command("consumer build failed with exit ${cvf_build_result}"
+            "${cvf_build_display}" "${cvf_build_output}${cvf_build_error}")
     else()
         cvf_note("consumer build succeeded")
 
         if(NOT EXISTS "${cvf_consumer_exe}")
-            cvf_fail("consumer executable not found at ${cvf_consumer_exe}")
+            cvf_fail("consumer executable not found at ${cvf_consumer_exe} "
+                     "(build command: ${cvf_build_display})")
         else()
-            # Prepend the package bin directory so the installed cvforwin.dll is
-            # the DLL the consumer loads.
+            # Pin the runtime the consumer loads by deploying the installed DLL
+            # next to the executable. With the default SafeDllSearchMode the
+            # Windows loader searches the application directory before PATH, so
+            # the installed cvforwin.dll cannot be shadowed by a same-named DLL
+            # elsewhere on PATH, and this mirrors how a real deployment ships
+            # the DLL beside the application.
+            cvf_command_line(cvf_deploy_display
+                "${CMAKE_COMMAND}" -E copy_if_different
+                "${CVF_PACKAGE_ROOT}/bin/cvforwin.dll"
+                "${cvf_consumer_bin_dir}/cvforwin.dll")
             execute_process(
-                COMMAND "${CMAKE_COMMAND}" -E env --modify "PATH=prepend:${CVF_PACKAGE_ROOT}/bin"
-                        "${cvf_consumer_exe}" "${cvf_consumer_config}" "${cvf_consumer_output}"
-                RESULT_VARIABLE cvf_run_result
-                OUTPUT_VARIABLE cvf_run_output
-                ERROR_VARIABLE cvf_run_error)
-            if(NOT cvf_run_result EQUAL 0)
-                cvf_fail("consumer run failed with exit ${cvf_run_result}:\n"
-                         "${cvf_run_output}${cvf_run_error}")
+                COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                        "${CVF_PACKAGE_ROOT}/bin/cvforwin.dll"
+                        "${cvf_consumer_bin_dir}/cvforwin.dll"
+                RESULT_VARIABLE cvf_deploy_result
+                OUTPUT_VARIABLE cvf_deploy_output
+                ERROR_VARIABLE cvf_deploy_error)
+            if(NOT cvf_deploy_result EQUAL 0)
+                cvf_fail_command("deploying the installed cvforwin.dll next to the "
+                    "consumer executable failed with exit ${cvf_deploy_result}"
+                    "${cvf_deploy_display}" "${cvf_deploy_output}${cvf_deploy_error}")
             else()
-                cvf_note("consumer run succeeded; report:\n${cvf_run_output}")
+                cvf_note("deployed installed cvforwin.dll to '${cvf_consumer_bin_dir}'")
+
+                cvf_command_line(cvf_run_display
+                    "${cvf_consumer_exe}" "${cvf_consumer_config}" "${cvf_consumer_output}")
+                execute_process(
+                    COMMAND "${cvf_consumer_exe}" "${cvf_consumer_config}" "${cvf_consumer_output}"
+                    RESULT_VARIABLE cvf_run_result
+                    OUTPUT_VARIABLE cvf_run_output
+                    ERROR_VARIABLE cvf_run_error)
+                if(NOT cvf_run_result EQUAL 0)
+                    cvf_fail_command("consumer run failed with exit ${cvf_run_result}"
+                        "${cvf_run_display}" "${cvf_run_output}${cvf_run_error}")
+                else()
+                    cvf_note("consumer run succeeded; report:\n${cvf_run_output}")
+                endif()
             endif()
         endif()
     endif()

@@ -12,7 +12,7 @@ risk_justification: >-
   such need stops the pipeline for R3 escalation. Release review is required at the end.
 current_change: CVF-007
 stage: BLOCKED
-stage_note: "CI round 2 fixes complete (test-owner: C2397 narrowing + C4310 casts; developer: _CRT_SECURE_NO_WARNINGS + WIN32 DLL placement helper). WSL 263/263 green; changes staged; awaiting user push (round 3)."
+stage_note: "CI round 3 fixes complete and staged: package-symbols (developer, local Ninja probe 31/31 + negative control), consumer DLL-deploy fix (test-engineer, local cmake -E self-tests), vcpkg binary cache added to both jobs (actions/cache@v4 SHA verified live). Controller re-verify: WSL 263/263, probe PASS. Awaiting user push (round 4)."
 automated_loop:
   requested_by: user
   goal: "GitHub Actions (windows-ci) green; build fixes and re-publishes until pass."
@@ -48,7 +48,18 @@ ci:
     (1299,1302) -> test-engineer; CI-2D Catch discovery 0xc0000135 - cvforwin.dll is at
     build/<preset>/bin/Release while test exes are at build/<preset>/Release (targets
     linking the shared lib: cvf_abi_* x3, cvf_unit_tests, cvf006_lifecycle) -> developer
-    CMake copy/output-dir fix.attempts:
+    CMake copy/output-dir fix.
+  run_3: >-
+    34960459232 failure (windows-ci, 12m1s): test-enabled job PASSED all 188 Windows tests
+    and package/verify; failed at the clean consumer step. Release job PASSED configure/
+    build/test/abi-check/package/package-verify (exports 5/5, deps KERNEL32/MF/OLE32 only);
+    failed only at package-symbols. LOCAL REPRODUCTIONS CONFIRMED: (a) consumer run used
+    'cmake -E env --modify PATH=prepend:...' - 'prepend' is not a valid op (path_list_prepend
+    is); env exits 1 before running the consumer -> test-engineer fix (prefer copying the
+    package DLL next to the consumer exe or use path_list_prepend; add a local syntax probe);
+    (b) package-symbols WORKING_DIRECTORY points at ${CMAKE_BINARY_DIR}/symbols created by
+    its own first command; Ninja probe reproduces 'cd: can't cd' -> developer fix (create the
+    dir at configure time or use absolute paths).attempts:
   CVF-001: 1
 completed_gates:
   - change: CVF-001
