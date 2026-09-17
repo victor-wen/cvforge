@@ -26,6 +26,9 @@
 
 #include "camera/uvc_windows/uvc_backend.h"
 
+#include "camera/uvc_windows/uvc_frame_convert.h"
+#include "camera/uvc_windows/uvc_frame_math.h"
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -364,6 +367,35 @@ bool is_convertible_subtype(const GUID& subtype)
            subtype_is(subtype, MFVideoFormat_L8);
 }
 
+/*
+ * Maps a Media Foundation uncompressed subtype to the frozen seam's native
+ * format. Returns false for L8, which the seam does not model and which keeps
+ * its single-channel legacy conversion.
+ */
+bool native_format_for_subtype(const GUID& subtype, uvc::NativePixelFormat& format) noexcept
+{
+    if (subtype_is(subtype, MFVideoFormat_RGB24)) {
+        format = uvc::NativePixelFormat::rgb24;
+    } else if (subtype_is(subtype, MFVideoFormat_RGB32)) {
+        format = uvc::NativePixelFormat::rgb32;
+    } else if (subtype_is(subtype, MFVideoFormat_ARGB32)) {
+        format = uvc::NativePixelFormat::argb32;
+    } else if (subtype_is(subtype, MFVideoFormat_YUY2)) {
+        format = uvc::NativePixelFormat::yuy2;
+    } else if (subtype_is(subtype, MFVideoFormat_UYVY)) {
+        format = uvc::NativePixelFormat::uyvy;
+    } else if (subtype_is(subtype, MFVideoFormat_NV12)) {
+        format = uvc::NativePixelFormat::nv12;
+    } else if (subtype_is(subtype, MFVideoFormat_I420)) {
+        format = uvc::NativePixelFormat::i420;
+    } else if (subtype_is(subtype, MFVideoFormat_YV12)) {
+        format = uvc::NativePixelFormat::yv12;
+    } else {
+        return false;
+    }
+    return true;
+}
+
 int format_rank(const GUID& subtype, PixelFormat preferred) noexcept
 {
     const bool rgb = subtype_is(subtype, MFVideoFormat_RGB32) || subtype_is(subtype, MFVideoFormat_ARGB32) ||
@@ -402,55 +434,75 @@ double score_native_type(const GUID& subtype, std::uint32_t width, std::uint32_t
  * ------------------------------------------------------------------------- */
 
 /*
- * Bytes actually addressed by the converter for the given buffer stride, or 0
- * when the subtype/pitch combination is unsupported. This is the validation
- * bound against the locked buffer length: it covers the last row/plane the
- * conversion reads, including stride padding, so a padded or truncated sample
- * can never drive a read past the locked memory.
+ * One locked 2D-buffer view obtained with the documented preference order:
+ * IMF2DBuffer2::Lock2DSize (which also yields the accessible bounds), then
+ * IMF2DBuffer::Lock2D. The caller must call IMF2DBuffer::Unlock2D exactly once
+ * when the lock succeeded.
  *
- * Planar 4:2:0 layout (Media Foundation): the luma plane has H rows at the
- * luma pitch S; the two chroma planes each have H/2 rows at pitch S/2 and are
- * stored back to back after the luma plane. NV12 keeps the interleaved UV plane
- * at the luma pitch.
+ * Lock2DSize reports its accessible range as (buffer_start, buffer_length),
+ * where buffer_length is measured from buffer_start. The seam measures
+ * accessible_bytes from the lowest addressed byte of the scanned region
+ * instead, so buffer_start/buffer_length are kept raw here and rebased by
+ * accessible_extent_from_lock_start() once the frame height is known. The
+ * Lock2D path cannot report a range, so its bounds stay unknown.
  */
-std::size_t required_extent_bytes(const GUID& subtype, std::uint32_t width, std::uint32_t height, LONG stride)
+struct Locked2DView {
+    BYTE* scanline0 = nullptr; /* visual top row */
+    LONG pitch = 0; /* may be negative */
+    BYTE* buffer_start = nullptr; /* Lock2DSize reported range start; null for Lock2D */
+    std::size_t buffer_length = 0; /* Lock2DSize reported length from buffer_start */
+    bool accessible_bytes_known = false;
+};
+
+HRESULT lock_2d_buffer(IMF2DBuffer* buffer_2d, Locked2DView& view)
 {
-    if (width == 0 || height == 0 || stride == 0) {
-        return 0;
-    }
-    const std::size_t row_span =
-        stride < 0 ? static_cast<std::size_t>(-static_cast<long long>(stride)) : static_cast<std::size_t>(stride);
-    constexpr std::size_t k_max_row_span = static_cast<std::size_t>(k_max_frame_dimension) * 8;
-    if (row_span > k_max_row_span) {
-        return 0;
-    }
-    const std::size_t rows = static_cast<std::size_t>(height);
-    const std::size_t width_bytes = static_cast<std::size_t>(width);
-    if (subtype_is(subtype, MFVideoFormat_RGB32) || subtype_is(subtype, MFVideoFormat_ARGB32)) {
-        return (rows - 1) * row_span + width_bytes * 4;
-    }
-    if (subtype_is(subtype, MFVideoFormat_RGB24)) {
-        return (rows - 1) * row_span + width_bytes * 3;
-    }
-    if (subtype_is(subtype, MFVideoFormat_YUY2) || subtype_is(subtype, MFVideoFormat_UYVY)) {
-        return (rows - 1) * row_span + width_bytes * 2;
-    }
-    if (subtype_is(subtype, MFVideoFormat_L8)) {
-        return (rows - 1) * row_span + width_bytes;
-    }
-    if (subtype_is(subtype, MFVideoFormat_NV12)) {
-        return (rows + rows / 2 - 1) * row_span + width_bytes;
-    }
-    if (subtype_is(subtype, MFVideoFormat_I420) || subtype_is(subtype, MFVideoFormat_YV12)) {
-        if (stride <= 0 || (stride % 2) != 0) {
-            return 0;
+    ComPtr<IMF2DBuffer2> buffer_2d_2;
+    if (SUCCEEDED(buffer_2d->QueryInterface(__uuidof(IMF2DBuffer2), reinterpret_cast<void**>(buffer_2d_2.put())))) {
+        BYTE* buffer_start = nullptr;
+        DWORD buffer_length = 0;
+        const HRESULT result =
+            buffer_2d_2->Lock2DSize(MF2DBuffer_LockFlags_Read, &view.scanline0, &view.pitch, &buffer_start,
+                                    &buffer_length);
+        if (SUCCEEDED(result)) {
+            view.buffer_start = buffer_start;
+            view.buffer_length = static_cast<std::size_t>(buffer_length);
+            view.accessible_bytes_known = true;
+            return S_OK;
         }
-        const std::size_t chroma_span = row_span / 2;
-        return rows * row_span + (rows - 1) * chroma_span + width_bytes / 2;
     }
-    return 0;
+    /*
+     * IMF2DBuffer::Lock2D cannot report the accessible length (the
+     * GetContiguousLength value Microsoft documents as inapplicable to the
+     * Lock2D view), so the bounds are left unknown and only structural checks
+     * apply.
+     */
+    view.buffer_start = nullptr;
+    view.buffer_length = 0;
+    view.accessible_bytes_known = false;
+    return buffer_2d->Lock2D(&view.scanline0, &view.pitch);
 }
 
+/*
+ * Rebases a Lock2DSize-reported (buffer_start, buffer_length) range onto the
+ * lowest addressed byte of the scanned region and returns the resulting
+ * accessible byte count. Returns false when the arithmetic is unrepresentable
+ * or the reported range does not strictly contain the addressed region, so the
+ * caller can fail the capture instead of trusting the lock's numbers.
+ * The pure arithmetic is covered by the portable uvc_frame_math.h helpers.
+ */
+bool accessible_extent_from_lock_start(const Locked2DView& view, std::uint32_t height, std::size_t& accessible)
+{
+    /* A non-null length from a null start is not a usable range. */
+    if (view.buffer_start == nullptr) {
+        return false;
+    }
+    return uvc::detail::lock_accessible_extent(reinterpret_cast<std::size_t>(view.scanline0),
+                                               static_cast<std::int32_t>(view.pitch), height,
+                                               reinterpret_cast<std::size_t>(view.buffer_start), view.buffer_length,
+                                               accessible);
+}
+
+/* Minimum packed stride for a subtype the IMFMediaBuffer::Lock fallback uses. */
 LONG packed_stride_for(const GUID& subtype, std::uint32_t width) noexcept
 {
     if (subtype_is(subtype, MFVideoFormat_RGB32) || subtype_is(subtype, MFVideoFormat_ARGB32)) {
@@ -468,81 +520,10 @@ LONG packed_stride_for(const GUID& subtype, std::uint32_t width) noexcept
     return -1;
 }
 
-enum class PlanarLayout {
-    nv12,
-    i420,
-    yv12,
-};
-
 /*
- * Copies a packed (single stride) frame into an owned continuous cv::Mat with
- * channels 8-bit components. A negative stride (bottom-up buffer) is flipped
- * into top-down order.
+ * Normalizes a converted BGR8 frame to the configured capture size when one is
+ * requested. The frame is already owned and continuous from the seam.
  */
-cv::Mat copy_packed_rows(const BYTE* data, LONG stride, std::uint32_t width, std::uint32_t height, int channels)
-{
-    const int rows = static_cast<int>(height);
-    const int columns = static_cast<int>(width);
-    cv::Mat packed(rows, columns, CV_MAKETYPE(CV_8U, channels));
-    const std::size_t row_bytes = static_cast<std::size_t>(columns) * static_cast<std::size_t>(channels);
-    const bool bottom_up = stride < 0;
-    const std::ptrdiff_t row_stride = static_cast<std::ptrdiff_t>(stride);
-    for (int row = 0; row < rows; ++row) {
-        const int source_row = bottom_up ? (rows - 1 - row) : row;
-        const BYTE* source = data + static_cast<std::ptrdiff_t>(source_row) * row_stride;
-        std::memcpy(packed.ptr(row), source, row_bytes);
-    }
-    return packed;
-}
-
-/*
- * Copies a planar 4:2:0 frame into the canonical I420 layout OpenCV expects
- * (Y plane, then U, then V). In Media Foundation's planar layout each chroma
- * plane has HALF the luma stride and HALF the luma height, so the chroma pitch
- * is stride/2, each plane has height/2 rows, and each chroma row carries
- * width/2 samples. I420 stores U then V; YV12 stores V then U, so the copy
- * re-orders YV12 into the canonical U-then-V layout and the caller always uses
- * COLOR_YUV2BGR_I420. NV12 keeps its interleaved UV plane at the luma pitch.
- * Planar YUV buffers are top-down and even-sized; the caller validates stride,
- * width, and height, and the full extent against the locked buffer length.
- */
-cv::Mat copy_planar_rows(const BYTE* data, LONG stride, std::uint32_t width, std::uint32_t height, PlanarLayout layout)
-{
-    const int columns = static_cast<int>(width);
-    const int luma_rows = static_cast<int>(height);
-    const int chroma_plane_rows = luma_rows / 2;
-    cv::Mat planar(luma_rows + chroma_plane_rows, columns, CV_8UC1);
-    const std::ptrdiff_t row_stride = static_cast<std::ptrdiff_t>(stride);
-    const std::size_t luma_row_bytes = static_cast<std::size_t>(width);
-    const std::size_t chroma_row_bytes = static_cast<std::size_t>(width) / 2;
-
-    for (int row = 0; row < luma_rows; ++row) {
-        std::memcpy(planar.ptr(row), data + static_cast<std::ptrdiff_t>(row) * row_stride, luma_row_bytes);
-    }
-    if (layout == PlanarLayout::nv12) {
-        for (int row = 0; row < chroma_plane_rows; ++row) {
-            const std::ptrdiff_t source_row = static_cast<std::ptrdiff_t>(luma_rows + row);
-            std::memcpy(planar.ptr(luma_rows + row), data + source_row * row_stride, luma_row_bytes);
-        }
-        return planar;
-    }
-
-    /* Chroma pitch is half the luma stride (planar 4:2:0 layout). */
-    const std::ptrdiff_t chroma_stride = row_stride / 2;
-    const BYTE* first_plane = data + static_cast<std::ptrdiff_t>(luma_rows) * row_stride;
-    const BYTE* second_plane = data + static_cast<std::ptrdiff_t>(luma_rows) * row_stride +
-                               static_cast<std::ptrdiff_t>(chroma_plane_rows) * chroma_stride;
-    const bool first_plane_is_u = layout == PlanarLayout::i420;
-    const BYTE* u_plane = first_plane_is_u ? first_plane : second_plane;
-    const BYTE* v_plane = first_plane_is_u ? second_plane : first_plane;
-    for (int row = 0; row < chroma_plane_rows; ++row) {
-        const std::ptrdiff_t offset = static_cast<std::ptrdiff_t>(row) * chroma_stride;
-        std::memcpy(planar.ptr(luma_rows + row), u_plane + offset, chroma_row_bytes);
-        std::memcpy(planar.ptr(luma_rows + chroma_plane_rows + row), v_plane + offset, chroma_row_bytes);
-    }
-    return planar;
-}
-
 core::Result<cv::Mat> normalize_frame_size(cv::Mat pixels, const CameraSettings& settings)
 {
     if (pixels.empty() || pixels.type() != CV_8UC3) {
@@ -567,9 +548,29 @@ core::Result<cv::Mat> normalize_frame_size(cv::Mat pixels, const CameraSettings&
     }
 }
 
-core::Result<cv::Mat> convert_video_buffer(const BYTE* data, LONG stride, std::size_t available_bytes,
-                                           const GUID& subtype, std::uint32_t width, std::uint32_t height,
-                                           const CameraSettings& settings)
+/*
+ * Media Foundation L8 (8-bit luminance) is the only supported native subtype
+ * the frozen seam does not model, so it keeps a dedicated single-plane
+ * conversion. Every other supported subtype - packed RGB24/RGB32/ARGB32/YUY2/
+ * UYVY and planar NV12/I420/YV12 - is decoded by
+ * uvc::decode_locked_buffer_to_bgr8, so the seam and production share one
+ * row-addressing and accessible-bounds-validating path (FR-019).
+ */
+cv::Mat copy_luma_rows(const BYTE* data, LONG stride, std::uint32_t width, std::uint32_t height)
+{
+    const int rows = static_cast<int>(height);
+    const int columns = static_cast<int>(width);
+    cv::Mat luma(rows, columns, CV_8UC1);
+    const std::ptrdiff_t row_stride = static_cast<std::ptrdiff_t>(stride);
+    for (int row = 0; row < rows; ++row) {
+        std::memcpy(luma.ptr(row), data + static_cast<std::ptrdiff_t>(row) * row_stride,
+                    static_cast<std::size_t>(columns));
+    }
+    return luma;
+}
+
+core::Result<cv::Mat> convert_luma_buffer(const BYTE* data, LONG stride, std::size_t available_bytes,
+                                          std::uint32_t width, std::uint32_t height, const CameraSettings& settings)
 {
     if (data == nullptr || width == 0 || height == 0) {
         return camera_failure(core::ErrorCode::capture_failed, "the Media Foundation sample has no video data");
@@ -578,73 +579,62 @@ core::Result<cv::Mat> convert_video_buffer(const BYTE* data, LONG stride, std::s
         return camera_failure(core::ErrorCode::capture_failed,
                               "the Media Foundation frame exceeds the supported dimension limit");
     }
-    const std::size_t extent = required_extent_bytes(subtype, width, height, stride);
-    if (extent == 0) {
+    const std::size_t row_bytes = static_cast<std::size_t>(width);
+    const std::size_t magnitude =
+        stride < 0 ? static_cast<std::size_t>(-static_cast<long long>(stride)) : static_cast<std::size_t>(stride);
+    if (magnitude < row_bytes) {
         return camera_failure(core::ErrorCode::capture_failed,
-                              "the Media Foundation stream uses an unsupported video subtype or pitch");
+                              "the Media Foundation sample stride is smaller than one row");
     }
+    const std::size_t rows = static_cast<std::size_t>(height);
+    if (rows - 1u > (std::numeric_limits<std::size_t>::max() - row_bytes) / magnitude) {
+        return camera_failure(core::ErrorCode::capture_failed,
+                              "the Media Foundation sample extent overflows the addressable range");
+    }
+    const std::size_t extent = (rows - 1u) * magnitude + row_bytes;
     /* Zero means the buffer could not report a length; structural checks still apply. */
     if (available_bytes != 0 && available_bytes < extent) {
         return camera_failure(core::ErrorCode::capture_failed,
                               "the Media Foundation sample is smaller than the required frame extent");
     }
-    const std::ptrdiff_t row_stride = static_cast<std::ptrdiff_t>(stride);
-    const std::ptrdiff_t row_bytes = static_cast<std::ptrdiff_t>(width);
-    if (row_stride == 0 || (row_stride > 0 ? row_stride < row_bytes : -row_stride < row_bytes)) {
-        return camera_failure(core::ErrorCode::capture_failed,
-                              "the Media Foundation sample stride is smaller than one row");
-    }
-
     try {
+        const cv::Mat luma = copy_luma_rows(data, stride, width, height);
         cv::Mat pixels;
-        if (subtype_is(subtype, MFVideoFormat_RGB32) || subtype_is(subtype, MFVideoFormat_ARGB32)) {
-            const cv::Mat packed = copy_packed_rows(data, stride, width, height, 4);
-            cv::cvtColor(packed, pixels, cv::COLOR_BGRA2BGR);
-        } else if (subtype_is(subtype, MFVideoFormat_RGB24)) {
-            /* Media Foundation RGB24 memory order is B,G,R per pixel. */
-            pixels = copy_packed_rows(data, stride, width, height, 3);
-        } else if (subtype_is(subtype, MFVideoFormat_YUY2)) {
-            const cv::Mat packed = copy_packed_rows(data, stride, width, height, 2);
-            cv::cvtColor(packed, pixels, cv::COLOR_YUV2BGR_YUY2);
-        } else if (subtype_is(subtype, MFVideoFormat_UYVY)) {
-            const cv::Mat packed = copy_packed_rows(data, stride, width, height, 2);
-            cv::cvtColor(packed, pixels, cv::COLOR_YUV2BGR_UYVY);
-        } else if (subtype_is(subtype, MFVideoFormat_L8)) {
-            const cv::Mat packed = copy_packed_rows(data, stride, width, height, 1);
-            cv::cvtColor(packed, pixels, cv::COLOR_GRAY2BGR);
-        } else if (subtype_is(subtype, MFVideoFormat_NV12)) {
-            if (stride <= 0 || (width % 2) != 0 || (height % 2) != 0) {
-                return camera_failure(core::ErrorCode::capture_failed,
-                                      "the Media Foundation NV12 sample is not a top-down even-sized frame");
-            }
-            const cv::Mat planar = copy_planar_rows(data, stride, width, height, PlanarLayout::nv12);
-            cv::cvtColor(planar, pixels, cv::COLOR_YUV2BGR_NV12);
-        } else if (subtype_is(subtype, MFVideoFormat_I420)) {
-            if (stride <= 0 || (stride % 2) != 0 || (width % 2) != 0 || (height % 2) != 0) {
-                return camera_failure(core::ErrorCode::capture_failed,
-                                      "the Media Foundation I420 sample is not a top-down even-sized frame with an "
-                                      "even stride");
-            }
-            const cv::Mat planar = copy_planar_rows(data, stride, width, height, PlanarLayout::i420);
-            cv::cvtColor(planar, pixels, cv::COLOR_YUV2BGR_I420);
-        } else if (subtype_is(subtype, MFVideoFormat_YV12)) {
-            if (stride <= 0 || (stride % 2) != 0 || (width % 2) != 0 || (height % 2) != 0) {
-                return camera_failure(core::ErrorCode::capture_failed,
-                                      "the Media Foundation YV12 sample is not a top-down even-sized frame with an "
-                                      "even stride");
-            }
-            /* copy_planar_rows re-orders YV12 into the canonical Y,U,V layout. */
-            const cv::Mat planar = copy_planar_rows(data, stride, width, height, PlanarLayout::yv12);
-            cv::cvtColor(planar, pixels, cv::COLOR_YUV2BGR_I420);
-        } else {
-            return camera_failure(core::ErrorCode::capture_failed,
-                                  "the Media Foundation stream uses an unsupported video subtype");
-        }
+        cv::cvtColor(luma, pixels, cv::COLOR_GRAY2BGR);
         return normalize_frame_size(std::move(pixels), settings);
     } catch (const cv::Exception&) {
         return camera_failure(core::ErrorCode::capture_failed,
-                              "OpenCV failed to convert the Media Foundation frame to BGR8");
+                              "OpenCV failed to convert the Media Foundation luminance frame to BGR8");
     }
+}
+
+/*
+ * Converts one locked Media Foundation sample to BGR8 through the frozen seam so
+ * the seam and production share one row-addressing and bounds path. The pitch is
+ * applied exactly once with no row-index reversal, and the accessible bounds are
+ * enforced whenever the lock reported them.
+ */
+core::Result<cv::Mat> convert_locked_to_bgr8(const BYTE* data, LONG stride, bool accessible_known,
+                                             std::size_t accessible_bytes, const GUID& subtype, std::uint32_t width,
+                                             std::uint32_t height, const CameraSettings& settings)
+{
+    uvc::NativePixelFormat native_format = uvc::NativePixelFormat::rgb24;
+    if (!native_format_for_subtype(subtype, native_format)) {
+        return convert_luma_buffer(data, stride, accessible_bytes, width, height, settings);
+    }
+    uvc::Locked2DBufferView view;
+    view.scanline0 = data;
+    view.pitch = static_cast<std::int32_t>(stride);
+    view.width = width;
+    view.height = height;
+    view.format = native_format;
+    view.accessible_bytes = accessible_bytes;
+    view.accessible_bytes_known = accessible_known;
+    core::Result<cv::Mat> pixels = uvc::decode_locked_buffer_to_bgr8(view);
+    if (!pixels.has_value()) {
+        return pixels.failure();
+    }
+    return normalize_frame_size(std::move(pixels).value(), settings);
 }
 
 /* ---------------------------------------------------------------------------
@@ -1420,22 +1410,32 @@ private:
 
         ComPtr<IMF2DBuffer> buffer_2d;
         if (SUCCEEDED(buffer->QueryInterface(__uuidof(IMF2DBuffer), reinterpret_cast<void**>(buffer_2d.put())))) {
-            BYTE* scanline = nullptr;
-            LONG stride = 0;
-            result = buffer_2d->Lock2D(&scanline, &stride);
+            Locked2DView locked;
+            result = lock_2d_buffer(buffer_2d.get(), locked);
             if (FAILED(result)) {
-                return hresult_failure("IMF2DBuffer::Lock2D", result, core::ErrorCode::capture_failed);
+                return hresult_failure("IMF2DBuffer lock", result, core::ErrorCode::capture_failed);
             }
-            DWORD contiguous_length = 0;
-            const HRESULT length_result = buffer_2d->GetContiguousLength(&contiguous_length);
-            const std::size_t available =
-                SUCCEEDED(length_result) ? static_cast<std::size_t>(contiguous_length) : 0;
+            /*
+             * Lock2DSize reports its length from the lock's start pointer; the
+             * seam measures accessible_bytes from the lowest addressed byte of
+             * the scanned region, so rebase it and refuse a range that does not
+             * actually contain that region instead of trusting the lock.
+             */
+            std::size_t accessible_bytes = 0;
+            if (locked.accessible_bytes_known && locked.buffer_length == 0u) {
+                buffer_2d->Unlock2D();
+                return camera_failure(core::ErrorCode::capture_failed,
+                                      "the Media Foundation sample buffer is empty");
+            }
+            if (locked.accessible_bytes_known &&
+                !accessible_extent_from_lock_start(locked, output_height_, accessible_bytes)) {
+                buffer_2d->Unlock2D();
+                return camera_failure(core::ErrorCode::capture_failed,
+                                      "the locked Media Foundation buffer range does not contain the scanned region");
+            }
             core::Result<cv::Mat> pixels =
-                (SUCCEEDED(length_result) && available == 0)
-                    ? camera_failure(core::ErrorCode::capture_failed,
-                                     "the Media Foundation sample buffer is empty")
-                    : convert_video_buffer(scanline, stride, available, output_subtype_, output_width_, output_height_,
-                                           settings_);
+                convert_locked_to_bgr8(locked.scanline0, locked.pitch, locked.accessible_bytes_known,
+                                       accessible_bytes, output_subtype_, output_width_, output_height_, settings_);
             buffer_2d->Unlock2D();
             return pixels;
         }
@@ -1455,8 +1455,8 @@ private:
         core::Result<cv::Mat> pixels =
             current_length == 0
                 ? camera_failure(core::ErrorCode::capture_failed, "the Media Foundation sample buffer is empty")
-                : convert_video_buffer(data, packed_stride, static_cast<std::size_t>(current_length), output_subtype_,
-                                       output_width_, output_height_, settings_);
+                : convert_locked_to_bgr8(data, packed_stride, true, static_cast<std::size_t>(current_length),
+                                         output_subtype_, output_width_, output_height_, settings_);
         buffer->Unlock();
         return pixels;
     }

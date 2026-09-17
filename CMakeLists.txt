@@ -92,6 +92,7 @@ cvforwin_apply_sanitizers(cvforwin_camera)
 if(WIN32)
     add_library(cvforwin_uvc_windows STATIC
         src/camera/uvc_windows/uvc_backend.cpp
+        src/camera/uvc_windows/uvc_frame_convert.cpp
     )
     add_library(cvforwin::uvc_windows ALIAS cvforwin_uvc_windows)
 
@@ -854,6 +855,71 @@ if(CVFORWIN_BUILD_TESTS)
     cvforwin_apply_project_compile_options(cvf007_developer_tests)
     cvforwin_apply_sanitizers(cvf007_developer_tests)
     catch_discover_tests(cvf007_developer_tests)
+
+    # --- developer-owned CVF-101 portable locked-buffer helper tests --------
+    #
+    # tests/unit/uvc_frame_math_test.cpp exercises the portable helpers extracted
+    # from the Windows-only seam src/camera/uvc_windows/uvc_frame_convert.cpp:
+    # the overflow-safe row arithmetic and the full-range YUV conversion. The
+    # helpers live in uvc_frame_math.h, which has no Windows API, Media
+    # Foundation, or OpenCV dependency, so this target builds and runs on the
+    # portable Linux host and covers the seam's pure logic there. The Windows
+    # component target cvf101_windows_uvc_tests remains owned by the test owner.
+
+    add_executable(uvc_frame_math_developer_tests
+        tests/unit/uvc_frame_math_test.cpp
+    )
+    target_include_directories(uvc_frame_math_developer_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+    )
+    target_link_libraries(uvc_frame_math_developer_tests PRIVATE
+        Catch2::Catch2WithMain
+    )
+    set_target_properties(uvc_frame_math_developer_tests PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    cvforwin_apply_project_compile_options(uvc_frame_math_developer_tests)
+    cvforwin_apply_sanitizers(uvc_frame_math_developer_tests)
+    catch_discover_tests(uvc_frame_math_developer_tests)
+
+    # --- independent CVF-101 Windows UVC 2D-buffer component tests -----------
+    #
+    # tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp is authored and
+    # hash-pinned by the test owner. It includes only the frozen seam header
+    # src/camera/uvc_windows/uvc_frame_convert.h and drives it with synthetic
+    # in-memory locked buffers; no camera, Media Foundation object, or device is
+    # used, and no production .cpp is read. catch_discover_tests registers the
+    # cases with CTest via add_test, so the windows-tests-quality workflow runs
+    # them. The gate is WIN32 + CVFORWIN_BUILD_TESTS + CVFORWIN_BUILD_TEST_BACKENDS:
+    # the release preset sets CVFORWIN_BUILD_TESTS=ON but keeps the test backends
+    # OFF, so this target is never registered in the release or any hosted
+    # no-camera preset. This file only builds and registers the owner's source;
+    # it never modifies it.
+
+    if(WIN32 AND CVFORWIN_BUILD_TESTS AND CVFORWIN_BUILD_TEST_BACKENDS)
+        add_executable(cvf101_windows_uvc_tests
+            tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp
+        )
+        target_include_directories(cvf101_windows_uvc_tests PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        )
+        target_link_libraries(cvf101_windows_uvc_tests PRIVATE
+            cvforwin_uvc_windows
+            opencv_core
+            Catch2::Catch2WithMain
+        )
+        set_target_properties(cvf101_windows_uvc_tests PROPERTIES
+            CXX_STANDARD 20
+            CXX_STANDARD_REQUIRED ON
+            CXX_EXTENSIONS OFF
+        )
+        cvforwin_apply_test_compile_options(cvf101_windows_uvc_tests)
+        cvforwin_apply_sanitizers(cvf101_windows_uvc_tests)
+        catch_discover_tests(cvf101_windows_uvc_tests)
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------
