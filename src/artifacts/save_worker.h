@@ -97,11 +97,17 @@ public:
 
 private:
     void worker_loop();
-    SaveOutcome execute(const SaveJob& job, std::uint64_t id) noexcept;
-    /* Records a cancellation request for an executing/queued target (mutex held). */
+    /*
+     * Runs one job on the worker thread: writes a temporary, then under
+     * publish_mutex_ decides whether to publish or discard it, and stores the
+     * terminal outcome for worker_loop to move into completed_.
+     */
+    void execute(const SaveJob& job, std::uint64_t id) noexcept;
+    /* Records a cancellation request for an executing/queued target (mutex_ held). */
     void cancel_target(std::uint64_t target) noexcept;
-    /* True when this job id had its publication cancelled (mutex held). */
-    bool is_cancelled(std::uint64_t id) const noexcept;
+    /* Both require publish_mutex_ held by the caller. */
+    bool is_cancelled_locked(std::uint64_t id) const noexcept;
+    bool deadline_expired_locked(std::uint64_t id) const noexcept;
 
     ArtifactSink& sink_;
 
@@ -116,11 +122,31 @@ private:
     std::uint64_t next_id_ = 0;
     std::uint64_t last_submitted_id_ = 0;
     std::map<std::uint64_t, SaveOutcome> completed_;
-    /* Job ids whose publication was cancelled after submission (wait timeout). */
-    std::set<std::uint64_t> cancelled_ids_;
-
     bool stopping_ = false;
     std::thread worker_;
+
+    /*
+     * Publication gate. Guards the cancellation/deadline decision together with
+     * the commit that follows it, so a wait_until deadline cannot mark a job
+     * cancelled in the window between execute()'s check and sink_.commit(). It
+     * is separate from mutex_ because sink calls may block on I/O: holding it
+     * never stalls try_submit/executing/queued, which take only mutex_. Lock
+     * order is mutex_ (when held) before publish_mutex_; execute() takes only
+     * publish_mutex_.
+     */
+    std::mutex publish_mutex_;
+    /* Job ids whose publication was cancelled before the commit decision. */
+    std::set<std::uint64_t> cancelled_ids_;
+    /* The job id wait_until is awaiting, and the deadline it waits under. */
+    std::uint64_t awaited_id_ = 0;
+    std::optional<core::Deadline> awaited_deadline_;
+    /*
+     * The id whose commit decision completed and its outcome, held until
+     * worker_loop moves it into completed_. It lets a wait_until whose deadline
+     * expired recover a completed outcome that won the publication race.
+     */
+    std::uint64_t decided_id_ = 0;
+    std::optional<SaveOutcome> decided_outcome_;
 };
 
 }  // namespace cvforwin::artifacts

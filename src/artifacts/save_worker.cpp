@@ -69,6 +69,14 @@ SaveOutcome SaveWorker::wait_until(const core::Deadline& deadline)
         return SaveOutcome{};
     }
 
+    /* Publish this job's deadline to the worker before waiting, so execute()
+     * can discard the temporary of a save that starts after it expired. */
+    {
+        std::lock_guard<std::mutex> publish_lock(publish_mutex_);
+        awaited_id_ = target;
+        awaited_deadline_ = deadline;
+    }
+
     const bool finished =
         state_cv_.wait_for(lock, deadline.remaining(), [this, target] {
             return completed_.find(target) != completed_.end();
@@ -79,6 +87,22 @@ SaveOutcome SaveWorker::wait_until(const core::Deadline& deadline)
          * so it discards its temporary instead of publishing a late final file.
          */
         cancel_target(target);
+        /* cancel_target() and the commit decision are mutually exclusive. If the
+         * decision already won, the job published; report that instead of a
+         * synthetic cancellation so the caller is never told "cancelled" for a
+         * job that published. */
+        if (completed_.find(target) != completed_.end()) {
+            return take();
+        }
+        {
+            std::lock_guard<std::mutex> publish_lock(publish_mutex_);
+            if (decided_id_ == target && decided_outcome_.has_value()) {
+                SaveOutcome decided = std::move(*decided_outcome_);
+                decided_outcome_.reset();
+                decided_id_ = 0;
+                return decided;
+            }
+        }
         SaveOutcome timed_out;
         timed_out.state = SaveState::cancelled;
         return timed_out;
@@ -91,19 +115,32 @@ void SaveWorker::cancel_target(std::uint64_t target) noexcept
     if (target == 0) {
         return;
     }
-    if (executing_id_ == target) {
-        cancelled_ids_.insert(target);
-    }
+    /* mutex_ is held by the caller. */
     if (queued_id_ == target) {
         /* Never executed: just drop it, so it cannot publish. */
         queued_job_.reset();
         queued_id_ = 0;
+        return;
     }
+    if (executing_id_ != target) {
+        return;
+    }
+    std::lock_guard<std::mutex> publish_lock(publish_mutex_);
+    if (decided_id_ == target) {
+        /* execute() already made and acted on its commit decision. */
+        return;
+    }
+    cancelled_ids_.insert(target);
 }
 
-bool SaveWorker::is_cancelled(std::uint64_t id) const noexcept
+bool SaveWorker::is_cancelled_locked(std::uint64_t id) const noexcept
 {
     return cancelled_ids_.find(id) != cancelled_ids_.end();
+}
+
+bool SaveWorker::deadline_expired_locked(std::uint64_t id) const noexcept
+{
+    return awaited_id_ == id && awaited_deadline_.has_value() && awaited_deadline_->expired();
 }
 
 void SaveWorker::cancel_pending() noexcept
@@ -140,46 +177,62 @@ std::size_t SaveWorker::queued() const noexcept
     return queued_job_.has_value() ? 1u : 0u;
 }
 
-SaveOutcome SaveWorker::execute(const SaveJob& job, std::uint64_t id) noexcept
+void SaveWorker::execute(const SaveJob& job, std::uint64_t id) noexcept
 {
     SaveOutcome outcome;
+    std::optional<std::filesystem::path> temporary;
+
+    /* Phase 1: encode/write the temporary outside the publication gate so a
+     * wait_until timeout can still mark this job cancelled while it blocks. */
     try {
-        core::Result<std::filesystem::path> temporary = sink_.write_temp(job);
-        if (!temporary.has_value()) {
+        core::Result<std::filesystem::path> written = sink_.write_temp(job);
+        if (!written.has_value()) {
             outcome.state = SaveState::failed;
-            outcome.error = temporary.failure().code;
-            return outcome;
+            outcome.error = written.failure().code;
+        } else {
+            temporary = std::move(written).value();
         }
-
-        bool cancelled = false;
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            cancelled = is_cancelled(id);
-        }
-        if (cancelled) {
-            /* The caller already gave up: remove the temp and publish nothing. */
-            sink_.discard(temporary.value());
-            outcome.state = SaveState::cancelled;
-            outcome.error = core::ErrorCode::none;
-            return outcome;
-        }
-
-        core::Result<std::filesystem::path> committed = sink_.commit(temporary.value());
-        if (!committed.has_value()) {
-            sink_.discard(temporary.value());
-            outcome.state = SaveState::failed;
-            outcome.error = committed.failure().code;
-            return outcome;
-        }
-
-        outcome.state = SaveState::completed;
-        outcome.path = std::move(committed).value();
-        outcome.error = core::ErrorCode::none;
-        return outcome;
     } catch (...) {
         outcome.state = SaveState::failed;
         outcome.error = core::ErrorCode::internal_exception;
-        return outcome;
+    }
+
+    /* Phase 2: the cancellation/deadline check and the commit are one critical
+     * section, so wait_until's cancel_target() is either observed here (discard,
+     * no final file) or loses to an already made decision. */
+    std::lock_guard<std::mutex> publish_lock(publish_mutex_);
+    if (temporary.has_value()) {
+        try {
+            if (is_cancelled_locked(id) || deadline_expired_locked(id)) {
+                /* The caller already gave up: remove the temp and publish nothing. */
+                sink_.discard(*temporary);
+                outcome.state = SaveState::cancelled;
+                outcome.error = core::ErrorCode::none;
+            } else {
+                core::Result<std::filesystem::path> committed = sink_.commit(*temporary);
+                if (!committed.has_value()) {
+                    sink_.discard(*temporary);
+                    outcome.state = SaveState::failed;
+                    outcome.error = committed.failure().code;
+                } else {
+                    outcome.state = SaveState::completed;
+                    outcome.path = std::move(committed).value();
+                    outcome.error = core::ErrorCode::none;
+                }
+            }
+        } catch (...) {
+            sink_.discard(*temporary);
+            outcome.state = SaveState::failed;
+            outcome.error = core::ErrorCode::internal_exception;
+        }
+    }
+
+    decided_id_ = id;
+    decided_outcome_ = std::move(outcome);
+    cancelled_ids_.erase(id);
+    if (awaited_id_ == id) {
+        awaited_id_ = 0;
+        awaited_deadline_.reset();
     }
 }
 
@@ -198,13 +251,24 @@ void SaveWorker::worker_loop()
         const SaveJob job = *executing_job_;
         const std::uint64_t id = executing_id_;
         lock.unlock();
-        SaveOutcome outcome = execute(job, id);
+        execute(job, id);
         lock.lock();
 
         executing_job_.reset();
         executing_id_ = 0;
-        cancelled_ids_.erase(id);
-        completed_[id] = std::move(outcome);
+        {
+            std::lock_guard<std::mutex> publish_lock(publish_mutex_);
+            if (decided_id_ == id && decided_outcome_.has_value()) {
+                completed_[id] = std::move(*decided_outcome_);
+                decided_outcome_.reset();
+            }
+            decided_id_ = 0;
+            cancelled_ids_.erase(id);
+            if (awaited_id_ == id) {
+                awaited_id_ = 0;
+                awaited_deadline_.reset();
+            }
+        }
 
         if (!stopping_ && queued_job_.has_value()) {
             executing_job_ = std::move(queued_job_);

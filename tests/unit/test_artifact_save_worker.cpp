@@ -20,9 +20,11 @@
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <vector>
 
 #include <opencv2/core.hpp>
@@ -220,6 +222,122 @@ private:
     bool released_ = false;
 };
 
+/*
+ * Sink whose commit() blocks until release_commit() is called, then publishes a
+ * real final file by rename. It pins the cancellation/commit race: a wait_until
+ * deadline that expires while the commit is in flight must either win (no final
+ * file) or be reported as the completed outcome that actually published, never
+ * as a synthetic cancellation next to a published file.
+ */
+class BlockingCommitSink final : public art::ArtifactSink {
+public:
+    explicit BlockingCommitSink(std::filesystem::path root)
+        : root_(std::move(root))
+    {
+        std::error_code error;
+        std::filesystem::create_directories(root_, error);
+    }
+
+    core::Result<std::filesystem::path> write_temp(const art::SaveJob& job) override
+    {
+        (void)job;
+        const std::filesystem::path temporary = temporary_path();
+        std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
+        stream << "partial";
+        stream.close();
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            ++write_calls_;
+        }
+        return temporary;
+    }
+
+    core::Result<std::filesystem::path> commit(const std::filesystem::path& temp) override
+    {
+        {
+            std::lock_guard<std::mutex> lock(gate_mutex_);
+            commit_entered_ = true;
+        }
+        gate_cv_.notify_all();
+        {
+            std::unique_lock<std::mutex> lock(gate_mutex_);
+            gate_cv_.wait(lock, [this] { return commit_released_; });
+        }
+
+        const std::filesystem::path final = published_path();
+        std::error_code error;
+        std::filesystem::rename(temp, final, error);
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            ++commit_calls_;
+        }
+        return final;
+    }
+
+    void discard(const std::filesystem::path& temp) noexcept override
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        ++discard_calls_;
+        std::error_code error;
+        std::filesystem::remove(temp, error);
+    }
+
+    bool wait_commit_entered(std::chrono::milliseconds timeout)
+    {
+        std::unique_lock<std::mutex> lock(gate_mutex_);
+        return gate_cv_.wait_for(lock, timeout, [this] { return commit_entered_; });
+    }
+
+    void release_commit()
+    {
+        {
+            std::lock_guard<std::mutex> lock(gate_mutex_);
+            commit_released_ = true;
+        }
+        gate_cv_.notify_all();
+    }
+
+    std::filesystem::path temporary_path() const
+    {
+        return root_ / ".cvftmp_dev_commit.part";
+    }
+
+    std::filesystem::path published_path() const
+    {
+        return root_ / "published.png";
+    }
+
+    std::uint32_t write_calls() const
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return write_calls_;
+    }
+
+    std::uint32_t commit_calls() const
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return commit_calls_;
+    }
+
+    std::uint32_t discard_calls() const
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return discard_calls_;
+    }
+
+private:
+    std::filesystem::path root_;
+    mutable std::mutex mutex_;
+    std::uint32_t write_calls_ = 0;
+    std::uint32_t commit_calls_ = 0;
+    std::uint32_t discard_calls_ = 0;
+
+    std::mutex gate_mutex_;
+    std::condition_variable gate_cv_;
+    bool commit_entered_ = false;
+    bool commit_released_ = false;
+};
+
 }  // namespace
 
 TEST_CASE("CVF-104 developer: a completed sink save publishes a decodable PNG and removes its temp",
@@ -371,4 +489,41 @@ TEST_CASE("CVF-104 developer regression B-1: an expired wait cancels the in-flig
     CHECK(count_temporary_files(root) == 0u);
     CHECK(worker.executing() == 0u);
     CHECK(worker.queued() == 0u);
+}
+
+TEST_CASE("CVF-104 developer regression TOCTOU: a deadline that expires during an in-flight commit "
+          "never reports cancelled for the file that was published",
+          "[cvf-104][dev][worker][cancel][regression][toctou]")
+{
+    TempTree tree("worker_commit_race");
+    const auto root = tree.path() / "captures";
+    BlockingCommitSink sink(root);
+    art::SaveWorker worker(sink);
+
+    REQUIRE(worker.try_submit(make_job("example.fail", "dev-commit-race", 91u)));
+    /* write_temp produced a temporary and commit() is now in flight and blocked. */
+    REQUIRE(sink.wait_commit_entered(std::chrono::milliseconds(2000)));
+
+    /* The caller's deadline expires while the commit is blocked. wait_until must
+     * not report a cancellation next to a final file the commit goes on to
+     * publish; it either stops the publish or reports the completion. */
+    std::optional<art::SaveOutcome> outcome;
+    std::thread waiter([&] { outcome = worker.wait_until(core::Deadline::from_timeout_ms(100u)); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    sink.release_commit();
+    waiter.join();
+    worker.drain();
+
+    REQUIRE(outcome.has_value());
+    /* The commit decision won the race: the caller is told completed and the
+     * reported path is exactly the file that was published. Pre-fix this
+     * returned cancelled while published.png still appeared. */
+    CHECK(outcome->state == art::SaveState::completed);
+    CHECK(outcome->path == sink.published_path());
+    CHECK(std::filesystem::is_regular_file(sink.published_path()));
+    CHECK(sink.commit_calls() == 1u);
+    CHECK(sink.discard_calls() == 0u);
+    CHECK_FALSE(std::filesystem::exists(sink.temporary_path()));
+    CHECK(count_temporary_files(root) == 0u);
 }
