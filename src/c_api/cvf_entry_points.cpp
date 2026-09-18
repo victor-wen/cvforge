@@ -265,6 +265,22 @@ std::optional<core::Failure> validate_request_struct(const cvf_inspection_reques
         return core::invalid_argument(core::ErrorCode::struct_size_mismatch,
                                       "cvf_inspection_request_v1.struct_size does not match the v1 size");
     }
+    /* Every pointer-length pair is checked before a view is constructed. A
+     * required identifier needs a non-NULL pointer and a positive length; an
+     * optional input_json needs a non-NULL pointer only when its length is
+     * positive, and a zero length means absent regardless of the pointer. */
+    if (request->recipe_id_utf8 == nullptr && request->recipe_id_utf8_bytes != 0u) {
+        return core::invalid_argument(core::ErrorCode::buffer_argument_invalid,
+                                      "recipe_id_utf8 is NULL with a nonzero length");
+    }
+    if (request->request_id_utf8 == nullptr && request->request_id_utf8_bytes != 0u) {
+        return core::invalid_argument(core::ErrorCode::buffer_argument_invalid,
+                                      "request_id_utf8 is NULL with a nonzero length");
+    }
+    if (request->input_json_utf8 == nullptr && request->input_json_utf8_bytes != 0u) {
+        return core::invalid_argument(core::ErrorCode::buffer_argument_invalid,
+                                      "input_json_utf8 is NULL with a nonzero length");
+    }
     core::InspectionRequestView view;
     view.struct_size = request->struct_size;
     view.abi_version = request->abi_version;
@@ -274,11 +290,9 @@ std::optional<core::Failure> validate_request_struct(const cvf_inspection_reques
     if (request->request_id_utf8 != nullptr) {
         view.request_id = std::string_view(request->request_id_utf8, request->request_id_utf8_bytes);
     }
-    if (request->input_json_utf8 != nullptr || request->input_json_utf8_bytes != 0u) {
-        view.input_json_present = request->input_json_utf8 != nullptr;
-        if (request->input_json_utf8 != nullptr) {
-            view.input_json = std::string_view(request->input_json_utf8, request->input_json_utf8_bytes);
-        }
+    if (request->input_json_utf8 != nullptr && request->input_json_utf8_bytes != 0u) {
+        view.input_json_present = true;
+        view.input_json = std::string_view(request->input_json_utf8, request->input_json_utf8_bytes);
     }
     for (std::size_t index = 0u; index < view.reserved.size(); ++index) {
         view.reserved[index] = request->reserved[index];
@@ -346,7 +360,7 @@ runtime::InspectionRequest make_runtime_request(const cvf_inspection_request_v1*
     runtime_request.recipe_id = std::string(request->recipe_id_utf8, request->recipe_id_utf8_bytes);
     runtime_request.request_id = std::string(request->request_id_utf8, request->request_id_utf8_bytes);
     runtime_request.timeout_ms = request->timeout_ms;
-    if (request->input_json_utf8 != nullptr) {
+    if (request->input_json_utf8 != nullptr && request->input_json_utf8_bytes != 0u) {
         runtime_request.input_json = std::string(request->input_json_utf8, request->input_json_utf8_bytes);
     }
     return runtime_request;
@@ -504,15 +518,12 @@ cvf_status_t CVF_CALL inspect_impl(cvf_context* context, const cvf_inspection_re
     const runtime::InspectionOutcome& value = outcome.value();
 
     /*
-     * The caller capacity was validated to the v1 required capacity before any
-     * side effect, but a serialized result can still exceed it. The encoded
-     * text is produced once; on overflow nothing of it is written and
-     * bytes_required reports the real size needed.
+     * The runtime produced exactly one canonical serialization and enforced the
+     * 65535-byte payload bound. The C API copies that string verbatim and never
+     * re-serializes the object; the caller capacity was validated to the v1
+     * required capacity before any side effect.
      */
-    std::string serialized_json;
-    if (!value.output_json.is_null()) {
-        serialized_json = value.output_json.dump();
-    }
+    const std::string& serialized_json = value.output_text;
     if (!serialized_json.empty() && serialized_json.size() + 1u > result->output_json_capacity) {
         const core::Failure failure =
             core::make_failure(core::Status::buffer_too_small, core::ErrorCode::runtime_result_too_large,

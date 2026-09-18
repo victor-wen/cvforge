@@ -1287,6 +1287,224 @@ if(CVFORWIN_BUILD_TESTS)
         cvforwin_apply_sanitizers(cvf103_windows_uvc_tests)
         catch_discover_tests(cvf103_windows_uvc_tests)
     endif()
+
+    # --- independent CVF-105 canonicalization/ABI/payload tests (test-engineer owned)
+    #
+    # The cvf105_* sources are authored and hash-pinned by the test owner; this
+    # file only builds and registers them with CTest. The canonicalization,
+    # payload-bound, and warning-concurrency suites include frozen headers only.
+    # The ABI suites exercise the frozen public header; the request-pair and
+    # runtime output_text suites additionally need the deterministic test
+    # backends, so they are registered only when CVFORWIN_BUILD_TEST_BACKENDS is
+    # ON. Nothing here is ever inside CVFORWIN_BUILD_HARDWARE_TESTS.
+
+    add_executable(cvf105_hex_tests
+        tests/unit/cvf105_hex_test.cpp
+    )
+    target_include_directories(cvf105_hex_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+    )
+    target_link_libraries(cvf105_hex_tests PRIVATE
+        cvforwin_recipes
+        Catch2::Catch2WithMain
+    )
+    set_target_properties(cvf105_hex_tests PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    cvforwin_apply_test_compile_options(cvf105_hex_tests)
+    cvforwin_apply_sanitizers(cvf105_hex_tests)
+    catch_discover_tests(cvf105_hex_tests)
+
+    add_executable(cvf105_selector_tests
+        tests/unit/cvf105_selector_test.cpp
+    )
+    target_include_directories(cvf105_selector_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+    )
+    target_link_libraries(cvf105_selector_tests PRIVATE
+        cvforwin_recipes
+        cvforwin_camera
+        Catch2::Catch2WithMain
+    )
+    set_target_properties(cvf105_selector_tests PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    cvforwin_apply_test_compile_options(cvf105_selector_tests)
+    cvforwin_apply_sanitizers(cvf105_selector_tests)
+    catch_discover_tests(cvf105_selector_tests)
+
+    add_executable(cvf105_payload_tests
+        tests/unit/cvf105_payload_test.cpp
+    )
+    target_include_directories(cvf105_payload_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    )
+    target_link_libraries(cvf105_payload_tests PRIVATE
+        cvforwin_runtime
+        nlohmann_json::nlohmann_json
+        Catch2::Catch2WithMain
+    )
+    set_target_properties(cvf105_payload_tests PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    cvforwin_apply_test_compile_options(cvf105_payload_tests)
+    cvforwin_apply_sanitizers(cvf105_payload_tests)
+    catch_discover_tests(cvf105_payload_tests)
+
+    add_executable(cvf105_warnings_tests
+        tests/unit/cvf105_warnings_test.cpp
+    )
+    target_include_directories(cvf105_warnings_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+    )
+    target_link_libraries(cvf105_warnings_tests PRIVATE
+        cvforwin_diagnostics
+        Threads::Threads
+        Catch2::Catch2WithMain
+    )
+    set_target_properties(cvf105_warnings_tests PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    cvforwin_apply_test_compile_options(cvf105_warnings_tests)
+    cvforwin_apply_sanitizers(cvf105_warnings_tests)
+    catch_discover_tests(cvf105_warnings_tests)
+
+    add_executable(cvf105_abi_validation_tests
+        tests/unit/cvf105_abi_validation_test.cpp
+    )
+    target_include_directories(cvf105_abi_validation_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    )
+    target_link_libraries(cvf105_abi_validation_tests PRIVATE
+        cvforwin
+        Catch2::Catch2WithMain
+    )
+    set_target_properties(cvf105_abi_validation_tests PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    cvforwin_apply_test_compile_options(cvf105_abi_validation_tests)
+    cvforwin_apply_sanitizers(cvf105_abi_validation_tests)
+    cvforwin_place_shared_library(cvf105_abi_validation_tests)
+    catch_discover_tests(cvf105_abi_validation_tests)
+
+    if(CVFORWIN_BUILD_TEST_BACKENDS)
+        add_executable(cvf105_abi_pairs_tests
+            tests/unit/cvf105_abi_pairs_test.cpp
+        )
+        target_include_directories(cvf105_abi_pairs_tests PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/src"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        )
+        target_link_libraries(cvf105_abi_pairs_tests PRIVATE
+            cvforwin
+            cvforwin_runtime
+            cvforwin_test_backends
+            nlohmann_json::nlohmann_json
+            Threads::Threads
+            Catch2::Catch2WithMain
+        )
+        target_compile_definitions(cvf105_abi_pairs_tests PRIVATE CVFORWIN_TEST_BACKENDS_ENABLED=1)
+        set_target_properties(cvf105_abi_pairs_tests PROPERTIES
+            CXX_STANDARD 20
+            CXX_STANDARD_REQUIRED ON
+            CXX_EXTENSIONS OFF
+        )
+        cvforwin_apply_test_compile_options(cvf105_abi_pairs_tests)
+        cvforwin_apply_sanitizers(cvf105_abi_pairs_tests)
+        cvforwin_place_shared_library(cvf105_abi_pairs_tests)
+        catch_discover_tests(cvf105_abi_pairs_tests)
+
+        add_executable(cvf105_runtime_output_text_tests
+            tests/unit/cvf105_runtime_output_text_test.cpp
+        )
+        target_include_directories(cvf105_runtime_output_text_tests PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/src"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        )
+        target_link_libraries(cvf105_runtime_output_text_tests PRIVATE
+            cvforwin_runtime
+            cvforwin_test_backends
+            nlohmann_json::nlohmann_json
+            Threads::Threads
+            Catch2::Catch2WithMain
+        )
+        target_compile_definitions(cvf105_runtime_output_text_tests PRIVATE CVFORWIN_TEST_BACKENDS_ENABLED=1)
+        set_target_properties(cvf105_runtime_output_text_tests PROPERTIES
+            CXX_STANDARD 20
+            CXX_STANDARD_REQUIRED ON
+            CXX_EXTENSIONS OFF
+        )
+        cvforwin_apply_test_compile_options(cvf105_runtime_output_text_tests)
+        cvforwin_apply_sanitizers(cvf105_runtime_output_text_tests)
+        catch_discover_tests(cvf105_runtime_output_text_tests)
+    else()
+        message(STATUS "cvforwin: cvf105 ABI request-pair tests are not registered because CVFORWIN_BUILD_TEST_BACKENDS is OFF")
+    endif()
+
+    # --- developer-owned CVF-105 hardening regression tests -----------------
+    #
+    # tests/unit/test_cvf105_hardening.cpp is the developer's own coverage for
+    # the four CVF-105 fixes (canonical VID/PID, C ABI pointer-length/capacity
+    # pairs, atomic diagnostics warnings, single bounded result payload). It
+    # drives the production seams and the public C ABI end to end, so it needs
+    # the deterministic test backends and is registered only when
+    # CVFORWIN_BUILD_TEST_BACKENDS is ON. The independent cvf105_* suite remains
+    # owned by the test owner. Nothing here is ever inside
+    # CVFORWIN_BUILD_HARDWARE_TESTS.
+
+    if(CVFORWIN_BUILD_TEST_BACKENDS)
+        add_executable(cvf105_hardening_developer_tests
+            tests/unit/test_cvf105_hardening.cpp
+        )
+        target_include_directories(cvf105_hardening_developer_tests PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/src"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        )
+        target_link_libraries(cvf105_hardening_developer_tests PRIVATE
+            cvforwin
+            cvforwin_runtime
+            cvforwin_recipes
+            cvforwin_camera
+            cvforwin_diagnostics
+            cvforwin_test_backends
+            nlohmann_json::nlohmann_json
+            opencv_core
+            Threads::Threads
+            Catch2::Catch2WithMain
+        )
+        target_compile_definitions(cvf105_hardening_developer_tests PRIVATE CVFORWIN_TEST_BACKENDS_ENABLED=1)
+        set_target_properties(cvf105_hardening_developer_tests PROPERTIES
+            CXX_STANDARD 20
+            CXX_STANDARD_REQUIRED ON
+            CXX_EXTENSIONS OFF
+        )
+        cvforwin_apply_test_compile_options(cvf105_hardening_developer_tests)
+        cvforwin_apply_sanitizers(cvf105_hardening_developer_tests)
+        cvforwin_place_shared_library(cvf105_hardening_developer_tests)
+        catch_discover_tests(cvf105_hardening_developer_tests)
+    else()
+        message(STATUS "cvforwin: cvf105_hardening_developer_tests is not registered because CVFORWIN_BUILD_TEST_BACKENDS is OFF")
+    endif()
+
 endif()
 
 # ---------------------------------------------------------------------------

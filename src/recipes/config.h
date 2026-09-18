@@ -14,12 +14,21 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <string_view>
 
 #include <nlohmann/json.hpp>
 
 #include "core/result.h"
 
 namespace cvforwin::recipes {
+
+/*
+ * Canonical form of a configured or enumerated VID/PID: exactly four lowercase
+ * ASCII hex digits. Returns config_value_invalid for a null/empty value, non-hex
+ * characters, or a length other than four. Identity comparison then runs on
+ * canonical values only.
+ */
+core::Result<std::string> canonicalize_hex4(std::string_view value);
 
 struct CameraSelectorConfig {
     std::string backend;

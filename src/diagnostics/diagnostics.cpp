@@ -84,7 +84,7 @@ void Diagnostics::open_file_sink() noexcept
         std::error_code error;
         std::filesystem::create_directories(log_file_path_.parent_path(), error);
         if (error) {
-            warnings_ |= warning_bit(core::warning_log_sink_failed);
+            warnings_.fetch_or(warning_bit(core::warning_log_sink_failed), std::memory_order_relaxed);
             return;
         }
 
@@ -101,7 +101,7 @@ void Diagnostics::open_file_sink() noexcept
             log_file_path_.string(), static_cast<std::size_t>(state_->max_file_bytes), rotated_files, false);
     } catch (...) {
         state_->sink.reset();
-        warnings_ |= warning_bit(core::warning_log_sink_failed);
+        warnings_.fetch_or(warning_bit(core::warning_log_sink_failed), std::memory_order_relaxed);
     }
 }
 
@@ -119,28 +119,32 @@ void Diagnostics::log(core::LogLevel level, std::string_view message) noexcept
                                                  spdlog::string_view_t(truncated.data(), truncated.size()));
             state_->sink->log(entry);
         } catch (...) {
-            warnings_ |= warning_bit(core::warning_log_sink_failed);
+            warnings_.fetch_or(warning_bit(core::warning_log_sink_failed), std::memory_order_relaxed);
         }
     }
 
     if (callback_.fn != nullptr) {
+        /* Stable storage for the host call, then serialized delivery so the
+         * host never observes concurrent callbacks; no warning/state lock is
+         * held while host code runs. */
+        const std::string text{truncated};
         try {
-            const std::string text{truncated};
+            std::lock_guard<std::mutex> callback_guard(callback_mutex_);
             callback_.fn(core::to_public_log_level(level), text.c_str(), callback_.user_data);
         } catch (...) {
-            warnings_ |= warning_bit(core::warning_log_sink_failed);
+            warnings_.fetch_or(warning_bit(core::warning_log_sink_failed), std::memory_order_relaxed);
         }
     }
 }
 
 std::uint32_t Diagnostics::warnings() const noexcept
 {
-    return warnings_;
+    return warnings_.load(std::memory_order_relaxed);
 }
 
 void Diagnostics::clear_warnings() noexcept
 {
-    warnings_ = core::warning_none;
+    warnings_.store(core::warning_none, std::memory_order_relaxed);
 }
 
 std::filesystem::path Diagnostics::log_file_path() const
@@ -156,7 +160,7 @@ Diagnostics::~Diagnostics()
     try {
         state_->sink->flush();
     } catch (...) {
-        warnings_ |= warning_bit(core::warning_log_sink_failed);
+        warnings_.fetch_or(warning_bit(core::warning_log_sink_failed), std::memory_order_relaxed);
     }
 }
 

@@ -17,6 +17,7 @@
 #define CVFORWIN_SRC_RUNTIME_CONTEXT_H_
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -36,6 +37,17 @@ class ArtifactSink;
 }  // namespace cvforwin::artifacts
 
 namespace cvforwin::runtime {
+
+/* Maximum UTF-8 payload bytes, excluding the mandatory trailing NUL. */
+constexpr std::size_t k_max_result_payload_bytes = 65535;
+
+/*
+ * Serializes the fully assembled result object exactly once (measurements plus
+ * optional defects) and enforces the payload bound; over-bound fails with
+ * buffer_too_small and error_code runtime_result_too_large before any C API
+ * copy.
+ */
+core::Result<std::string> serialize_result_payload(const nlohmann::json& output);
 
 /*
  * Inspection timeout in milliseconds. The value keeps the frozen millisecond
@@ -90,6 +102,8 @@ struct InspectionOutcome {
     std::uint32_t elapsed_ms = 0;
     /* Measurements plus defects as one bounded JSON object; null when cleared. */
     nlohmann::json output_json;
+    /* Canonical serialization of output_json, produced exactly once by the runtime. */
+    std::string output_text;
     std::string image_path;
     std::string error_message;
 };

@@ -14,9 +14,11 @@
 #ifndef CVFORWIN_SRC_DIAGNOSTICS_DIAGNOSTICS_H_
 #define CVFORWIN_SRC_DIAGNOSTICS_DIAGNOSTICS_H_
 
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <string_view>
 
 #include "core/result.h"
@@ -83,7 +85,10 @@ private:
     std::filesystem::path log_file_path_;
     core::LogLevel level_ = core::LogLevel::info;
     CallbackBinding callback_;
-    std::uint32_t warnings_ = core::warning_none;
+    /* Serializes host callback delivery; never held while touching warnings_. */
+    std::mutex callback_mutex_;
+    /* Race-free across inspect, reload, maintenance, and callback threads. */
+    std::atomic<std::uint32_t> warnings_{core::warning_none};
 };
 
 }  // namespace cvforwin::diagnostics

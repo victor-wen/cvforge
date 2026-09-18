@@ -25,8 +25,8 @@ TEST_CASE("CVF-004 B1: a valid cvforwin.json parses to the documented values and
     check_integer(config.schema_version, 1, "schema_version");
     check_text(config.camera.backend, "uvc", "camera.backend");
     check_text(config.camera.device_path, "/dev/cvf004-camera", "camera.device_path");
-    check_text(config.camera.vendor_id, "1A2B", "camera.vendor_id");
-    check_text(config.camera.product_id, "0C3D", "camera.product_id");
+    check_text(config.camera.vendor_id, "1a2b", "camera.vendor_id");
+    check_text(config.camera.product_id, "0c3d", "camera.product_id");
     check_text(config.camera.friendly_name, "CVF-004 probe camera", "camera.friendly_name");
     check_integer(config.base_capture.width, 1920, "base_capture.width");
     check_integer(config.base_capture.height, 1080, "base_capture.height");
@@ -90,7 +90,7 @@ TEST_CASE("CVF-004 B2: the camera selector accepts device_path or a VID/PID pair
         config["camera"]["device_path"] = "";
         auto loaded = load(config);
         REQUIRE(loaded.has_value());
-        check_text(loaded.value().camera.vendor_id, "1A2B", "camera.vendor_id");
+        check_text(loaded.value().camera.vendor_id, "1a2b", "camera.vendor_id");
     }
 
     SECTION("lowercase hexadecimal VID/PID values are accepted")

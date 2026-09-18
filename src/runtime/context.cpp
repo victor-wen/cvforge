@@ -67,8 +67,6 @@ namespace {
 
 constexpr std::uint32_t k_default_timeout_ms = 5000u;
 constexpr std::uint64_t k_seconds_per_day = 86400u;
-/* Public output_json payload bound, excluding the required trailing NUL. */
-constexpr std::size_t k_max_result_payload_bytes = 65535u;
 
 core::LogLevel log_level_from_token(std::string_view token) noexcept
 {
@@ -257,6 +255,22 @@ nlohmann::json serialize_measurements(const inspection::AlgorithmResult& result)
 
 }  // namespace
 
+core::Result<std::string> serialize_result_payload(const nlohmann::json& output)
+{
+    std::string serialized;
+    try {
+        serialized = output.dump();
+    } catch (const std::exception&) {
+        return core::make_failure(core::Status::internal_error, core::ErrorCode::internal_exception,
+                                  "the inspection result could not be serialized");
+    }
+    if (serialized.size() > k_max_result_payload_bytes) {
+        return core::make_failure(core::Status::buffer_too_small, core::ErrorCode::runtime_result_too_large,
+                                  "the serialized inspection result exceeds the bounded payload");
+    }
+    return serialized;
+}
+
 class Context::Impl {
 public:
     Impl(recipes::GlobalConfig config, inspection::AlgorithmRegistry registry,
@@ -407,16 +421,15 @@ public:
         fin.execution_ok = true;
 
         nlohmann::json output_json;
+        std::string output_text;
         try {
             output_json = serialize_measurements(algorithm_outcome);
-            const std::string serialized = output_json.dump();
-            if (serialized.size() > k_max_result_payload_bytes) {
-                const core::Failure too_large =
-                    core::make_failure(core::Status::internal_error, core::ErrorCode::runtime_result_too_large,
-                                       "the serialized inspection result exceeds the bounded payload");
-                return finalize_post_frame(&too_large, deadline, recipe, request, frame, fin,
+            core::Result<std::string> serialized = serialize_result_payload(output_json);
+            if (!serialized.has_value()) {
+                return finalize_post_frame(&serialized.failure(), deadline, recipe, request, frame, fin,
                                            nlohmann::json(), started);
             }
+            output_text = std::move(serialized).value();
         } catch (const std::exception&) {
             const core::Failure serialize_error =
                 core::make_failure(core::Status::internal_error, core::ErrorCode::internal_exception,
@@ -425,7 +438,8 @@ public:
                                        nlohmann::json(), started);
         }
 
-        return finalize_post_frame(nullptr, deadline, recipe, request, frame, fin, std::move(output_json), started);
+        return finalize_post_frame(nullptr, deadline, recipe, request, frame, fin, std::move(output_json), started,
+                                   std::move(output_text));
     }
 
     core::Result<void> reload_recipes()
@@ -463,7 +477,8 @@ private:
                                           const recipes::Recipe& recipe, const InspectionRequest& request,
                                           const camera::CapturedFrame& frame, FinalizeRequest fin,
                                           nlohmann::json output_json,
-                                          std::chrono::steady_clock::time_point started)
+                                          std::chrono::steady_clock::time_point started,
+                                          std::string output_text = {})
     {
         if (failure != nullptr) {
             fin.execution_ok = false;
@@ -523,8 +538,10 @@ private:
         outcome.elapsed_ms = elapsed_ms_since(started);
         if (decision.status == core::Status::ok) {
             outcome.output_json = std::move(output_json);
+            outcome.output_text = std::move(output_text);
         } else {
             outcome.output_json = nlohmann::json();
+            outcome.output_text.clear();
             if (failure != nullptr) {
                 outcome.error_message = failure->message;
             } else if (decision.status == core::Status::required_artifact_error) {

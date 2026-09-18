@@ -121,11 +121,6 @@ bool is_hex_digit(char character) noexcept
            (character >= 'a' && character <= 'f');
 }
 
-bool is_vid_pid(std::string_view value) noexcept
-{
-    return value.size() == 4U && std::all_of(value.begin(), value.end(), is_hex_digit);
-}
-
 bool is_token(std::string_view value, std::initializer_list<std::string_view> allowed)
 {
     return is_allowed_key(allowed, value);
@@ -221,10 +216,19 @@ std::optional<Failure> validate_camera(const nlohmann::json& object, CameraSelec
         return config_failure(ErrorCode::config_value_invalid,
                               "camera selector strings must be at most 256 bytes");
     }
-    if ((!out.vendor_id.empty() && !is_vid_pid(out.vendor_id)) ||
-        (!out.product_id.empty() && !is_vid_pid(out.product_id))) {
-        return config_failure(ErrorCode::config_value_invalid,
-                              "camera vendor_id and product_id must be four hexadecimal characters");
+    if (!out.vendor_id.empty()) {
+        auto canonical = canonicalize_hex4(out.vendor_id);
+        if (!canonical.has_value()) {
+            return canonical.failure();
+        }
+        out.vendor_id = std::move(canonical).value();
+    }
+    if (!out.product_id.empty()) {
+        auto canonical = canonicalize_hex4(out.product_id);
+        if (!canonical.has_value()) {
+            return canonical.failure();
+        }
+        out.product_id = std::move(canonical).value();
     }
     if (out.device_path.empty() && (out.vendor_id.empty() || out.product_id.empty())) {
         return config_failure(ErrorCode::config_value_invalid,
@@ -342,6 +346,25 @@ std::optional<Failure> validate_retention(const nlohmann::json& object, Retentio
 }
 
 }  // namespace
+
+core::Result<std::string> canonicalize_hex4(std::string_view value)
+{
+    if (value.size() != 4u) {
+        return config_failure(ErrorCode::config_value_invalid,
+                              "camera vendor_id and product_id must be four hexadecimal characters");
+    }
+    std::string canonical{value};
+    for (char& character : canonical) {
+        if (!is_hex_digit(character)) {
+            return config_failure(ErrorCode::config_value_invalid,
+                                  "camera vendor_id and product_id must be four hexadecimal characters");
+        }
+        if (character >= 'A' && character <= 'F') {
+            character = static_cast<char>(character - 'A' + 'a');
+        }
+    }
+    return canonical;
+}
 
 core::Result<GlobalConfig> load_global_config(const std::filesystem::path& config_root,
                                               const std::filesystem::path& output_root)
