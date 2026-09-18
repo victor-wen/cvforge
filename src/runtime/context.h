@@ -31,6 +31,10 @@
 #include "core/status.h"
 #include "diagnostics/diagnostics.h"
 
+namespace cvforwin::artifacts {
+class ArtifactSink;
+}  // namespace cvforwin::artifacts
+
 namespace cvforwin::runtime {
 
 /*
@@ -67,6 +71,8 @@ struct RuntimeOptions {
     diagnostics::CallbackBinding log_callback{};
     /* Testing hook; when set, config-driven backend construction is skipped. */
     std::shared_ptr<camera::ICameraBackend> camera_override;
+    /* Optional internal artifact-sink injection; null selects managed captures. */
+    std::shared_ptr<artifacts::ArtifactSink> artifact_sink;
 };
 
 struct InspectionRequest {

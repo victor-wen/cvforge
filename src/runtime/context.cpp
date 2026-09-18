@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
@@ -31,13 +32,17 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include <nlohmann/json.hpp>
 
 #include "algorithms/compiled_algorithms.h"
+#include "artifacts/capture_sink.h"
 #include "artifacts/capture_store.h"
+#include "artifacts/retention_scheduler.h"
+#include "artifacts/save_worker.h"
 #include "core/deadline.h"
 #include "core/warnings.h"
 #include "inspection/algorithm.h"
@@ -45,6 +50,7 @@
 #include "recipes/config.h"
 #include "recipes/recipe.h"
 #include "recipes/recipe_catalog.h"
+#include "runtime/finalization.h"
 
 #if defined(CVFORWIN_TEST_BACKENDS_ENABLED) && CVFORWIN_TEST_BACKENDS_ENABLED
 #include "camera/test_backends/file_camera_backend.h"
@@ -61,6 +67,8 @@ namespace {
 
 constexpr std::uint32_t k_default_timeout_ms = 5000u;
 constexpr std::uint64_t k_seconds_per_day = 86400u;
+/* Public output_json payload bound, excluding the required trailing NUL. */
+constexpr std::size_t k_max_result_payload_bytes = 65535u;
 
 core::LogLevel log_level_from_token(std::string_view token) noexcept
 {
@@ -255,20 +263,42 @@ public:
          std::shared_ptr<const recipes::RecipeCatalog> catalog,
          std::unique_ptr<diagnostics::Diagnostics> diagnostics,
          std::unique_ptr<artifacts::CaptureStore> captures,
-         std::shared_ptr<camera::ICameraBackend> camera)
+         std::shared_ptr<camera::ICameraBackend> camera,
+         std::shared_ptr<artifacts::ArtifactSink> injected_sink)
         : config_(std::move(config)),
           registry_(std::move(registry)),
           diagnostics_(std::move(diagnostics)),
           captures_(std::move(captures)),
           camera_(std::move(camera)),
-          captures_root_(config_.output_root / "captures")
+          captures_root_(config_.output_root / "captures"),
+          sink_(injected_sink ? std::move(injected_sink)
+                              : std::shared_ptr<artifacts::ArtifactSink>(
+                                    std::make_shared<artifacts::CaptureStoreSink>(*captures_))),
+          save_worker_(*sink_)
     {
         recipes_.publish(std::move(catalog));
+        /* Anchor the retention time trigger at construction so the first run
+         * is not scheduled merely because the steady-clock epoch is in the
+         * past. */
+        retention_.on_retention_run(std::chrono::steady_clock::now());
+        retention_root_ = captures_root_;
+        maintenance_ = std::thread([this] { maintenance_loop(); });
     }
 
     ~Impl()
     {
         closed_.store(true, std::memory_order_release);
+        {
+            std::lock_guard<std::mutex> lock(maintenance_mutex_);
+            maintenance_stop_ = true;
+            maintenance_requested_ = false;
+            maintenance_cv_.notify_all();
+        }
+        if (maintenance_.joinable()) {
+            maintenance_.join();
+        }
+        /* Completes or cancels in-flight work and never deadlocks. */
+        save_worker_.drain();
         if (camera_) {
             camera_->close();
         }
@@ -292,6 +322,8 @@ public:
         const auto started = std::chrono::steady_clock::now();
         const std::uint32_t timeout_ms =
             request.timeout_ms.value() == 0u ? k_default_timeout_ms : request.timeout_ms.value();
+        /* One absolute deadline for the whole cycle. Every stage below receives
+         * this exact Deadline and never computes its own timeout. */
         const core::Deadline deadline = core::Deadline::from_timeout_ms(timeout_ms);
 
         std::optional<nlohmann::json> algorithm_input;
@@ -327,21 +359,33 @@ public:
         }
         const recipes::Recipe& recipe = *recipe_result.value();
 
+        /*
+         * One finalization request carries every post-frame input. The latest
+         * valid frame stays alive here until finalize_after_frame has produced
+         * the single decision.
+         */
+        FinalizeRequest fin;
+        fin.requirement = save_requirement_for(recipe.artifacts.save_policy, recipe.artifacts.required);
+
         const camera::CameraSettings settings = recipe_settings(config_, recipe);
         core::Result<camera::CapturedFrame> captured = camera::capture_with_one_retry(*camera_, settings, deadline);
         if (!captured.has_value()) {
+            /* No valid frame ever existed: no artifact attempt is allowed. */
             return failure_outcome(captured.failure(), started);
         }
         camera::CapturedFrame frame = std::move(captured).value();
+        fin.frame_valid = true;
         for (std::uint32_t settled = 0; settled < recipe.capture.settle_frames; ++settled) {
             if (deadline.expired()) {
-                return failure_outcome(core::make_failure(core::Status::timeout, core::ErrorCode::deadline_expired,
-                                                          "inspection deadline expired while settling the capture"),
-                                       started);
+                const core::Failure missed_settle =
+                    core::make_failure(core::Status::timeout, core::ErrorCode::deadline_expired,
+                                       "inspection deadline expired while settling the capture");
+                return finalize_post_frame(&missed_settle, deadline, recipe, request, frame, fin,
+                                           nlohmann::json(), started);
             }
             core::Result<camera::CapturedFrame> next = camera_->capture(deadline);
             if (!next.has_value()) {
-                return failure_outcome(next.failure(), started);
+                return finalize_post_frame(&next.failure(), deadline, recipe, request, frame, fin, nlohmann::json(), started);
             }
             frame = std::move(next).value();
         }
@@ -349,64 +393,39 @@ public:
         const core::Result<const inspection::IInspectionAlgorithm*> algorithm_result =
             registry_.find(recipe.algorithm);
         if (!algorithm_result.has_value()) {
-            return failure_outcome(algorithm_result.failure(), started);
+            return finalize_post_frame(&algorithm_result.failure(), deadline, recipe, request, frame, fin,
+                                       nlohmann::json(), started);
         }
         const inspection::AlgorithmRequest algorithm_request{frame, recipe.parameters, algorithm_input, deadline};
         core::Result<inspection::AlgorithmResult> dispatched =
             inspection::dispatch(*algorithm_result.value(), algorithm_request);
         if (!dispatched.has_value()) {
-            return failure_outcome(dispatched.failure(), started);
+            return finalize_post_frame(&dispatched.failure(), deadline, recipe, request, frame, fin, nlohmann::json(), started);
         }
         const inspection::AlgorithmResult algorithm_outcome = std::move(dispatched).value();
+        fin.verdict = algorithm_outcome.verdict;
+        fin.execution_ok = true;
 
-        InspectionOutcome outcome;
-        outcome.status = core::Status::ok;
-        outcome.verdict = algorithm_outcome.verdict;
-        outcome.error_code = core::ErrorCode::none;
+        nlohmann::json output_json;
         try {
-            outcome.output_json = serialize_measurements(algorithm_outcome);
-        } catch (const std::exception&) {
-            return failure_outcome(core::make_failure(core::Status::internal_error,
-                                                      core::ErrorCode::internal_exception,
-                                                      "algorithm measurements could not be serialized"),
-                                   started);
-        }
-
-        const artifacts::SaveDecision decision =
-            artifacts::decide_capture_save(recipe.artifacts.save_policy, outcome.verdict, true);
-        if (decision == artifacts::SaveDecision::save) {
-            const artifacts::CaptureSaveRequest save_request{frame.pixels, recipe.recipe_id, request.request_id,
-                                                             frame.metadata.sequence};
-            core::Result<std::filesystem::path> saved = captures_->save(save_request);
-            if (saved.has_value()) {
-                outcome.image_path = saved.value().string();
-            } else if (recipe.artifacts.required) {
-                outcome.status = core::Status::required_artifact_error;
-                outcome.verdict = core::Verdict::not_evaluated;
-                outcome.error_code = core::ErrorCode::runtime_required_artifact_failed;
-                outcome.output_json = nlohmann::json();
-                outcome.image_path.clear();
-                outcome.error_message = "required capture persistence failed: " + saved.failure().message;
-                outcome.warning_flags = warning_flags();
-                outcome.elapsed_ms = elapsed_ms_since(started);
-                return outcome;
-            } else {
-                add_warning(core::warning_image_save_failed);
+            output_json = serialize_measurements(algorithm_outcome);
+            const std::string serialized = output_json.dump();
+            if (serialized.size() > k_max_result_payload_bytes) {
+                const core::Failure too_large =
+                    core::make_failure(core::Status::internal_error, core::ErrorCode::runtime_result_too_large,
+                                       "the serialized inspection result exceeds the bounded payload");
+                return finalize_post_frame(&too_large, deadline, recipe, request, frame, fin,
+                                           nlohmann::json(), started);
             }
+        } catch (const std::exception&) {
+            const core::Failure serialize_error =
+                core::make_failure(core::Status::internal_error, core::ErrorCode::internal_exception,
+                                   "algorithm measurements could not be serialized");
+            return finalize_post_frame(&serialize_error, deadline, recipe, request, frame, fin,
+                                       nlohmann::json(), started);
         }
 
-        /* Retention runs after saves; a failure is an optional-artifact warning. */
-        const std::chrono::seconds max_age{
-            static_cast<std::chrono::seconds::rep>(config_.retention.max_age_days * k_seconds_per_day)};
-        const core::Result<std::uint32_t> retained =
-            artifacts::CaptureStore::enforce_retention(captures_root_, max_age, config_.retention.max_total_bytes);
-        if (!retained.has_value()) {
-            add_warning(core::warning_image_save_failed);
-        }
-
-        outcome.warning_flags = warning_flags();
-        outcome.elapsed_ms = elapsed_ms_since(started);
-        return outcome;
+        return finalize_post_frame(nullptr, deadline, recipe, request, frame, fin, std::move(output_json), started);
     }
 
     core::Result<void> reload_recipes()
@@ -433,6 +452,162 @@ public:
     }
 
 private:
+    /*
+     * Single exit for every outcome after a valid frame: algorithm failure,
+     * serialization failure, or success. It applies the recipe artifact policy
+     * with the real execution_ok value, waits on the bounded save worker only
+     * until the absolute deadline, then builds the public outcome from exactly
+     * one finalize_after_frame decision.
+     */
+    InspectionOutcome finalize_post_frame(const core::Failure* failure, const core::Deadline& deadline,
+                                          const recipes::Recipe& recipe, const InspectionRequest& request,
+                                          const camera::CapturedFrame& frame, FinalizeRequest fin,
+                                          nlohmann::json output_json,
+                                          std::chrono::steady_clock::time_point started)
+    {
+        if (failure != nullptr) {
+            fin.execution_ok = false;
+            fin.verdict = core::Verdict::not_evaluated;
+            fin.post_frame_status = failure->status != core::Status::ok ? failure->status : core::Status::internal_error;
+            fin.post_frame_error = failure->code;
+        }
+
+        const artifacts::SaveDecision policy =
+            artifacts::decide_capture_save(recipe.artifacts.save_policy, fin.verdict, fin.execution_ok);
+        if (policy != artifacts::SaveDecision::save) {
+            fin.requirement = SaveRequirement::none;
+        }
+
+        std::filesystem::path saved_path;
+        if (policy == artifacts::SaveDecision::save && fin.frame_valid) {
+            artifacts::SaveJob job;
+            /* Own the pixels so the worker never observes a caller-owned Mat. */
+            job.pixels = frame.pixels.clone();
+            job.recipe_id = recipe.recipe_id;
+            job.request_id = request.request_id;
+            job.sequence = frame.metadata.sequence;
+
+            fin.save_attempted = true;
+            if (save_worker_.try_submit(job)) {
+                const artifacts::SaveOutcome saved = save_worker_.wait_until(deadline);
+                if (saved.state == artifacts::SaveState::completed) {
+                    fin.save_committed = true;
+                    saved_path = saved.path;
+                } else {
+                    fin.save_failed = true;
+                    /* Drop this inspection's queued job; the executing one
+                     * cannot be interrupted without a caller-visible handle. */
+                    save_worker_.cancel_pending();
+                }
+            } else {
+                fin.save_failed = true;
+                /* A required save that cannot even be queued is awaited only to
+                 * the absolute deadline, after which it is a timeout. */
+                if (fin.requirement == SaveRequirement::required) {
+                    while (!deadline.expired()) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    }
+                }
+            }
+        }
+
+        fin.deadline_expired = deadline.expired() && !fin.save_committed;
+
+        const FinalizeDecision decision = finalize_after_frame(fin, warning_flags());
+
+        InspectionOutcome outcome;
+        outcome.status = decision.status;
+        outcome.verdict = decision.verdict;
+        outcome.error_code = decision.error_code;
+        outcome.warning_flags = decision.warning_flags;
+        outcome.elapsed_ms = elapsed_ms_since(started);
+        if (decision.status == core::Status::ok) {
+            outcome.output_json = std::move(output_json);
+        } else {
+            outcome.output_json = nlohmann::json();
+            if (failure != nullptr) {
+                outcome.error_message = failure->message;
+            } else if (decision.status == core::Status::required_artifact_error) {
+                outcome.error_message = "required capture persistence failed before the deadline";
+            } else if (decision.status == core::Status::timeout) {
+                outcome.error_message =
+                    "inspection deadline expired before the required capture was persisted";
+            }
+        }
+        if (decision.publish_image_path && !saved_path.empty()) {
+            outcome.image_path = saved_path.string();
+        }
+        if ((decision.warning_flags & static_cast<std::uint32_t>(core::warning_image_save_failed)) != 0u) {
+            add_warning(core::warning_image_save_failed);
+        }
+
+        schedule_retention(fin.save_committed, saved_path);
+        return outcome;
+    }
+
+    /*
+     * Records one committed capture and requests a coalesced background
+     * retention run when either trigger fires. It never scans, sorts, or
+     * deletes; the maintenance worker owns that work.
+     */
+    void schedule_retention(bool committed, const std::filesystem::path& saved_path)
+    {
+        bool request = false;
+        {
+            std::lock_guard<std::mutex> lock(maintenance_mutex_);
+            if (committed && !saved_path.empty()) {
+                const std::filesystem::path parent = saved_path.parent_path();
+                if (!parent.empty()) {
+                    retention_root_ = parent;
+                }
+            }
+            const auto now = std::chrono::steady_clock::now();
+            if (committed) {
+                request = retention_.on_capture_committed(now);
+            }
+            if (!request) {
+                request = retention_.due(now);
+            }
+            if (request) {
+                maintenance_requested_ = true;
+            }
+        }
+        if (request) {
+            maintenance_cv_.notify_all();
+        }
+    }
+
+    void maintenance_loop()
+    {
+        std::unique_lock<std::mutex> lock(maintenance_mutex_);
+        while (!maintenance_stop_) {
+            if (!maintenance_requested_) {
+                const auto now = std::chrono::steady_clock::now();
+                if (retention_.due(now)) {
+                    maintenance_requested_ = true;
+                }
+            }
+            if (!maintenance_requested_) {
+                maintenance_cv_.wait_for(lock, std::chrono::milliseconds(200));
+                continue;
+            }
+
+            maintenance_requested_ = false;
+            const std::chrono::seconds max_age{
+                static_cast<std::chrono::seconds::rep>(config_.retention.max_age_days * k_seconds_per_day)};
+            const std::uint64_t max_total_bytes = config_.retention.max_total_bytes;
+            const std::filesystem::path root = retention_root_;
+            lock.unlock();
+            const core::Result<std::uint32_t> retained =
+                artifacts::CaptureStore::enforce_retention(root, max_age, max_total_bytes);
+            lock.lock();
+            if (!retained.has_value()) {
+                add_warning(core::warning_image_save_failed);
+            }
+            retention_.on_retention_run(std::chrono::steady_clock::now());
+        }
+    }
+
     InspectionOutcome failure_outcome(const core::Failure& failure,
                                       std::chrono::steady_clock::time_point started) const
     {
@@ -458,6 +633,19 @@ private:
     std::unique_ptr<artifacts::CaptureStore> captures_;
     std::shared_ptr<camera::ICameraBackend> camera_;
     std::filesystem::path captures_root_;
+
+    /* Artifact execution: one bounded save worker plus a separate maintenance
+     * worker for coalesced retention. Neither runs on the inspect caller. */
+    std::shared_ptr<artifacts::ArtifactSink> sink_;
+    artifacts::SaveWorker save_worker_;
+    artifacts::RetentionScheduler retention_;
+    std::mutex maintenance_mutex_;
+    std::condition_variable maintenance_cv_;
+    bool maintenance_stop_ = false;
+    bool maintenance_requested_ = false;
+    std::filesystem::path retention_root_;
+    std::thread maintenance_;
+
     std::atomic<bool> closed_{false};
     std::atomic<std::uint32_t> warnings_{0u};
     std::timed_mutex gate_;
@@ -550,7 +738,8 @@ core::Result<std::unique_ptr<Context>> Context::create(RuntimeOptions options)
 
     std::unique_ptr<Context::Impl> impl =
         std::make_unique<Context::Impl>(std::move(config), std::move(registry), std::move(catalog),
-                                        std::move(diagnostics), std::move(captures), std::move(camera));
+                                        std::move(diagnostics), std::move(captures), std::move(camera),
+                                        std::move(options.artifact_sink));
     impl->log_startup();
     return std::unique_ptr<Context>(new Context(std::move(impl)));
 }

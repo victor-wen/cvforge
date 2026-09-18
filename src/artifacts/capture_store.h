@@ -56,6 +56,20 @@ public:
     core::Result<std::filesystem::path> save(const CaptureSaveRequest& request);
 
     /*
+     * Encodes pixels as PNG into a temporary file directly below the root and
+     * returns its absolute path. The temporary is unpublished and is ignored by
+     * retention until commit publishes it to the final sanitized name.
+     */
+    core::Result<std::filesystem::path> save_temporary(const CaptureSaveRequest& request);
+
+    /* Atomically renames a same-root temporary to the final sanitized name. */
+    core::Result<std::filesystem::path> publish_temporary(const std::filesystem::path& temporary,
+                                                          const CaptureSaveRequest& request);
+
+    /* True for names this store uses for unpublished temporaries. */
+    static bool is_temporary_capture_name(std::string_view name) noexcept;
+
+    /*
      * Non-recursive age-then-size retention over regular files only; symlinks
      * and other entry types are skipped and never followed. Returns the number
      * of deleted files. A scan or delete failure reports retention_error after

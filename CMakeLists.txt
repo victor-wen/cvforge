@@ -56,6 +56,10 @@ cvforwin_apply_sanitizers(cvforwin_core)
 
 find_package(OpenCV CONFIG REQUIRED COMPONENTS core imgcodecs imgproc)
 
+# The artifact save worker owns a std::thread, so the artifacts component links
+# the platform thread library on every build (not only test-enabled ones).
+find_package(Threads REQUIRED)
+
 add_library(cvforwin_camera STATIC
     src/camera/camera_backend.cpp
 )
@@ -278,6 +282,8 @@ cvforwin_apply_sanitizers(cvforwin_diagnostics)
 
 add_library(cvforwin_artifacts STATIC
     src/artifacts/capture_store.cpp
+    src/artifacts/capture_sink.cpp
+    src/artifacts/save_worker.cpp
 )
 add_library(cvforwin::artifacts ALIAS cvforwin_artifacts)
 
@@ -289,6 +295,7 @@ target_link_libraries(cvforwin_artifacts
     PUBLIC
         cvforwin_core
         opencv_core
+        Threads::Threads
     PRIVATE
         opencv_imgcodecs
 )
@@ -1118,6 +1125,146 @@ if(CVFORWIN_BUILD_TESTS)
     # this target is never registered in the release or any hosted no-camera
     # preset. This file only builds and registers the owner's source; it never
     # modifies it.
+
+
+    # --- independent CVF-104 runtime finalization/artifact tests (test-engineer owned)
+    #
+    # The cvf104_* sources are authored and hash-pinned by the test owner; this
+    # file only builds and registers them with CTest. The finalization,
+    # save-worker, and retention-scheduler suites are portable pure-logic tests
+    # that include only the frozen CVF-104 seam headers (runtime/finalization.h,
+    # artifacts/save_worker.h, artifacts/retention_scheduler.h). The end-to-end
+    # suite drives the runtime context through the deterministic synthetic camera
+    # override plus the frozen RuntimeOptions.artifact_sink injection point, so it
+    # links the runtime, the test backends, OpenCV imgcodecs, and Threads. The
+    # CMakeLists.txt registration is performed by the author harness under
+    # .ai/validation/ because the repository-root path is outside this session's
+    # edit policy; CMakeLists.txt is not an owned test artifact.
+
+    add_executable(cvf104_finalization_tests
+        tests/unit/cvf104_finalization_test.cpp
+    )
+    target_include_directories(cvf104_finalization_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+    )
+    target_link_libraries(cvf104_finalization_tests PRIVATE
+        cvforwin_core
+        Catch2::Catch2WithMain
+    )
+    set_target_properties(cvf104_finalization_tests PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    cvforwin_apply_test_compile_options(cvf104_finalization_tests)
+    cvforwin_apply_sanitizers(cvf104_finalization_tests)
+    catch_discover_tests(cvf104_finalization_tests)
+
+    add_executable(cvf104_worker_tests
+        tests/unit/cvf104_save_worker_test.cpp
+    )
+    target_include_directories(cvf104_worker_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+    )
+    target_link_libraries(cvf104_worker_tests PRIVATE
+        cvforwin_artifacts
+        nlohmann_json::nlohmann_json
+        opencv_core
+        opencv_imgcodecs
+        Threads::Threads
+        Catch2::Catch2WithMain
+    )
+    set_target_properties(cvf104_worker_tests PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    cvforwin_apply_test_compile_options(cvf104_worker_tests)
+    cvforwin_apply_sanitizers(cvf104_worker_tests)
+    catch_discover_tests(cvf104_worker_tests)
+
+    add_executable(cvf104_retention_tests
+        tests/unit/cvf104_retention_scheduler_test.cpp
+    )
+    target_include_directories(cvf104_retention_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+    )
+    target_link_libraries(cvf104_retention_tests PRIVATE
+        cvforwin_artifacts
+        Catch2::Catch2WithMain
+    )
+    set_target_properties(cvf104_retention_tests PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    cvforwin_apply_test_compile_options(cvf104_retention_tests)
+    cvforwin_apply_sanitizers(cvf104_retention_tests)
+    catch_discover_tests(cvf104_retention_tests)
+
+    if(CVFORWIN_BUILD_TEST_BACKENDS)
+        add_executable(cvf104_end_to_end_tests
+            tests/unit/cvf104_end_to_end_test.cpp
+        )
+        target_include_directories(cvf104_end_to_end_tests PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/src"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        )
+        target_link_libraries(cvf104_end_to_end_tests PRIVATE
+            cvforwin_runtime
+            cvforwin_test_backends
+            opencv_core
+            opencv_imgcodecs
+            Threads::Threads
+            Catch2::Catch2WithMain
+        )
+        target_compile_definitions(cvf104_end_to_end_tests PRIVATE CVFORWIN_TEST_BACKENDS_ENABLED=1)
+        set_target_properties(cvf104_end_to_end_tests PROPERTIES
+            CXX_STANDARD 20
+            CXX_STANDARD_REQUIRED ON
+            CXX_EXTENSIONS OFF
+        )
+        cvforwin_apply_test_compile_options(cvf104_end_to_end_tests)
+        cvforwin_apply_sanitizers(cvf104_end_to_end_tests)
+        catch_discover_tests(cvf104_end_to_end_tests)
+    else()
+        message(STATUS "cvforwin: cvf104_end_to_end_tests is not registered because CVFORWIN_BUILD_TEST_BACKENDS is OFF")
+    endif()
+
+    # --- developer-owned CVF-104 production sink/worker tests ---------------
+    #
+    # tests/unit/test_artifact_save_worker.cpp drives the production
+    # CaptureStoreSink and its bounded SaveWorker directly: the encode ->
+    # same-root temp -> atomic rename path, sanitized in-root names, discard on
+    # cancellation/failure, and a clean root. The independent cvf104_* suite
+    # injects its own sink double and does not exercise this production sink.
+
+    add_executable(runtime_artifact_developer_tests
+        tests/unit/test_artifact_save_worker.cpp
+    )
+    target_include_directories(runtime_artifact_developer_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+    )
+    target_link_libraries(runtime_artifact_developer_tests PRIVATE
+        cvforwin_artifacts
+        opencv_core
+        opencv_imgcodecs
+        Threads::Threads
+        Catch2::Catch2WithMain
+    )
+    set_target_properties(runtime_artifact_developer_tests PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    cvforwin_apply_project_compile_options(runtime_artifact_developer_tests)
+    cvforwin_apply_sanitizers(runtime_artifact_developer_tests)
+    catch_discover_tests(runtime_artifact_developer_tests)
 
     if(WIN32 AND CVFORWIN_BUILD_TESTS AND CVFORWIN_BUILD_TEST_BACKENDS)
         add_executable(cvf103_windows_uvc_tests

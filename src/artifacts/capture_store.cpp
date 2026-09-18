@@ -16,6 +16,8 @@
 
 #include <opencv2/imgcodecs.hpp>
 
+#include <atomic>
+
 #include "core/error.h"
 
 namespace cvforwin::artifacts {
@@ -25,6 +27,7 @@ namespace {
 constexpr std::size_t k_max_identifier_bytes = 64;
 constexpr std::string_view k_unnamed_identifier = "unnamed";
 constexpr std::string_view k_png_extension = ".png";
+constexpr std::string_view k_temporary_prefix = ".cvftmp_";
 
 core::Failure artifacts_failure(core::ErrorCode code, std::string message)
 {
@@ -93,6 +96,42 @@ std::string capture_filename(const CaptureSaveRequest& request)
 {
     return utc_stamp() + "_" + sanitize_identifier(request.recipe_id) + "_" +
            sanitize_identifier(request.request_id) + "_" + std::to_string(request.sequence) + ".png";
+}
+
+core::Result<std::vector<unsigned char>> encode_png(const cv::Mat& pixels)
+{
+    std::vector<unsigned char> encoded;
+    try {
+        if (pixels.empty() ||
+            !cv::imencode(std::string(k_png_extension), pixels, encoded) || encoded.empty()) {
+            return artifacts_failure(core::ErrorCode::image_encode_error,
+                                     "capture frame could not be encoded as PNG");
+        }
+    } catch (const std::exception&) {
+        return artifacts_failure(core::ErrorCode::image_encode_error,
+                                 "capture frame could not be encoded as PNG");
+    }
+    return encoded;
+}
+
+core::Result<void> write_png_file(const std::filesystem::path& target,
+                                  const std::vector<unsigned char>& encoded)
+{
+    std::ofstream stream(target, std::ios::binary | std::ios::trunc);
+    if (!stream.is_open()) {
+        return artifacts_failure(core::ErrorCode::image_write_error,
+                                 "capture PNG could not be written: " + target.string());
+    }
+    stream.write(reinterpret_cast<const char*>(encoded.data()),
+                 static_cast<std::streamsize>(encoded.size()));
+    stream.close();
+    if (!stream) {
+        std::error_code ignored;
+        std::filesystem::remove(target, ignored);
+        return artifacts_failure(core::ErrorCode::image_write_error,
+                                 "capture PNG could not be written: " + target.string());
+    }
+    return core::Result<void>{};
 }
 
 /* Drops a trailing separator so the returned path's parent is the root itself. */
@@ -164,34 +203,52 @@ core::Result<std::filesystem::path> CaptureStore::save(const CaptureSaveRequest&
 {
     const std::filesystem::path target = root_ / capture_filename(request);
 
-    std::vector<unsigned char> encoded;
-    try {
-        if (request.pixels.empty() ||
-            !cv::imencode(std::string(k_png_extension), request.pixels, encoded) || encoded.empty()) {
-            return artifacts_failure(core::ErrorCode::image_encode_error,
-                                     "capture frame could not be encoded as PNG");
-        }
-    } catch (const std::exception&) {
-        return artifacts_failure(core::ErrorCode::image_encode_error,
-                                 "capture frame could not be encoded as PNG");
+    core::Result<std::vector<unsigned char>> encoded = encode_png(request.pixels);
+    if (!encoded.has_value()) {
+        return encoded.failure();
     }
-
-    std::ofstream stream(target, std::ios::binary | std::ios::trunc);
-    if (!stream.is_open()) {
-        return artifacts_failure(core::ErrorCode::image_write_error,
-                                 "capture PNG could not be written: " + target.string());
+    core::Result<void> written = write_png_file(target, encoded.value());
+    if (!written.has_value()) {
+        return written.failure();
     }
-    stream.write(reinterpret_cast<const char*>(encoded.data()),
-                 static_cast<std::streamsize>(encoded.size()));
-    stream.close();
-    if (!stream) {
-        std::error_code ignored;
-        std::filesystem::remove(target, ignored);
-        return artifacts_failure(core::ErrorCode::image_write_error,
-                                 "capture PNG could not be written: " + target.string());
-    }
-
     return target;
+}
+
+core::Result<std::filesystem::path> CaptureStore::save_temporary(const CaptureSaveRequest& request)
+{
+    static std::atomic<std::uint64_t> temporary_counter{0};
+    const std::uint64_t serial = temporary_counter.fetch_add(1, std::memory_order_relaxed);
+    const std::filesystem::path target =
+        root_ / (std::string(k_temporary_prefix) + utc_stamp() + "_" + std::to_string(serial) + ".part");
+
+    core::Result<std::vector<unsigned char>> encoded = encode_png(request.pixels);
+    if (!encoded.has_value()) {
+        return encoded.failure();
+    }
+    core::Result<void> written = write_png_file(target, encoded.value());
+    if (!written.has_value()) {
+        return written.failure();
+    }
+    return target;
+}
+
+core::Result<std::filesystem::path> CaptureStore::publish_temporary(
+    const std::filesystem::path& temporary, const CaptureSaveRequest& request)
+{
+    const std::filesystem::path target = root_ / capture_filename(request);
+    std::error_code error;
+    std::filesystem::rename(temporary, target, error);
+    if (error) {
+        return artifacts_failure(core::ErrorCode::image_write_error,
+                                 "temporary capture could not be published: " + temporary.string());
+    }
+    return target;
+}
+
+bool CaptureStore::is_temporary_capture_name(std::string_view name) noexcept
+{
+    return name.size() >= k_temporary_prefix.size() &&
+           name.compare(0, k_temporary_prefix.size(), k_temporary_prefix) == 0;
 }
 
 core::Result<std::uint32_t> CaptureStore::enforce_retention(const std::filesystem::path& captures_root,
@@ -214,6 +271,14 @@ core::Result<std::uint32_t> CaptureStore::enforce_retention(const std::filesyste
             return retention_failure("cannot inspect captures entry: " + entry.path().string());
         }
         if (std::filesystem::is_regular_file(link_status)) {
+            if (is_temporary_capture_name(entry.path().filename().string())) {
+                iterator.increment(error);
+                if (error) {
+                    return retention_failure("cannot continue scanning captures root: " +
+                                             captures_root.string());
+                }
+                continue;
+            }
             const std::uintmax_t size = entry.file_size(error);
             if (error) {
                 return retention_failure("cannot size captures entry: " + entry.path().string());
