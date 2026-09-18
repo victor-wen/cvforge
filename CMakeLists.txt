@@ -942,6 +942,93 @@ if(CVFORWIN_BUILD_TESTS)
     cvforwin_apply_sanitizers(uvc_worker_snapshot_developer_tests)
     catch_discover_tests(uvc_worker_snapshot_developer_tests)
 
+    # --- developer-owned CVF-103 stream-generation / callback-snapshot tests -
+    #
+    # tests/unit/uvc_stream_generation_test.cpp exercises the portable gate
+    # src/camera/uvc_windows/uvc_stream_generation.h: strictly increasing
+    # per-stream generations, exact-equality acceptance, stale rejection
+    # counting, and concurrent begin/retire/accepts. The header has no Windows
+    # API, Media Foundation, or OpenCV dependency, so this target builds and
+    # runs on the portable Linux host.
+    #
+    # tests/unit/uvc_callback_snapshot_test.cpp is an empty TU off Windows and
+    # drives the real UvcCameraBackend::callback_snapshot() seam on Windows.
+    # The independent cvf103_generation_tests / cvf103_windows_uvc_tests
+    # targets remain owned by the test owner.
+
+    add_executable(uvc_stream_generation_developer_tests
+        tests/unit/uvc_stream_generation_test.cpp
+    )
+    target_include_directories(uvc_stream_generation_developer_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+    )
+    target_link_libraries(uvc_stream_generation_developer_tests PRIVATE
+        Threads::Threads
+        Catch2::Catch2WithMain
+    )
+    set_target_properties(uvc_stream_generation_developer_tests PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    cvforwin_apply_project_compile_options(uvc_stream_generation_developer_tests)
+    cvforwin_apply_sanitizers(uvc_stream_generation_developer_tests)
+    catch_discover_tests(uvc_stream_generation_developer_tests)
+
+    add_executable(uvc_callback_snapshot_developer_tests
+        tests/unit/uvc_callback_snapshot_test.cpp
+    )
+    target_include_directories(uvc_callback_snapshot_developer_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+    )
+    target_link_libraries(uvc_callback_snapshot_developer_tests PRIVATE
+        Catch2::Catch2WithMain
+    )
+    if(WIN32)
+        target_link_libraries(uvc_callback_snapshot_developer_tests PRIVATE cvforwin_uvc_windows)
+    endif()
+    set_target_properties(uvc_callback_snapshot_developer_tests PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    cvforwin_apply_project_compile_options(uvc_callback_snapshot_developer_tests)
+    cvforwin_apply_sanitizers(uvc_callback_snapshot_developer_tests)
+    catch_discover_tests(uvc_callback_snapshot_developer_tests)
+
+    # --- independent CVF-103 portable stream-generation gate tests ----------
+    #
+    # tests/unit/cvf103_stream_generation_test.cpp is authored and hash-pinned
+    # by the test owner. It includes only the frozen portable seam header
+    # src/camera/uvc_windows/uvc_stream_generation.h (pure logic; no Windows
+    # API, Media Foundation, or OpenCV dependency) and drives
+    # cvforwin::camera::uvc::StreamGenerationGate. The target builds and runs on
+    # the portable Linux host, so the stream-generation contract is covered by
+    # the canonical portable suite. This file only builds and registers the
+    # owner's source; it never modifies it.
+
+    add_executable(cvf103_generation_tests
+        tests/unit/cvf103_stream_generation_test.cpp
+    )
+    target_include_directories(cvf103_generation_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+    )
+    target_link_libraries(cvf103_generation_tests PRIVATE
+        Catch2::Catch2WithMain
+    )
+    set_target_properties(cvf103_generation_tests PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    cvforwin_apply_project_compile_options(cvf103_generation_tests)
+    cvforwin_apply_sanitizers(cvf103_generation_tests)
+    catch_discover_tests(cvf103_generation_tests)
+
+
     # --- independent CVF-101 Windows UVC 2D-buffer component tests -----------
     #
     # tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp is authored and
@@ -1015,6 +1102,44 @@ if(CVFORWIN_BUILD_TESTS)
         cvforwin_apply_sanitizers(cvf102_windows_uvc_tests)
         catch_discover_tests(cvf102_windows_uvc_tests)
     endif()
+
+    # --- independent CVF-103 Windows UVC callback-generation component tests -
+    #
+    # tests/windows/uvc/cvf103_uvc_callback_snapshot_test.cpp is authored and
+    # hash-pinned by the test owner. It includes only frozen headers
+    # (camera/camera_backend.h, camera/uvc_windows/uvc_backend.h, core/*.h) and
+    # drives the frozen UvcCameraBackend::callback_snapshot() seam plus the
+    # ICameraBackend contract with absent selectors and failing opens; no
+    # camera, Media Foundation object, or device is used, and no production
+    # .cpp is read. catch_discover_tests registers the cases with CTest via
+    # add_test, so the windows-tests-quality workflow runs them. The gate is
+    # WIN32 + CVFORWIN_BUILD_TESTS + CVFORWIN_BUILD_TEST_BACKENDS: the release
+    # preset sets CVFORWIN_BUILD_TESTS=ON but keeps the test backends OFF, so
+    # this target is never registered in the release or any hosted no-camera
+    # preset. This file only builds and registers the owner's source; it never
+    # modifies it.
+
+    if(WIN32 AND CVFORWIN_BUILD_TESTS AND CVFORWIN_BUILD_TEST_BACKENDS)
+        add_executable(cvf103_windows_uvc_tests
+            tests/windows/uvc/cvf103_uvc_callback_snapshot_test.cpp
+        )
+        target_include_directories(cvf103_windows_uvc_tests PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        )
+        target_link_libraries(cvf103_windows_uvc_tests PRIVATE
+            cvforwin_uvc_windows
+            opencv_core
+            Catch2::Catch2WithMain
+        )
+        set_target_properties(cvf103_windows_uvc_tests PROPERTIES
+            CXX_STANDARD 20
+            CXX_STANDARD_REQUIRED ON
+            CXX_EXTENSIONS OFF
+        )
+        cvforwin_apply_test_compile_options(cvf103_windows_uvc_tests)
+        cvforwin_apply_sanitizers(cvf103_windows_uvc_tests)
+        catch_discover_tests(cvf103_windows_uvc_tests)
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------
@@ -1048,6 +1173,7 @@ if(CVFORWIN_BUILD_HARDWARE_TESTS)
     else()
         message(STATUS "cvforwin: CVFORWIN_BUILD_HARDWARE_TESTS is ignored on non-Windows builds")
     endif()
+
 endif()
 
 # ---------------------------------------------------------------------------

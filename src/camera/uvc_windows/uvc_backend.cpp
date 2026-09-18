@@ -29,6 +29,7 @@
 #include "camera/uvc_windows/uvc_command_worker.h"
 #include "camera/uvc_windows/uvc_frame_convert.h"
 #include "camera/uvc_windows/uvc_frame_math.h"
+#include "camera/uvc_windows/uvc_stream_generation.h"
 
 #include <algorithm>
 #include <atomic>
@@ -646,13 +647,32 @@ core::Result<cv::Mat> convert_locked_to_bgr8(const BYTE* data, LONG stride, bool
  * ------------------------------------------------------------------------- */
 
 /*
+ * Shared, reference-counted stream-generation state. The backend and every
+ * callback it hands to Media Foundation own a reference, so a late callback
+ * from a retired SourceReader always consults live state and never a dangling
+ * pointer to a destroyed backend. StreamGenerationGate is internally
+ * synchronized, so accepts()/discard_stale() are safe on Media Foundation
+ * work-queue threads while begin_stream()/retire() run on the owned worker.
+ */
+struct StreamGenerationState {
+    uvc::StreamGenerationGate gate;
+    std::atomic<std::uint64_t> callbacks_created{0};
+};
+
+/*
  * Carries exactly one completed read or flush to the waiting capture call.
  * Media Foundation may invoke the callback from any thread, so every field is
  * guarded by the mutex and the waiter is woken through the condition variable.
+ * Each callback belongs to exactly one SourceReader and carries that stream's
+ * immutable generation; an event from a retired generation is counted as stale
+ * and never touches the completion state, so it cannot satisfy a replacement.
  */
 class ReadCallback final : public IMFSourceReaderCallback {
 public:
-    ReadCallback() = default;
+    ReadCallback(std::shared_ptr<StreamGenerationState> generation_state, std::uint64_t generation)
+        : generation_state_(std::move(generation_state)), generation_(generation)
+    {
+    }
     /*
      * IMFSourceReaderCallback is a COM interface: IUnknown has no virtual
      * destructor, so an override specifier here is invalid (MSVC C3668).
@@ -693,6 +713,15 @@ public:
     HRESULT STDMETHODCALLTYPE OnReadSample(HRESULT status, DWORD /*stream_index*/, DWORD stream_flags,
                                            LONGLONG /*timestamp*/, IMFSample* sample) override
     {
+        /*
+         * A retired callback never writes completion state: the gate check
+         * precedes every field, so the rejected event can neither produce a
+         * frame nor falsely satisfy the capture waiter.
+         */
+        if (!generation_state_->gate.accepts(generation_)) {
+            generation_state_->gate.discard_stale(generation_);
+            return S_OK;
+        }
         {
             std::lock_guard<std::mutex> lock(mutex_);
             read_status_ = status;
@@ -706,6 +735,11 @@ public:
 
     HRESULT STDMETHODCALLTYPE OnFlush(DWORD /*stream_index*/) override
     {
+        /* A stale flush completion must never report a false flush success. */
+        if (!generation_state_->gate.accepts(generation_)) {
+            generation_state_->gate.discard_stale(generation_);
+            return S_OK;
+        }
         {
             std::lock_guard<std::mutex> lock(mutex_);
             flush_completed_ = true;
@@ -717,6 +751,12 @@ public:
     HRESULT STDMETHODCALLTYPE OnEvent(DWORD /*stream_index*/, IMFMediaEvent* /*event*/) override
     {
         return S_OK;
+    }
+
+    /* Immutable generation of the SourceReader that owns this callback. */
+    std::uint64_t generation() const noexcept
+    {
+        return generation_;
     }
 
     std::mutex& mutex() noexcept
@@ -769,6 +809,8 @@ public:
     }
 
 private:
+    std::shared_ptr<StreamGenerationState> generation_state_;
+    const std::uint64_t generation_;
     std::atomic<ULONG> references_{1};
     std::mutex mutex_;
     std::condition_variable condition_;
@@ -971,6 +1013,21 @@ public:
         return value;
     }
 
+    /*
+     * Read-only callback diagnostics. Every value comes from the shared,
+     * internally synchronized generation state, so this is safe from any host
+     * thread at any time and never touches a Media Foundation object.
+     */
+    UvcCallbackSnapshot callback_snapshot() const noexcept
+    {
+        UvcCallbackSnapshot value;
+        value.active_generation = generation_state_->gate.active_generation();
+        value.callbacks_created = generation_state_->callbacks_created.load(std::memory_order_relaxed);
+        value.stale_events_discarded = generation_state_->gate.stale_events_discarded();
+        value.stream_open = stream_open_.load(std::memory_order_relaxed);
+        return value;
+    }
+
 private:
     struct Enumeration {
         std::vector<CameraDescriptor> descriptors;
@@ -1023,8 +1080,6 @@ private:
     void teardown_worker() noexcept
     {
         teardown_stream();
-        /* The callback holds the last sample; release it on the worker too. */
-        callback_.reset();
         if (mf_started_) {
             MFShutdown();
             mf_started_ = false;
@@ -1060,8 +1115,16 @@ private:
 
     void teardown_stream() noexcept
     {
+        /*
+         * Retire the generation before releasing the reader/source/callback so a
+         * delayed event from this stream can never satisfy a replacement: once
+         * retired, every further callback for it is stale and discarded.
+         */
+        generation_state_->gate.retire();
+        stream_open_.store(false, std::memory_order_relaxed);
         reader_.reset();
         source_.reset();
+        callback_.reset();
         open_ = false;
         needs_reconnect_ = false;
         output_subtype_ = GUID_NULL;
@@ -1189,9 +1252,15 @@ private:
                                       "the camera activation deadline expired before the source reader was created");
         }
 
-        if (!callback_) {
-            callback_.reset(new ReadCallback());
-        }
+        /*
+         * A fresh callback object with a fresh monotonic generation for every
+         * started stream; one callback instance is never reused by a different
+         * SourceReader, so a retired reader's late event cannot mutate the
+         * completion state of its replacement.
+         */
+        const std::uint64_t generation = generation_state_->gate.begin_stream();
+        callback_.reset(new ReadCallback(generation_state_, generation));
+        generation_state_->callbacks_created.fetch_add(1, std::memory_order_relaxed);
         ComPtr<IMFAttributes> attributes;
         result = MFCreateAttributes(attributes.put(), 2);
         if (FAILED(result)) {
@@ -1216,10 +1285,10 @@ private:
         source_ = std::move(source);
         const core::Result<void> selected = select_format(settings, deadline);
         if (!selected.has_value()) {
-            reader_.reset();
-            source_.reset();
+            teardown_stream();
             return selected.failure();
         }
+        stream_open_.store(true, std::memory_order_relaxed);
         return {};
     }
 
@@ -1384,10 +1453,20 @@ private:
                                   "the UVC stream needs a reconnect before the next capture");
         }
 
+        /*
+         * Hold the stream's callback for the whole capture so its lifetime is
+         * independent of the member pointer, and read its immutable generation.
+         * A completion satisfies the waiter only while that generation is still
+         * the gate's active generation.
+         */
+        ComPtr<ReadCallback> callback;
+        callback.copy_from(callback_.get());
+        const std::uint64_t generation = callback->generation();
+
         while (true) {
             {
-                std::lock_guard<std::mutex> lock(callback_->mutex());
-                callback_->begin_read();
+                std::lock_guard<std::mutex> lock(callback->mutex());
+                callback->begin_read();
             }
             const HRESULT issued =
                 reader_->ReadSample(static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM), 0, nullptr, nullptr,
@@ -1397,22 +1476,23 @@ private:
                 return hresult_failure("IMFSourceReader::ReadSample", issued, core::ErrorCode::capture_failed);
             }
 
-            std::unique_lock<std::mutex> lock(callback_->mutex());
-            const bool completed = callback_->condition().wait_for(
-                lock, deadline.remaining(), [this] { return callback_->read_completed(); });
+            std::unique_lock<std::mutex> lock(callback->mutex());
+            const bool completed = callback->condition().wait_for(lock, deadline.remaining(), [this, &callback, generation] {
+                return callback->read_completed() && generation_state_->gate.accepts(generation);
+            });
             if (!completed) {
                 lock.unlock();
-                if (!cancel_pending_read(deadline)) {
+                if (!cancel_pending_read(deadline, callback.get(), generation)) {
                     needs_reconnect_ = true;
                 }
                 return core::make_failure(core::Status::timeout, core::ErrorCode::capture_timed_out,
                                           "the capture deadline expired before a Media Foundation sample arrived");
             }
 
-            const HRESULT sample_status = callback_->read_status();
-            const DWORD sample_flags = callback_->read_flags();
+            const HRESULT sample_status = callback->read_status();
+            const DWORD sample_flags = callback->read_flags();
             ComPtr<IMFSample> sample;
-            sample.copy_from(callback_->read_sample());
+            sample.copy_from(callback->read_sample());
             lock.unlock();
 
             if (FAILED(sample_status)) {
@@ -1462,11 +1542,11 @@ private:
      * the stream is marked for a reconnect instead of being reused in an unknown
      * state; a late completion is cleared so it cannot leak into the next read.
      */
-    bool cancel_pending_read(const core::Deadline& deadline)
+    bool cancel_pending_read(const core::Deadline& deadline, ReadCallback* callback, std::uint64_t generation)
     {
         {
-            std::lock_guard<std::mutex> lock(callback_->mutex());
-            callback_->begin_flush();
+            std::lock_guard<std::mutex> lock(callback->mutex());
+            callback->begin_flush();
         }
         const HRESULT result =
             reader_->Flush(static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM));
@@ -1475,16 +1555,16 @@ private:
         }
         const std::chrono::milliseconds budget = std::min(k_flush_grace, deadline.remaining());
         if (budget <= std::chrono::milliseconds::zero()) {
-            std::lock_guard<std::mutex> lock(callback_->mutex());
-            callback_->begin_read();
+            std::lock_guard<std::mutex> lock(callback->mutex());
+            callback->begin_read();
             return false;
         }
-        std::unique_lock<std::mutex> lock(callback_->mutex());
-        const bool flushed = callback_->condition().wait_for(lock, budget, [this] {
-            return callback_->flush_completed();
+        std::unique_lock<std::mutex> lock(callback->mutex());
+        const bool flushed = callback->condition().wait_for(lock, budget, [this, callback, generation] {
+            return callback->flush_completed() && generation_state_->gate.accepts(generation);
         });
         /* A late completion from the cancelled read must not leak into the next capture. */
-        callback_->begin_read();
+        callback->begin_read();
         return flushed;
     }
 
@@ -1551,6 +1631,13 @@ private:
 
     /* The dedicated worker that owns COM, Media Foundation, and every held interface. */
     uvc::CommandWorker worker_;
+    /*
+     * Shared with every ReadCallback so a callback kept alive by a Media
+     * Foundation work-queue thread consults live state without a raw pointer to
+     * this backend. Created once and never replaced, so callback_snapshot() can
+     * read it from any host thread.
+     */
+    std::shared_ptr<StreamGenerationState> generation_state_{std::make_shared<StreamGenerationState>()};
     std::atomic<std::uint64_t> com_init_count_{0};
     std::atomic<std::uint64_t> com_uninit_count_{0};
     std::atomic<std::uint64_t> mf_startup_count_{0};
@@ -1571,6 +1658,8 @@ private:
     std::uint64_t sequence_ = 0;
     bool open_ = false;
     bool needs_reconnect_ = false;
+    /* Cross-thread mirror of open_ for callback_snapshot(); worker writes only. */
+    std::atomic<bool> stream_open_{false};
 };
 
 UvcCameraBackend::UvcCameraBackend()
@@ -1614,6 +1703,11 @@ void UvcCameraBackend::close() noexcept
 UvcWorkerSnapshot UvcCameraBackend::worker_snapshot() const noexcept
 {
     return impl_->snapshot();
+}
+
+UvcCallbackSnapshot UvcCameraBackend::callback_snapshot() const noexcept
+{
+    return impl_->callback_snapshot();
 }
 
 }  // namespace cvforwin::camera

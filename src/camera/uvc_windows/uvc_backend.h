@@ -50,6 +50,21 @@ struct UvcWorkerSnapshot {
     bool worker_running = false;
 };
 
+/*
+ * Internal per-stream callback diagnostics for the Windows UVC backend. A
+ * retired SourceReader's late completion can never satisfy a replacement
+ * stream because every started stream owns a fresh callback tagged with a
+ * strictly greater generation, and a completion is applied only while the
+ * generation gate still accepts it. Every field is observable through
+ * callback_snapshot() and is not part of ICameraBackend or the public C ABI.
+ */
+struct UvcCallbackSnapshot {
+    std::uint64_t active_generation = 0; /* 0 when no stream is active */
+    std::uint64_t callbacks_created = 0; /* fresh callback per started stream */
+    std::uint64_t stale_events_discarded = 0; /* completions rejected by generation */
+    bool stream_open = false; /* a SourceReader is currently open */
+};
+
 class UvcCameraBackend final : public ICameraBackend {
 public:
     UvcCameraBackend();
@@ -103,6 +118,13 @@ public:
      * absent from ICameraBackend. Safe to call from any thread at any time.
      */
     UvcWorkerSnapshot worker_snapshot() const noexcept;
+
+    /*
+     * Windows-only internal per-stream callback diagnostics; never exposed
+     * through the C ABI. Safe to call from any thread, including one that never
+     * initialized COM, while the owned worker is running.
+     */
+    UvcCallbackSnapshot callback_snapshot() const noexcept;
 
 private:
     class Impl;
