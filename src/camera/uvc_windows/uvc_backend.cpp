@@ -26,6 +26,7 @@
 
 #include "camera/uvc_windows/uvc_backend.h"
 
+#include "camera/uvc_windows/uvc_command_worker.h"
 #include "camera/uvc_windows/uvc_frame_convert.h"
 #include "camera/uvc_windows/uvc_frame_math.h"
 
@@ -38,6 +39,7 @@
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -69,6 +71,8 @@ constexpr std::string_view k_backend_key = "uvc";
 constexpr std::uint32_t k_max_frame_dimension = 16384;
 constexpr DWORD k_max_native_types = 256;
 constexpr std::chrono::milliseconds k_flush_grace{1000};
+/* Construction/startup budget; the worker resolves COM/MF startup within it. */
+constexpr std::uint32_t k_worker_start_timeout_ms = 30000;
 
 /* ---------------------------------------------------------------------------
  * Minimal RAII COM pointer.
@@ -638,73 +642,6 @@ core::Result<cv::Mat> convert_locked_to_bgr8(const BYTE* data, LONG stride, bool
 }
 
 /* ---------------------------------------------------------------------------
- * COM and Media Foundation lifetime.
- * ------------------------------------------------------------------------- */
-
-class ComApartment {
-public:
-    ComApartment() noexcept
-    {
-        const HRESULT result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-        initialized_ = SUCCEEDED(result);
-    }
-
-    ~ComApartment()
-    {
-        if (initialized_) {
-            CoUninitialize();
-        }
-    }
-
-    ComApartment(const ComApartment&) = delete;
-    ComApartment& operator=(const ComApartment&) = delete;
-
-private:
-    bool initialized_ = false;
-};
-
-class MediaFoundationSession {
-public:
-    MediaFoundationSession() noexcept = default;
-    ~MediaFoundationSession()
-    {
-        stop();
-    }
-
-    MediaFoundationSession(const MediaFoundationSession&) = delete;
-    MediaFoundationSession& operator=(const MediaFoundationSession&) = delete;
-
-    HRESULT start() noexcept
-    {
-        if (started_) {
-            return S_OK;
-        }
-        const HRESULT result = MFStartup(MF_VERSION, MFSTARTUP_LITE);
-        if (SUCCEEDED(result)) {
-            started_ = true;
-        }
-        return result;
-    }
-
-    void stop() noexcept
-    {
-        if (!started_) {
-            return;
-        }
-        MFShutdown();
-        started_ = false;
-    }
-
-    bool active() const noexcept
-    {
-        return started_;
-    }
-
-private:
-    bool started_ = false;
-};
-
-/* ---------------------------------------------------------------------------
  * Asynchronous source-reader callback.
  * ------------------------------------------------------------------------- */
 
@@ -850,7 +787,17 @@ private:
 
 class UvcCameraBackend::Impl {
 public:
-    Impl() = default;
+    /*
+     * The backend owns one worker for its whole lifetime. The constructor asks
+     * the worker to initialize COM as MTA and run one MFStartup; a failed
+     * startup leaves no running worker and the balanced teardown below runs on
+     * the worker before it exits. Construction never touches the caller's
+     * apartment.
+     */
+    Impl()
+    {
+        (void)worker_.start(core::Deadline::from_timeout_ms(k_worker_start_timeout_ms), [this] { return startup_worker(); }, [this] { teardown_worker(); });
+    }
 
     ~Impl()
     {
@@ -862,95 +809,166 @@ public:
 
     core::Result<std::vector<CameraDescriptor>> enumerate(const core::Deadline& deadline)
     {
-        try {
-            if (deadline.expired()) {
-                return core::make_failure(core::Status::timeout, core::ErrorCode::deadline_expired,
-                                          "the camera enumeration deadline expired before enumeration started");
-            }
-            core::Result<Enumeration> enumerated = enumerate_devices();
-            if (!enumerated.has_value()) {
-                return enumerated.failure();
-            }
-            Enumeration devices = std::move(enumerated).value();
-            return std::move(devices.descriptors);
-        } catch (const std::exception&) {
-            return internal_failure();
-        } catch (...) {
-            return internal_failure();
+        record_caller();
+        if (!worker_.running()) {
+            return worker_unavailable_failure("the camera enumeration worker is not running");
         }
+        if (deadline.expired()) {
+            return core::make_failure(core::Status::timeout, core::ErrorCode::deadline_expired,
+                                      "the camera enumeration deadline expired before enumeration started");
+        }
+        auto outcome = std::make_shared<core::Result<std::vector<CameraDescriptor>>>(placeholder<std::vector<CameraDescriptor>>());
+        const uvc::CommandWorker::SubmitState state = worker_.submit(deadline, [this, outcome] {
+            try {
+                core::Result<Enumeration> enumerated = enumerate_devices();
+                if (!enumerated.has_value()) {
+                    *outcome = enumerated.failure();
+                    return;
+                }
+                Enumeration devices = std::move(enumerated).value();
+                *outcome = std::move(devices.descriptors);
+            } catch (const std::exception&) {
+                *outcome = internal_failure();
+            } catch (...) {
+                *outcome = internal_failure();
+            }
+        });
+        return finalize(outcome, state, core::ErrorCode::deadline_expired,
+                        "the camera enumeration deadline expired before enumeration completed");
     }
 
     core::Result<void> open(const CameraDescriptor& descriptor, const CameraSettings& settings,
                             const core::Deadline& deadline)
     {
-        try {
-            teardown_stream();
-            if (deadline.expired()) {
-                return core::make_failure(core::Status::timeout, core::ErrorCode::deadline_expired,
-                                          "the camera open deadline expired before the device was activated");
-            }
-            const core::Result<void> activated = activate(descriptor, settings, deadline, false);
-            if (!activated.has_value()) {
-                close();
-                return activated.failure();
-            }
-            return {};
-        } catch (const std::exception&) {
-            close();
-            return internal_failure();
-        } catch (...) {
-            close();
-            return internal_failure();
+        record_caller();
+        if (!worker_.running()) {
+            return worker_unavailable_failure("the camera open worker is not running");
         }
+        if (deadline.expired()) {
+            return core::make_failure(core::Status::timeout, core::ErrorCode::deadline_expired,
+                                      "the camera open deadline expired before the device was activated");
+        }
+        auto outcome = std::make_shared<core::Result<void>>(placeholder<void>());
+        const uvc::CommandWorker::SubmitState state = worker_.submit(deadline, [this, descriptor, settings, outcome, deadline] {
+            try {
+                teardown_stream();
+                if (deadline.expired()) {
+                    *outcome = core::make_failure(core::Status::timeout, core::ErrorCode::deadline_expired,
+                                                  "the camera open deadline expired before the device was activated");
+                    return;
+                }
+                const core::Result<void> activated = activate(descriptor, settings, deadline, false);
+                if (!activated.has_value()) {
+                    /* Release any partial Media Foundation objects on the worker. */
+                    teardown_stream();
+                    *outcome = activated.failure();
+                    return;
+                }
+                *outcome = core::Result<void>{};
+            } catch (const std::exception&) {
+                teardown_stream();
+                *outcome = internal_failure();
+            } catch (...) {
+                teardown_stream();
+                *outcome = internal_failure();
+            }
+        });
+        return finalize(outcome, state, core::ErrorCode::deadline_expired,
+                        "the camera open deadline expired before the device was activated");
     }
 
     core::Result<CapturedFrame> capture(const core::Deadline& deadline)
     {
-        try {
-            return capture_or_failure(deadline);
-        } catch (const std::exception&) {
-            return internal_failure();
-        } catch (...) {
-            return internal_failure();
+        record_caller();
+        if (!worker_.running()) {
+            return worker_unavailable_failure("the camera capture worker is not running");
         }
+        if (deadline.expired()) {
+            return core::make_failure(core::Status::timeout, core::ErrorCode::capture_timed_out,
+                                      "the capture deadline expired before the frame request was issued");
+        }
+        auto outcome = std::make_shared<core::Result<CapturedFrame>>(placeholder<CapturedFrame>());
+        const uvc::CommandWorker::SubmitState state = worker_.submit(deadline, [this, outcome, deadline] {
+            try {
+                *outcome = capture_or_failure(deadline);
+            } catch (const std::exception&) {
+                *outcome = internal_failure();
+            } catch (...) {
+                *outcome = internal_failure();
+            }
+        });
+        return finalize(outcome, state, core::ErrorCode::capture_timed_out,
+                        "the capture deadline expired before the frame request completed");
     }
 
     core::Result<void> reconnect(const CameraSettings& settings, const core::Deadline& deadline)
     {
-        try {
-            if (!has_identity()) {
-                return camera_failure(core::ErrorCode::camera_not_open,
-                                      "the UVC camera has never been opened, so there is nothing to reconnect");
-            }
-            if (deadline.expired()) {
-                return core::make_failure(core::Status::timeout, core::ErrorCode::deadline_expired,
-                                          "the camera reconnect deadline expired before the device was re-activated");
-            }
-            const CameraDescriptor descriptor = descriptor_;
-            teardown_stream();
-            const core::Result<void> activated = activate(descriptor, settings, deadline, true);
-            if (!activated.has_value()) {
-                close();
-                return activated.failure();
-            }
-            return {};
-        } catch (const std::exception&) {
-            close();
-            return internal_failure();
-        } catch (...) {
-            close();
-            return internal_failure();
+        record_caller();
+        if (!worker_.running()) {
+            return worker_unavailable_failure("the camera reconnect worker is not running");
         }
+        if (deadline.expired()) {
+            return core::make_failure(core::Status::timeout, core::ErrorCode::deadline_expired,
+                                      "the camera reconnect deadline expired before the device was re-activated");
+        }
+        auto outcome = std::make_shared<core::Result<void>>(placeholder<void>());
+        const uvc::CommandWorker::SubmitState state =
+            worker_.submit(deadline, [this, settings, outcome, deadline] {
+                try {
+                    if (!has_identity()) {
+                        *outcome = camera_failure(core::ErrorCode::camera_not_open,
+                                                  "the UVC camera has never been opened, so there is nothing to reconnect");
+                        return;
+                    }
+                    const CameraDescriptor descriptor = descriptor_;
+                    teardown_stream();
+                    if (deadline.expired()) {
+                        *outcome = core::make_failure(core::Status::timeout, core::ErrorCode::deadline_expired,
+                                                      "the camera reconnect deadline expired before the device was re-activated");
+                        return;
+                    }
+                    const core::Result<void> activated = activate(descriptor, settings, deadline, true);
+                    if (!activated.has_value()) {
+                        teardown_stream();
+                        *outcome = activated.failure();
+                        return;
+                    }
+                    *outcome = core::Result<void>{};
+                } catch (const std::exception&) {
+                    teardown_stream();
+                    *outcome = internal_failure();
+                } catch (...) {
+                    teardown_stream();
+                    *outcome = internal_failure();
+                }
+            });
+        return finalize(outcome, state, core::ErrorCode::deadline_expired,
+                        "the camera reconnect deadline expired before the device was re-activated");
     }
 
+    /*
+     * Idempotent, safe on a never-opened backend and from any host thread.
+     * Stream references are released on the worker, then MFShutdown and
+     * CoUninitialize run in reverse order on the worker before it is joined.
+     */
     void close() noexcept
     {
-        teardown_stream();
-        if (mf_.active()) {
-            ComApartment apartment;
-            mf_.stop();
-        }
+        worker_.stop_and_join();
         sequence_ = 0;
+    }
+
+    UvcWorkerSnapshot snapshot() const noexcept
+    {
+        UvcWorkerSnapshot value;
+        value.com_init_count = com_init_count_.load(std::memory_order_relaxed);
+        value.com_uninit_count = com_uninit_count_.load(std::memory_order_relaxed);
+        value.mf_startup_count = mf_startup_count_.load(std::memory_order_relaxed);
+        value.mf_shutdown_count = mf_shutdown_count_.load(std::memory_order_relaxed);
+        value.commands_marshalled = worker_.commands_executed();
+        value.worker_thread_id = worker_thread_id_.load(std::memory_order_relaxed);
+        value.last_caller_thread_id = last_caller_thread_id_.load(std::memory_order_relaxed);
+        value.worker_running = worker_.running();
+        return value;
     }
 
 private:
@@ -958,6 +976,81 @@ private:
         std::vector<CameraDescriptor> descriptors;
         std::vector<ComPtr<IMFActivate>> activations;
     };
+
+    /* A placeholder failure that is observable only when a command never ran. */
+    template <typename T>
+    static core::Result<T> placeholder()
+    {
+        return core::make_failure(core::Status::internal_error, core::ErrorCode::internal_unexpected,
+                                  "the Media Foundation worker did not complete the command");
+    }
+
+    static core::Failure worker_unavailable_failure(std::string message)
+    {
+        return core::make_failure(core::Status::camera_io, core::ErrorCode::capture_failed, std::move(message));
+    }
+
+    void record_caller() noexcept
+    {
+        last_caller_thread_id_.store(static_cast<std::uint32_t>(::GetCurrentThreadId()), std::memory_order_relaxed);
+    }
+
+    /* Runs on the worker before it serves commands. */
+    bool startup_worker() noexcept
+    {
+        worker_thread_id_.store(static_cast<std::uint32_t>(::GetCurrentThreadId()), std::memory_order_relaxed);
+        const HRESULT com = ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        if (FAILED(com)) {
+            return false;
+        }
+        com_initialized_ = true;
+        com_init_count_.fetch_add(1, std::memory_order_relaxed);
+        const HRESULT mf = MFStartup(MF_VERSION, MFSTARTUP_LITE);
+        if (FAILED(mf)) {
+            /* The teardown hook balances COM even when MF startup fails. */
+            return false;
+        }
+        mf_started_ = true;
+        mf_startup_count_.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    }
+
+    /*
+     * Runs on the worker after the command loop ends (including after a failed
+     * startup). Teardown order: release reader/source/callback, MFShutdown,
+     * CoUninitialize.
+     */
+    void teardown_worker() noexcept
+    {
+        teardown_stream();
+        /* The callback holds the last sample; release it on the worker too. */
+        callback_.reset();
+        if (mf_started_) {
+            MFShutdown();
+            mf_started_ = false;
+            mf_shutdown_count_.fetch_add(1, std::memory_order_relaxed);
+        }
+        if (com_initialized_) {
+            ::CoUninitialize();
+            com_initialized_ = false;
+            com_uninit_count_.fetch_add(1, std::memory_order_relaxed);
+        }
+        worker_thread_id_.store(0, std::memory_order_relaxed);
+    }
+
+    template <typename T>
+    core::Result<T> finalize(const std::shared_ptr<core::Result<T>>& outcome, uvc::CommandWorker::SubmitState state,
+                             core::ErrorCode timeout_code, std::string stopped_message) const
+    {
+        if (state == uvc::CommandWorker::SubmitState::completed) {
+            return std::move(*outcome);
+        }
+        if (state == uvc::CommandWorker::SubmitState::unavailable) {
+            return worker_unavailable_failure(std::move(stopped_message));
+        }
+        return core::make_failure(core::Status::timeout, timeout_code,
+                                  "the operation did not complete before its deadline");
+    }
 
     bool has_identity() const noexcept
     {
@@ -978,12 +1071,7 @@ private:
 
     core::Result<Enumeration> enumerate_devices()
     {
-        ComApartment apartment;
-        const HRESULT startup = mf_.start();
-        if (FAILED(startup)) {
-            return hresult_failure("MFStartup", startup, core::ErrorCode::capture_failed);
-        }
-
+        /* COM and MF startup are owned by the worker for the whole backend lifetime. */
         ComPtr<IMFAttributes> attributes;
         HRESULT result = MFCreateAttributes(attributes.put(), 1);
         if (FAILED(result)) {
@@ -1461,7 +1549,17 @@ private:
         return pixels;
     }
 
-    MediaFoundationSession mf_;
+    /* The dedicated worker that owns COM, Media Foundation, and every held interface. */
+    uvc::CommandWorker worker_;
+    std::atomic<std::uint64_t> com_init_count_{0};
+    std::atomic<std::uint64_t> com_uninit_count_{0};
+    std::atomic<std::uint64_t> mf_startup_count_{0};
+    std::atomic<std::uint64_t> mf_shutdown_count_{0};
+    std::atomic<std::uint32_t> worker_thread_id_{0};
+    std::atomic<std::uint32_t> last_caller_thread_id_{0};
+    /* Worker-thread-only lifetime flags (COM/MF owned by the worker). */
+    bool com_initialized_ = false;
+    bool mf_started_ = false;
     ComPtr<ReadCallback> callback_;
     ComPtr<IMFSourceReader> reader_;
     ComPtr<IMFMediaSource> source_;
@@ -1511,6 +1609,11 @@ core::Result<void> UvcCameraBackend::reconnect(const CameraSettings& settings, c
 void UvcCameraBackend::close() noexcept
 {
     impl_->close();
+}
+
+UvcWorkerSnapshot UvcCameraBackend::worker_snapshot() const noexcept
+{
+    return impl_->snapshot();
 }
 
 }  // namespace cvforwin::camera

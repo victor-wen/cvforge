@@ -885,6 +885,63 @@ if(CVFORWIN_BUILD_TESTS)
     cvforwin_apply_sanitizers(uvc_frame_math_developer_tests)
     catch_discover_tests(uvc_frame_math_developer_tests)
 
+    # --- developer-owned CVF-102 UVC command-worker tests -------------------
+    #
+    # tests/unit/uvc_command_worker_test.cpp exercises the portable
+    # src/camera/uvc_windows/uvc_command_worker.h header: the single-thread
+    # command marshaller that the Windows UVC backend uses to own its COM/Media
+    # Foundation worker. The header has no Windows API, Media Foundation, or
+    # OpenCV dependency, so this target builds and runs on the portable Linux
+    # host. The Windows-only worker/apartment behavior is covered by the
+    # Windows-gated developer test below and by the independent
+    # cvf102_windows_uvc_tests target; neither is faked here.
+    #
+    # tests/unit/uvc_worker_snapshot_test.cpp is an empty TU off Windows and
+    # drives the real UvcCameraBackend::worker_snapshot() seam on Windows.
+
+    add_executable(uvc_command_worker_developer_tests
+        tests/unit/uvc_command_worker_test.cpp
+    )
+    target_include_directories(uvc_command_worker_developer_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+    )
+    target_link_libraries(uvc_command_worker_developer_tests PRIVATE
+        cvforwin_core
+        Threads::Threads
+        Catch2::Catch2WithMain
+    )
+    set_target_properties(uvc_command_worker_developer_tests PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    cvforwin_apply_project_compile_options(uvc_command_worker_developer_tests)
+    cvforwin_apply_sanitizers(uvc_command_worker_developer_tests)
+    catch_discover_tests(uvc_command_worker_developer_tests)
+
+    add_executable(uvc_worker_snapshot_developer_tests
+        tests/unit/uvc_worker_snapshot_test.cpp
+    )
+    target_include_directories(uvc_worker_snapshot_developer_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+    )
+    target_link_libraries(uvc_worker_snapshot_developer_tests PRIVATE
+        Catch2::Catch2WithMain
+    )
+    if(WIN32)
+        target_link_libraries(uvc_worker_snapshot_developer_tests PRIVATE cvforwin_uvc_windows)
+    endif()
+    set_target_properties(uvc_worker_snapshot_developer_tests PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    cvforwin_apply_project_compile_options(uvc_worker_snapshot_developer_tests)
+    cvforwin_apply_sanitizers(uvc_worker_snapshot_developer_tests)
+    catch_discover_tests(uvc_worker_snapshot_developer_tests)
+
     # --- independent CVF-101 Windows UVC 2D-buffer component tests -----------
     #
     # tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp is authored and
@@ -919,6 +976,44 @@ if(CVFORWIN_BUILD_TESTS)
         cvforwin_apply_test_compile_options(cvf101_windows_uvc_tests)
         cvforwin_apply_sanitizers(cvf101_windows_uvc_tests)
         catch_discover_tests(cvf101_windows_uvc_tests)
+    endif()
+
+    # --- independent CVF-102 Windows UVC worker/lifetime component tests ------
+    #
+    # tests/windows/uvc/cvf102_uvc_worker_lifecycle_test.cpp is authored and
+    # hash-pinned by the test owner. It includes only frozen headers
+    # (camera/camera_backend.h, camera/uvc_windows/uvc_backend.h, core/*.h) and
+    # drives the frozen UvcCameraBackend::worker_snapshot() seam plus the
+    # ICameraBackend contract with absent/ambiguous selectors; no camera,
+    # Media Foundation object, or device is used, and no production .cpp is
+    # read. catch_discover_tests registers the cases with CTest via add_test, so
+    # the windows-tests-quality workflow runs them. The gate is WIN32 +
+    # CVFORWIN_BUILD_TESTS + CVFORWIN_BUILD_TEST_BACKENDS: the release preset
+    # sets CVFORWIN_BUILD_TESTS=ON but keeps the test backends OFF, so this
+    # target is never registered in the release or any hosted no-camera preset.
+    # This file only builds and registers the owner's source; it never modifies
+    # it.
+
+    if(WIN32 AND CVFORWIN_BUILD_TESTS AND CVFORWIN_BUILD_TEST_BACKENDS)
+        add_executable(cvf102_windows_uvc_tests
+            tests/windows/uvc/cvf102_uvc_worker_lifecycle_test.cpp
+        )
+        target_include_directories(cvf102_windows_uvc_tests PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        )
+        target_link_libraries(cvf102_windows_uvc_tests PRIVATE
+            cvforwin_uvc_windows
+            opencv_core
+            Catch2::Catch2WithMain
+        )
+        set_target_properties(cvf102_windows_uvc_tests PROPERTIES
+            CXX_STANDARD 20
+            CXX_STANDARD_REQUIRED ON
+            CXX_EXTENSIONS OFF
+        )
+        cvforwin_apply_test_compile_options(cvf102_windows_uvc_tests)
+        cvforwin_apply_sanitizers(cvf102_windows_uvc_tests)
+        catch_discover_tests(cvf102_windows_uvc_tests)
     endif()
 endif()
 

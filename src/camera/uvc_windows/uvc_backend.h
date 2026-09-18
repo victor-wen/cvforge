@@ -20,6 +20,7 @@
 
 #if defined(_WIN32)
 
+#include <cstdint>
 #include <memory>
 #include <string_view>
 #include <vector>
@@ -30,6 +31,24 @@
 #include "core/result.h"
 
 namespace cvforwin::camera {
+
+/*
+ * Internal diagnostics for the owned worker thread. Every field is observable
+ * through worker_snapshot() and is not part of ICameraBackend or the public C
+ * ABI. After close() the COM and Media Foundation counts are balanced
+ * (init == uninit, startup == shutdown), commands_marshalled reports how many
+ * commands the worker executed, and worker_running is false.
+ */
+struct UvcWorkerSnapshot {
+    std::uint64_t com_init_count = 0; /* CoInitializeEx(MTA) successes */
+    std::uint64_t com_uninit_count = 0; /* balanced CoUninitialize calls */
+    std::uint64_t mf_startup_count = 0; /* MFStartup successes */
+    std::uint64_t mf_shutdown_count = 0; /* balanced MFShutdown calls */
+    std::uint64_t commands_marshalled = 0; /* commands executed on the worker */
+    std::uint32_t worker_thread_id = 0; /* thread that owns MF objects */
+    std::uint32_t last_caller_thread_id = 0;
+    bool worker_running = false;
+};
 
 class UvcCameraBackend final : public ICameraBackend {
 public:
@@ -78,6 +97,12 @@ public:
 
     /* Deterministic, idempotent teardown; safe on a never-opened backend. */
     void close() noexcept override;
+
+    /*
+     * Windows-only internal diagnostics; never exposed through the C ABI and
+     * absent from ICameraBackend. Safe to call from any thread at any time.
+     */
+    UvcWorkerSnapshot worker_snapshot() const noexcept;
 
 private:
     class Impl;
