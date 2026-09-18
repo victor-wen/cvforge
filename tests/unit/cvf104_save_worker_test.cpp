@@ -291,3 +291,38 @@ TEST_CASE("CVF-104 worker boundary: drain is idempotent when called twice",
     CHECK(sink->outstanding() == 0u);
     CHECK(count_regular_files(sink->root()) == sink->commit_calls());
 }
+
+/* ------------------------------------------------------------------------- */
+/* Verify-phase Windows fix (2026-09-19, owner: test-engineer).               */
+/* path_within must accept both '/' and '\\' as separator boundaries: the     */
+/* original raw-string comparison only accepted '/', so it failed on native   */
+/* Windows, where lexically_normal().string() uses '\\'.                      */
+/* ------------------------------------------------------------------------- */
+
+TEST_CASE("CVF-104 support: path_within is separator-agnostic and still rejects siblings and "
+          "escapes",
+          "[cvf-104][support][path_within]")
+{
+    const std::filesystem::path root = "/tmp/cvf104_path_within/captures";
+
+    /* Root itself and native forward-slash descendants. */
+    CHECK(path_within(root, root));
+    CHECK(path_within(root, root / "frame.png"));
+    CHECK(path_within(root, root / "nested" / "frame.png"));
+
+    /* Windows-style backslash separators must be recognized as boundaries. */
+    CHECK(path_within(root, std::filesystem::path(root.string() + "\\frame.png")));
+    CHECK(path_within(std::filesystem::path("C:\\root\\captures"),
+                      std::filesystem::path("C:\\root\\captures\\frame.png")));
+
+    /* A sibling that only extends root's final component name is outside. */
+    CHECK_FALSE(
+        path_within(root, std::filesystem::path("/tmp/cvf104_path_within/captures_x/frame.png")));
+    CHECK_FALSE(path_within(std::filesystem::path("C:\\root\\captures"),
+                            std::filesystem::path("C:\\root\\captures_x\\frame.png")));
+
+    /* An escape out of root is outside. */
+    CHECK_FALSE(
+        path_within(root, std::filesystem::path("/tmp/cvf104_path_within/other/frame.png")));
+    CHECK_FALSE(path_within(root, root / ".." / "outside.png"));
+}

@@ -32,6 +32,7 @@
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -167,18 +168,40 @@ inline std::size_t count_files_with_extension(const std::filesystem::path& dir,
     return count;
 }
 
-// True when child is equal to, or a descendant of, root (both absolute).
+// True when child is equal to, or a descendant of, root. Both '/' and '\\' are
+// accepted as component boundaries so the check is correct with native Windows
+// ('\\') and POSIX ('/') separators alike. A sibling whose name merely extends
+// root's final component (for example "<root>_x/...") is not within.
 inline bool path_within(const std::filesystem::path& root, const std::filesystem::path& child)
 {
-    const std::string root_text = root.lexically_normal().string();
-    const std::string child_text = child.lexically_normal().string();
-    if (child_text.size() < root_text.size()) {
-        return false;
+    const auto components = [](const std::filesystem::path& value) {
+        std::vector<std::string> parts;
+        for (const auto& element : value.lexically_normal()) {
+            const std::string text = element.string();
+            std::size_t start = 0;
+            while (start <= text.size()) {
+                const std::size_t boundary = text.find_first_of("/\\", start);
+                const std::size_t length =
+                    boundary == std::string::npos ? std::string::npos : boundary - start;
+                const std::string piece = text.substr(start, length);
+                if (!piece.empty() && piece != ".") {
+                    parts.push_back(piece);
+                }
+                if (boundary == std::string::npos) {
+                    break;
+                }
+                start = boundary + 1;
+            }
+        }
+        return parts;
+    };
+
+    const std::vector<std::string> root_parts = components(root);
+    const std::vector<std::string> child_parts = components(child);
+    if (root_parts.empty() || child_parts.size() < root_parts.size()) {
+        return root_parts.empty() && child_parts.empty();
     }
-    if (child_text.compare(0, root_text.size(), root_text) != 0) {
-        return false;
-    }
-    return child_text.size() == root_text.size() || child_text[root_text.size()] == '/';
+    return std::equal(root_parts.begin(), root_parts.end(), child_parts.begin());
 }
 
 // --- synthetic camera -------------------------------------------------------
