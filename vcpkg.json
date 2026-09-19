@@ -1,6 +1,6 @@
 {
   "name": "cvforwin",
-  "version-string": "1.0.0",
+  "version-string": "1.1.0",
   "description": "Windows x64 visual-inspection DLL with a native C ABI v1",
   "homepage": "https://example.invalid/cvforwin",
   "license": "MIT",

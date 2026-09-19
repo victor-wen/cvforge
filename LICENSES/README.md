@@ -1,6 +1,6 @@
 # Third-party license notices
 
-This directory is the auditable notice set for the cvforwin 1.0.0 release. The
+This directory is the auditable notice set for the cvforwin 1.1.0 release. The
 release package copies this directory verbatim, and the `package-verify` target
 fails when the directory is missing or contains no `LICENSE`/`NOTICE`/`COPYING`
 named, non-empty file.

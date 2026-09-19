@@ -8,17 +8,17 @@ can never be mistaken for release evidence.
 ## Package layout
 
 ```
-cvforwin-1.0.0/
+cvforwin-1.1.0/
   bin/cvforwin.dll              # the one project runtime DLL
   lib/cvforwin.lib              # import library
   include/cvforwin/cvf_api.h    # frozen public C ABI v1 header
-  config/examples/              # deployment template: cvforwin.json + recipes/*.json
+  config/examples/              # deployment template: cvforwin.json, recipes/*.json, assets/*
   docs/                         # usage, build, and packaging documentation
   LICENSES/                     # third-party notices and the component mapping
 ```
 
-The staged directory is also archived as `cvforwin-1.0.0.zip`; only that ZIP and
-the separate `cvforwin-1.0.0-symbols.zip` (release PDB) are CI artifacts. The
+The staged directory is also archived as `cvforwin-1.1.0.zip`; only that ZIP and
+the separate `cvforwin-1.1.0-symbols.zip` (release PDB) are CI artifacts. The
 PDB never enters the package.
 
 ## What the targets do
@@ -36,7 +36,7 @@ PDB never enters the package.
     (dependency allowlist);
   - a missing upload ZIP.
 - `package-symbols` copies the release PDB into
-  `cvforwin-1.0.0-symbols.zip` (see `<build>/symbols/`).
+  `cvforwin-1.1.0-symbols.zip` (see `<build>/symbols/`).
 
 The release requirement is one runtime DLL with no non-system runtime DLL
 dependency; the MSVC runtime is statically linked and OpenCV, nlohmann-json,
@@ -56,7 +56,7 @@ cmake -DCVF_PACKAGE_ROOT=<absolute installed package root> -P tests/package/pack
 
 The consumer uses the synthetic backend, so CI points `CVF_PACKAGE_ROOT` at the
 test-enabled package variant built by the `windows-msvc-tests` preset
-(`build/windows-msvc-tests/package/cvforwin-1.0.0`). Release packages stay
+(`build/windows-msvc-tests/package/cvforwin-1.1.0`). Release packages stay
 `uvc`-only.
 
 ## Release flow

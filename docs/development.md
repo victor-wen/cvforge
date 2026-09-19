@@ -79,7 +79,7 @@ cvforwin/
   .ai/                     project contract, test-ownership manifest, reports
   .github/workflows/       windows-ci workflow definition
   cmake/                   helper modules: options, format, abi, analysis, package
-  config/examples/         deployment template: cvforwin.json + recipes/*.json
+  config/examples/         deployment template: cvforwin.json, recipes/*.json, assets/*
   docs/                    README, usage, build, packaging, development
   examples/c_host/         native C11 host template, config, run_example.sh
   include/cvforwin/        cvf_api.h - the frozen public C ABI v1 header
@@ -240,7 +240,7 @@ cmake --workflow --preset windows-tests-quality
 | `windows-msvc-release` + `ctest` | Release compile with `/W4 /WX`, test suites that need no test backends |
 | `windows-msvc-tests` + `ctest` | Camera/ABI/lifecycle suites with `CVFORWIN_BUILD_TEST_BACKENDS=ON` |
 | `*-abi-check` | Exactly five `cvf_*` exports from the built DLL (`dumpbin`) |
-| `*-package` | Stages `build/<preset>/package/cvforwin-1.0.0/` and builds the ZIP; Windows-only, refuses non-zero on portable hosts |
+| `*-package` | Stages `build/<preset>/package/cvforwin-1.1.0/` and builds the ZIP; Windows-only, refuses non-zero on portable hosts |
 | `*-package-verify` | Package contents, five exports, system-only runtime DLL dependency allowlist, notices, upload ZIP |
 | `windows-msvc-release-symbols` | Copies the release PDB into a separate symbols ZIP; the PDB never enters the package |
 | `windows-ci` (workflow) | Release chain: configure, build, ctest, abi-check, package, package-verify, symbols |
@@ -259,7 +259,7 @@ and packaging. See [build.md](build.md) for the build options and
 | --- | --- | --- |
 | ABI | `tests/abi/` | `test_c11_surface.c` (C11 header surface), `test_abi_runtime.c` (struct_size/abi_version/reserved/capacity/context validation), `test_cpp20_include.cpp` (C++20 inclusion), `test_header_isolation.c` (self-containment with `-nostdinc`, GCC/Clang only), `cvf006_lifecycle.c` (end-to-end C lifecycle over the synthetic backend) |
 | Camera | `tests/camera/` | Identity resolution (exactly one match, no first-device fallback), file and synthetic backends, fault injection, bounded one-reconnect/one-recapture |
-| Unit | `tests/unit/` | Developer tests (core, recipes, algorithms, diagnostics/artifacts, runtime, UVC factory) plus the test-owner CVF-003/004/005/006 suites for registry/dispatch, config/recipe/catalog, diagnostics/capture policy/retention, and runtime deadline/reconnect/save-policy/rollback/serialization |
+| Unit | `tests/unit/` | Developer tests (core, recipes, algorithms, diagnostics/artifacts, runtime, UVC factory) plus the test-owner unit suites listed in `.ai/test-ownership.yaml` (registry/dispatch, config/recipe/catalog, diagnostics/capture policy/retention, runtime deadline/reconnect/save-policy/rollback/serialization, and every later change addition) |
 | Package | `tests/package/` | Independent clean-consumer kit: `package_checks.cmake` verifies an installed package and configures/builds/runs a C11 consumer using only the installed header and import library |
 | Hardware | `tests/hardware/` | Opt-in `uvc_smoke.cpp`; Windows-only, never registered with CTest, never a CI gate |
 | Fixtures | `tests/fixtures/runtime/` | Test-owner runtime fixture config and recipes consumed by the CVF-006 suites |
@@ -271,14 +271,17 @@ presets). The release preset runs the remaining suites without test backends.
 ### Independence rules
 
 - Test author and production implementer are different roles. Every
-  test-owner-authored file is recorded with a sha256 in
-  `.ai/test-ownership.yaml` (sections CVF-001 through CVF-008) and is
-  hash-pinned.
+  test-owner-authored file is recorded with a sha256 under `files:` in
+  `.ai/test-ownership.yaml`, one section per change in acceptance order, and
+  is hash-pinned.
 - Never edit a hash-pinned file, and never "fix" a test to match an
   implementation. A hash mismatch at verification time is an independence
-  violation. This includes `tests/abi/**`, `tests/camera/**`,
-  `tests/unit/cvf00*_*.{cpp,h}`, `tests/fixtures/runtime/**`,
-  `tests/package/**`, and `tests/hardware/**` entries listed in the manifest.
+  violation. This covers every path listed in the manifest, including
+  `tests/abi/**`, `tests/camera/**`, the test-owner `tests/unit/` suites
+  (`tests/unit/cvfNNN_*`), `tests/fixtures/runtime/**`, `tests/package/**`,
+  `tests/hardware/**`, and `tests/windows/uvc/**`. The manifest is
+  authoritative; consult it for the current set rather than a fixed section
+  range or file glob.
 - To check whether a file is pinned and unmodified:
 
   ```sh
@@ -589,7 +592,10 @@ the warning bit and never changes status or verdict. When a recipe sets
   never escape the managed root.
 - Retention: `retention.max_age_days` and `retention.max_total_bytes` drive a
   non-recursive age-then-size cleanup over regular files only, oldest first;
-  links and other entry types are never followed.
+  links and other entry types are never followed. The cleanup runs
+  asynchronously on a dedicated background maintenance worker, coalesced by a
+  time trigger and a committed-capture trigger, so retention never blocks the
+  inspection caller.
 - Warning bits are reported per call in `cvf_inspection_result_v1.warning_flags`
   (see section 9).
 
@@ -602,21 +608,21 @@ exit, so a WSL invocation can never be mistaken for release evidence. The
 hosts at all, so a WSL build of that target fails immediately as an unknown
 target.
 
-- `package` stages `build/<preset>/package/cvforwin-1.0.0/` (DLL, import
+- `package` stages `build/<preset>/package/cvforwin-1.1.0/` (DLL, import
   library, public header, example config/recipes, `docs/`, `LICENSES/`) and
-  creates `cvforwin-1.0.0.zip`.
+  creates `cvforwin-1.1.0.zip`.
 - `package-verify` checks the staged tree: required files, no second runtime
   DLL, exactly five exports, a system-only direct-import allowlist, and the
   upload ZIP.
 - `package-symbols` archives the release PDB separately as
-  `cvforwin-1.0.0-symbols.zip`; the PDB never enters the package.
+  `cvforwin-1.1.0-symbols.zip`; the PDB never enters the package.
 
 CI runs two jobs on the pinned `windows-2022` runner
 (`.github/workflows/windows.yml`, workflow name `windows-ci`):
 
 | Job | What it does | Uploaded artifacts |
 | --- | --- | --- |
-| `windows-release` | `cmake --workflow --preset windows-ci`: release configure/build/ctest, abi-check, package, package-verify, symbols | `cvforwin-1.0.0-package` (`build/windows-msvc-release/package/cvforwin-1.0.0.zip`) and `cvforwin-1.0.0-symbols` (`build/windows-msvc-release/symbols/cvforwin-1.0.0-symbols.zip`) |
+| `windows-release` | `cmake --workflow --preset windows-ci`: release configure/build/ctest, abi-check, package, package-verify, symbols | `cvforwin-1.1.0-package` (`build/windows-msvc-release/package/cvforwin-1.1.0.zip`) and `cvforwin-1.1.0-symbols` (`build/windows-msvc-release/symbols/cvforwin-1.1.0-symbols.zip`) |
 | `windows-tests-consumer` | `cmake --workflow --preset windows-tests-quality` (test-enabled camera/ABI/lifecycle suites, package, package-verify), then `cmake -DCVF_PACKAGE_ROOT=... -P tests/package/package_checks.cmake` against the installed test-enabled package | none (the test-enabled package and consumer scratch tree are never uploaded) |
 
 Both jobs use a job-level `VCPKG_DEFAULT_BINARY_CACHE` plus one
@@ -679,4 +685,4 @@ for the release flow.
 | `package-symbols` fails on WSL as an unknown target | Expected: unlike `package`/`package-verify`, the symbols target is not defined on portable hosts. Run it only from the Windows presets. |
 | Camera/lifecycle tests are not found | They require `CVFORWIN_BUILD_TEST_BACKENDS=ON`. Use `wsl-gcc-debug`/`wsl-gcc-asan` or `windows-msvc-tests`; the release preset intentionally does not register them. |
 | WSL GCC build is green but the Windows CI build fails | MSVC-only diagnostics that GCC accepts, typically under `/W4 /WX`: narrowing conversions in braced initialization (C2397, promoted to C2220), constant truncations/casts (C4310-class), deprecated CRT calls such as `fopen` (C4996 to C2220), and `override` on a COM-derived destructor (C3668). Fix the source with explicit `static_cast` conversions, the scoped `_CRT_SECURE_NO_WARNINGS` opt-out where already justified, or drop the invalid `override`; do not weaken warnings project-wide. The authoritative check is the Windows presets in CI. |
-| Where are the CI logs and artifacts? | GitHub Actions runs of the `windows-ci` workflow (push, pull_request, workflow_dispatch): logs per job (`windows-release`, `windows-tests-consumer`) and the artifacts `cvforwin-1.0.0-package` and `cvforwin-1.0.0-symbols`. Locally, test logs are under `build/<preset>/Testing/Temporary/` and package/symbols outputs under `build/windows-msvc-*/{package,symbols}/`. |
+| Where are the CI logs and artifacts? | GitHub Actions runs of the `windows-ci` workflow (push, pull_request, workflow_dispatch): logs per job (`windows-release`, `windows-tests-consumer`) and the artifacts `cvforwin-1.1.0-package` and `cvforwin-1.1.0-symbols`. Locally, test logs are under `build/<preset>/Testing/Temporary/` and package/symbols outputs under `build/windows-msvc-*/{package,symbols}/`. |

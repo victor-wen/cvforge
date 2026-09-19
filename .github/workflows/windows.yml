@@ -73,15 +73,15 @@ jobs:
       - name: Upload verified release package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: cvforwin-1.0.0-package
-          path: build/windows-msvc-release/package/cvforwin-1.0.0.zip
+          name: cvforwin-1.1.0-package
+          path: build/windows-msvc-release/package/cvforwin-1.1.0.zip
           if-no-files-found: error
 
       - name: Upload release symbols archive
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: cvforwin-1.0.0-symbols
-          path: build/windows-msvc-release/symbols/cvforwin-1.0.0-symbols.zip
+          name: cvforwin-1.1.0-symbols
+          path: build/windows-msvc-release/symbols/cvforwin-1.1.0-symbols.zip
           if-no-files-found: error
 
   windows-tests-consumer:
@@ -122,4 +122,4 @@ jobs:
       # configure/build/run against the installed test-enabled package. The
       # kit never reads the build or source tree and is not edited here.
       - name: Clean package consumer (tests/package/package_checks.cmake)
-        run: cmake -DCVF_PACKAGE_ROOT="${{ github.workspace }}/build/windows-msvc-tests/package/cvforwin-1.0.0" -P tests/package/package_checks.cmake
+        run: cmake -DCVF_PACKAGE_ROOT="${{ github.workspace }}/build/windows-msvc-tests/package/cvforwin-1.1.0" -P tests/package/package_checks.cmake

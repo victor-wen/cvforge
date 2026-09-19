@@ -66,6 +66,7 @@ device or initialization fails.
 | `recipe_id` | `[A-Za-z0-9._-]{1,128}`, unique in the recipe set |
 | `algorithm` | compiled registry key, `[a-z0-9._-]{1,64}` (the example key is `example.threshold`) |
 | `parameters` | algorithm-specific object, validated before activation |
+| `assets` | optional object; each key matches `[a-z0-9._-]{1,64}` and each value is a bounded relative path under `<config_root>/assets/` (see [Recipe assets](#recipe-assets)) |
 | `capture.width`, `.height`, `.frame_rate`, `.pixel_format` | optional bounded capture overrides |
 | `capture.settle_frames` | required, 0..1000 |
 | `artifacts.save_policy` | `always`, `fail_or_error`, `never` (default behaviour is save on FAIL or technical error) |
@@ -75,6 +76,45 @@ The example algorithm `example.threshold` accepts `threshold` (integer 0..255)
 and `min_pass_ratio` (0.0..1.0); it reports `white_pixels`, `total_pixels`, and
 `pass_ratio` in `output_json`, and returns PASS when
 `pass_ratio >= min_pass_ratio`. See `config/examples/recipes/`.
+
+### Recipe assets
+
+An algorithm that needs a binary resource (a template, a mask, a colour table)
+declares it in the optional `assets` object, mapping a logical key to a path
+reference relative to `<config_root>/assets/` (not to the recipe file):
+
+```json
+"assets": {
+  "tmpl": "tmpl.asymmetric.png"
+}
+```
+
+The catalog resolves each reference once, at candidate-recipe load time, reads
+the bounded bytes, and hands them to the algorithm's `prepare()` step; the
+algorithm never opens the file itself. The bounds are:
+
+| Rule | Bound |
+| --- | --- |
+| Assets per recipe | 16 |
+| Asset key | `[a-z0-9._-]{1,64}` |
+| Asset reference length | 512 bytes |
+| Bytes per asset | 16777216 (16 MiB) |
+| Total bytes per recipe | 67108864 (64 MiB) |
+
+A reference is rejected unless it is a non-empty relative forward-slash path of
+at most 512 bytes. Absolute paths (`/...`), backslash separators (`\`), drive
+letters, URI schemes, and alternate-data-stream forms (`:`), repeated
+separators (`//`), and empty, `.` or `..` path components are all invalid. The
+catalog additionally resolves the file under `<config_root>/assets/` and
+rejects a symlink, a non-regular file, or any link/reparse escape that leaves
+the assets root. A recipe whose asset is missing, oversized, escaping, or
+undecodable rejects the whole catalog candidate; the previous snapshot stays
+active.
+
+The shipped template-matching example uses this mechanism: the recipe
+`config/examples/recipes/template.match.json` declares the asset key `tmpl`
+with the reference `tmpl.asymmetric.png`, and the referenced template ships at
+`config/examples/assets/tmpl.asymmetric.png`.
 
 `cvf_reload_recipes` validates the complete candidate set and swaps the snapshot
 atomically; on any error the previous set stays active.

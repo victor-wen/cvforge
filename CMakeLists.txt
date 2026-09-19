@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 
 project(cvforwin
-    VERSION 1.0.0
+    VERSION 1.1.0
     DESCRIPTION "Windows x64 visual-inspection DLL with a native C ABI v1"
     LANGUAGES C CXX
 )
@@ -1718,6 +1718,66 @@ if(CVFORWIN_BUILD_TESTS)
     cvforwin_apply_test_compile_options(cvf107_hardware_wiring_developer_tests)
     cvforwin_apply_sanitizers(cvf107_hardware_wiring_developer_tests)
     catch_discover_tests(cvf107_hardware_wiring_developer_tests)
+
+    # --- independent CVF-108 release-metadata tests (test-engineer owned) ---
+    #
+    # tests/unit/cvf108_release_metadata_test.cpp is authored and hash-pinned by
+    # the test owner; this file only builds and registers it with CTest. It
+    # reads delivery metadata as data and needs no production library or test
+    # backend, so it is registered unconditionally within CVFORWIN_BUILD_TESTS
+    # (no WIN32 or hardware gate, no test-backend dependency).
+
+    add_executable(cvf108_release_metadata_tests
+        tests/unit/cvf108_release_metadata_test.cpp
+    )
+    target_include_directories(cvf108_release_metadata_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+    )
+    target_link_libraries(cvf108_release_metadata_tests PRIVATE
+        Catch2::Catch2WithMain
+    )
+    target_compile_definitions(cvf108_release_metadata_tests PRIVATE
+        CVF108_REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    set_target_properties(cvf108_release_metadata_tests PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    cvforwin_apply_test_compile_options(cvf108_release_metadata_tests)
+    cvforwin_apply_sanitizers(cvf108_release_metadata_tests)
+    catch_discover_tests(cvf108_release_metadata_tests)
+
+    # --- developer-owned CVF-108 release-naming regression tests ------------
+    #
+    # tests/unit/test_cvf108_release_naming_developer.cpp pins the delivery
+    # wiring changed by CVF-108: the staged package directory, package archive,
+    # and symbols archive all derive from the single declared project version,
+    # no packaging body hardcodes a release name, the CI names match it, and
+    # the public export set stays exactly five. It is portable and reads
+    # repository files only, so it is registered unconditionally within
+    # CVFORWIN_BUILD_TESTS.
+
+    add_executable(cvf108_release_naming_developer_tests
+        tests/unit/test_cvf108_release_naming_developer.cpp
+    )
+    target_include_directories(cvf108_release_naming_developer_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+    )
+    target_link_libraries(cvf108_release_naming_developer_tests PRIVATE
+        Catch2::Catch2WithMain
+    )
+    target_compile_definitions(cvf108_release_naming_developer_tests PRIVATE
+        CVF108_REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    set_target_properties(cvf108_release_naming_developer_tests PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    cvforwin_apply_test_compile_options(cvf108_release_naming_developer_tests)
+    cvforwin_apply_sanitizers(cvf108_release_naming_developer_tests)
+    catch_discover_tests(cvf108_release_naming_developer_tests)
 
 endif()
 
