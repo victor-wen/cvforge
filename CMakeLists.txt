@@ -1649,6 +1649,42 @@ if(CVFORWIN_BUILD_TESTS)
         catch_discover_tests(template_match_developer_tests)
     endif()
 
+    # --- developer-owned CVF-106 recipe asset-reference portability tests ---
+    #
+    # tests/unit/test_recipe_asset_reference_developer.cpp is the developer's own
+    # regression coverage for the portable asset-reference containment check in
+    # RecipeCatalog::load(): a plain and a nested reference are accepted, while
+    # "..", nested parent escapes, and absolute references are rejected. It uses
+    # only the compiled algorithms and needs no test backend, so it is
+    # registered whenever CVFORWIN_BUILD_TESTS is ON. The independent cvf106_*
+    # suite remains owned by the test owner.
+
+    add_executable(recipe_asset_reference_developer_tests
+        tests/unit/test_recipe_asset_reference_developer.cpp
+    )
+    target_include_directories(recipe_asset_reference_developer_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+    )
+    target_link_libraries(recipe_asset_reference_developer_tests PRIVATE
+        cvforwin_algorithms
+        cvforwin_inspection
+        cvforwin_recipes
+        nlohmann_json::nlohmann_json
+        opencv_core
+        opencv_imgcodecs
+        Threads::Threads
+        Catch2::Catch2WithMain
+    )
+    set_target_properties(recipe_asset_reference_developer_tests PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    cvforwin_apply_test_compile_options(recipe_asset_reference_developer_tests)
+    cvforwin_apply_sanitizers(recipe_asset_reference_developer_tests)
+    catch_discover_tests(recipe_asset_reference_developer_tests)
+
 endif()
 
 # ---------------------------------------------------------------------------

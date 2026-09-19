@@ -69,7 +69,14 @@ std::optional<core::Failure> load_asset_bytes(const std::filesystem::path& asset
         return asset_failure("recipe asset cannot be resolved: " + asset.reference);
     }
     const std::filesystem::path relative = file_canonical.lexically_relative(root_canonical);
-    if (relative.empty() || relative.native().starts_with("..")) {
+    /*
+     * Compare the first path component against "..", never the native string
+     * prefix: path::native() is std::wstring on Windows, so a narrow ".."
+     * prefix test does not compile there. Building the comparison path from
+     * ASCII ".." is representable in every native encoding and cannot throw.
+     */
+    const std::filesystem::path parent_component{".."};
+    if (relative.empty() || *relative.begin() == parent_component) {
         return asset_failure("recipe asset escapes the assets root: " + asset.reference);
     }
 
