@@ -1685,6 +1685,40 @@ if(CVFORWIN_BUILD_TESTS)
     cvforwin_apply_sanitizers(recipe_asset_reference_developer_tests)
     catch_discover_tests(recipe_asset_reference_developer_tests)
 
+    # --- developer-owned CVF-107 hardware build-wiring regression tests ----
+    #
+    # tests/unit/test_cvf107_hardware_wiring_developer.cpp reads the real
+    # CMakeLists.txt at run time (through the target-scoped CVFORWIN_TEST_SOURCE_DIR
+    # definition below) and pins that the opt-in Windows UVC hardware suite is
+    # gated by CVFORWIN_BUILD_HARDWARE_TESTS AND WIN32, is never registered with
+    # CTest, carries its MSVC _CRT_SECURE_NO_WARNINGS opt-out scoped to itself,
+    # and is referenced by no file under .github. It is portable, needs no
+    # production library or test backend, and is registered whenever
+    # CVFORWIN_BUILD_TESTS is ON - it must never be placed behind
+    # CVFORWIN_BUILD_HARDWARE_TESTS or WIN32, which is exactly the CVF-103 defect
+    # class this target guards against.
+
+    add_executable(cvf107_hardware_wiring_developer_tests
+        tests/unit/test_cvf107_hardware_wiring_developer.cpp
+    )
+    target_include_directories(cvf107_hardware_wiring_developer_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+    )
+    target_link_libraries(cvf107_hardware_wiring_developer_tests PRIVATE
+        Catch2::Catch2WithMain
+    )
+    target_compile_definitions(cvf107_hardware_wiring_developer_tests PRIVATE
+        CVFORWIN_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    set_target_properties(cvf107_hardware_wiring_developer_tests PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    cvforwin_apply_test_compile_options(cvf107_hardware_wiring_developer_tests)
+    cvforwin_apply_sanitizers(cvf107_hardware_wiring_developer_tests)
+    catch_discover_tests(cvf107_hardware_wiring_developer_tests)
+
 endif()
 
 # ---------------------------------------------------------------------------
@@ -1708,6 +1742,12 @@ if(CVFORWIN_BUILD_HARDWARE_TESTS)
             cvforwin_uvc_windows
             opencv_core
         )
+        if(MSVC)
+            # The smoke test intentionally uses the portable getenv API; MSVC
+            # flags it with C4996 and /WX promotes that to C2220. The opt-out
+            # is scoped to this hardware test target only.
+            target_compile_definitions(cvf_hw_uvc_smoke PRIVATE _CRT_SECURE_NO_WARNINGS)
+        endif()
         set_target_properties(cvf_hw_uvc_smoke PROPERTIES
             CXX_STANDARD 20
             CXX_STANDARD_REQUIRED ON
