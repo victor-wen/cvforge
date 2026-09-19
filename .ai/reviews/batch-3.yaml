@@ -1,0 +1,464 @@
+# Batch-3 (CVF-106) retrospective release review - release-reviewer, read-only.
+# The controller requested .ai/reviews/batch-3.yaml; this role's write policy permits only
+# .ai/reports/*-release.yaml, so the verdict lives here (B4R-03 closure) and the controller
+# should copy it to .ai/reviews/batch-3.yaml as recorded in the batch descriptor.
+schema_version: 1
+batch_id: batch-3-algorithms
+change_id: batch-3-algorithms
+member_changes: [CVF-106]
+candidate_sha: 74b3b3f055ddd2408e8ea002b2f645ba4dfff812
+reviewed_tree_sha: 1f520a092fe28f53fa00a94c81712685db06d6db
+reviewer: release-reviewer (independent, read-only; retrospective for B4R-03)
+recorded_at: 2026-09-20
+verdict: PASS_WITH_FINDINGS
+release_decision: RELEASE_READY
+blocking_findings: []
+non_blocking_findings: [B3R-01, B3R-02, B3R-03]
+carried_findings: [CVF106-NB-01, CVF106-NB-02, CVF106-NB-03, CVF106-NB-04, CVF106-NB-05]
+
+prior_gates:
+  reviewer: APPROVE
+  reviewer_detail: >-
+    .ai/reviews/CVF-106.yaml verdict PASS_WITH_FINDINGS, verdict_classification APPROVE,
+    blocking_count 0 (sha256 985992ef... pinned in .ai/validation/batch-3-quality-plan.yaml:18-19).
+    Caveat recorded as B3R-02: that review inspected the pre-portability-fix worktree; the
+    74b3b3f delta (recipe_catalog.cpp escape check) postdates it and is verified directly in
+    this release review and by the mechanical gates at the candidate SHA.
+  quality_script: PASS
+  quality_script_detail: >-
+    .ai/reports/batch-3-quality.json at git_head = git_head_after = 74b3b3f (verdict PASS,
+    gate_exit_code 0; six canonical WSL commands all exit 0; 454/454 debug and 454/454 ASan;
+    format-check 124 files; ownership files_checked 4, mismatches []). Plan
+    .ai/validation/batch-3-quality-plan.yaml pins expected_head 74b3b3f (line 3) and min_tests
+    440 (lines 52,78; 454 observed). Per-task deterministic gate also PASS (CVF-106-quality.json
+    at the pre-commit worktree b4256e7, 447/447, exit 0) with a matching MiMo QE review
+    (CVF-106-quality-review.yaml script_verdict PASS); the batch gate at 74b3b3f is the
+    authoritative at-SHA mechanical record, exactly as batch-4's review concluded for its
+    candidate. No failed script report is converted to PASS by any model summary.
+  required_ci: PASS
+  required_ci_detail: >-
+    .ai/reports/CVF-106-ci.yaml: windows-2022 run 35412060643, conclusion success, both jobs
+    green at 74b3b3f. The archived log .ai/reports/CVF-106-ci-tests.log internally proves the
+    test-enabled job fetched and checked out exactly 74b3b3f (lines 82-96), ran 497/497
+    (line 1751) including the CVF-106 template.match cases (lines 1724-1727), abi-check with
+    exactly 5 exports (line 1772), package-verify all checks passed (lines 1816-1819), and the
+    clean package consumer checks=15 failures=0 result=PASS (line 1837). The release job
+    (332/332) is recorded in CVF-106-ci.yaml:9-12; its raw log is not separately archived
+    (finding B3R-01). The superseded failed run 35409749859 at b102946 (MSVC C2665) is
+    recorded with its portable fix (CVF-106-ci.yaml:13-19).
+
+candidate_identity_crosscheck:
+  batch_candidate: 74b3b3f (batch-3-algorithms.yaml:12; quality plan expected_head)
+  batch_quality_json: 74b3b3f (git_head and git_head_after)
+  ci_checkout: 74b3b3f (CVF-106-ci-tests.log:82-96)
+  current_main: 1f520a0 (.git/refs/heads/main; reflog line 23 fast-forward)
+  conclusion: >-
+    The batch source, quality report, and CI results all refer to the same candidate SHA
+    74b3b3f. The tree has since advanced to 1f520a0 via batch-4 (CVF-107/CVF-108) and the
+    audit-trail commit; the CVF-106-relied surfaces are verified unchanged at 1f520a0 (see
+    later_batches below) and the integrated candidate was re-verified green at 2461959
+    (batch-4: 485/485 WSL, 528/528 Windows).
+
+platform_coverage:
+  - platform: portable
+    status: EXECUTED
+    evidence: ".ai/reports/batch-3-quality.json at 74b3b3f (454/454 debug, 454/454 ASan, format-check 124 files, clang static analysis, ownership 0 mismatches, gate exit 0)"
+    proves: >-
+      Portable build/test health of the CVF-106 package: all 24 independent CVF-106 cases, the
+      template_match developer suite, and the 7-case recipe-asset-reference regression, under
+      debug, ASan, clang-format, and clang static analysis, at the exact candidate SHA.
+    does_not_prove: "MSVC/Windows behavior, package bytes, any physical-camera behavior."
+  - platform: windows
+    status: EXECUTED
+    evidence: ".ai/reports/CVF-106-ci-tests.log (run 35412060643; test-enabled job checkout 74b3b3f at lines 82-96; 497/497 at line 1751; abi-check 5 exports at 1772; package-verify at 1816-1819; clean package consumer 15/15 at 1837); release job 332/332 per CVF-106-ci.yaml:9-12"
+    proves: >-
+      Native MSVC build and execution of the full test-enabled suite at the exact candidate SHA,
+      including the template.match example and the recipe preparation lifecycle, the unchanged
+      five-export ABI surface, package verification of cvforwin-1.0.0 (the then-current
+      package name), and real consumer usability of the installed package. This is also the
+      proof that the 74b3b3f portability fix compiles on MSVC (the b102946 C2665 break is
+      closed).
+    does_not_prove: "Physical-camera behavior; the 1.1.0-renamed package (verified later at 2461959 by batch-4 CI); FCT deployment readiness."
+  - platform: hardware
+    status: NOT_RUN
+    evidence: "By design: batch-3-algorithms.yaml acceptance states hardware evidence is absent by design; CVF-106 touches no camera path (src/camera/** out of scope, CVF-106.yaml:34)."
+    proves: "Nothing; correctly not claimed."
+    does_not_prove: >-
+      Any physical-camera behavior. The contract's hardware_uvc.production_release_requirement
+      (.ai/project-contract.yaml:975, per the batch-4 release record) is tracked SEPARATELY at
+      batch-4 and is NOT satisfied at this time (orientation/colour targets absent); no part of
+      this batch-3 verdict may be read as satisfying it, and FCT deployment must not proceed on
+      current hardware evidence.
+
+passes:
+  architecture: { result: PASS, findings: [] }
+  correctness: { result: PASS, findings: [] }
+  testing: { result: PASS, findings: [B3R-01, B3R-03] }
+  security: { result: PASS, findings: [] }
+  summary: { result: PASS, note: "B3R-02 review-vs-fix ordering recorded; all gates green at 74b3b3f; CVF-106 surfaces unchanged at 1f520a0; hardware production-release requirement explicitly NOT satisfied and out of this batch's scope." }
+
+item_1_contract_fidelity:
+  additive_seam: >-
+    VERIFIED at 1f520a0. AlgorithmAsset{key, reference, bytes} (src/inspection/algorithm.h:53-57),
+    AlgorithmAssetBundle with find() (algorithm.h:64-85), IPreparedAlgorithm (algorithm.h:93-99),
+    and IInspectionAlgorithm::prepare as a virtual WITH a default implementation
+    (algorithm.h:124-125; body at src/inspection/algorithm.cpp:38-52: validates parameters,
+    rejects a non-empty bundle for asset-less algorithms with
+    config_error/algorithm_parameters_invalid, returns a forwarding prepared object).
+  registry_dispatch: >-
+    The prepared dispatch mirrors the frozen containment rules exactly: deadline check, empty
+    frame check, exception containment, and the 65536-byte result bound
+    (src/inspection/registry.cpp:134-172 vs the legacy body at registry.cpp:94-132;
+    declarations at registry.h:54 and registry.h:62).
+  asset_bounds: >-
+    All five documented bounds enforced: at most 16 assets (src/recipes/recipe.cpp:24,258-261),
+    512-byte reference (recipe.cpp:25,228), 16 MiB per asset (src/recipes/recipe_catalog.cpp:25,
+    87-90), 64 MiB running total per recipe (recipe_catalog.cpp:26,91-94), and reference form
+    (recipe.cpp:226-251: rejects empty, >512, leading '/', backslash, ':', '//', and
+    empty/'.'/'..' components - i.e. absolute paths, backslashes, and parent-directory escapes).
+    Loading additionally rejects missing, non-regular, and symlink targets and any canonical
+    escape beneath config_root/assets (recipe_catalog.cpp:44-106; the portable first-component
+    ".." comparison at :78-81 is the 74b3b3f fix, with the ASCII-safe rationale documented at
+    :72-77; assets_root derived at :154). Bytes are loaded and prepare() is invoked for every
+    recipe before the candidate catalog is constructed (recipe_catalog.cpp:174-195).
+  all_or_nothing_reload: >-
+    RecipeCatalog load returns a failure on the first bad recipe/asset/preparation
+    (recipe_catalog.cpp:156-196); the runtime publishes only a fully loaded candidate
+    (src/runtime/context.cpp:471-478) over an atomic shared_ptr snapshot (recipe_catalog.cpp:
+    243-251) while each inspect holds its own shared_ptr and dispatches through the prepared
+    object (context.cpp:383,427-435), so an in-flight call keeps the old prepared state.
+  template_match_parameters_and_result: >-
+    Strict validation (src/algorithms/template_match.cpp:68-137: object form, unknown keys,
+    template_asset key pattern, roi as 4 integers with 1..64 dimensions and non-negative origin,
+    method == ccoeff_normed, finite threshold in [0,1]); prepare-time decode bounds
+    (:139-160: empty/undecodable/8192x8192/134217728 bytes; grayscale via IMREAD_GRAYSCALE),
+    larger-than-ROI rejection (:292-295) and zero-variance rejection (:297-302); inspect
+    performs no disk I/O, checks the deadline before preprocessing (:173), before matchTemplate
+    (:203), and before returning (:220), clamps non-finite scores (:216-218), reports
+    global-frame x/y plus template width/height (:227-233), PASS iff score >= threshold else
+    FAIL with a deterministic kind=template_mismatch defect (:234-243). Every interface_v1
+    behavior bullet in .ai/changes/CVF-106.yaml:115-123 is implemented and evidenced.
+
+item_2_compatibility:
+  frozen_signatures: >-
+    VERIFIED. key()/validate_parameters()/inspect() remain the only pure virtuals
+    (algorithm.h:106,109,115); prepare() is virtual with a default (algorithm.h:124-125); the
+    legacy dispatch(const IInspectionAlgorithm&, const AlgorithmRequest&) declaration
+    (registry.h:54) and body (registry.cpp:94-132) are semantically unchanged from the
+    pre-CVF-106 seam.
+  cvf003_stub: >-
+    The pinned StubAlgorithm (tests/unit/cvf003_test_support.h:155-178) overrides exactly the
+    three original pure virtuals and does not override prepare(); it compiles unchanged
+    because of the default implementation, and the whole CVF-003 suite passed at the candidate
+    SHA (497/497 windows, CI log line 1751) and again at the integrated candidate (528/528,
+    batch-4 CI log).
+  cvf003_amendment: >-
+    The FR-029 amendment only updated expected sets, not semantics: the fresh-registry case now
+    pins the exact order-independent key set {example.threshold, template.match} with per-key
+    find() and key() equality (tests/unit/cvf003_registry_test.cpp:154-178) and the
+    duplicate-key case still pins algorithm_duplicate_key plus the same two-key set (:180-200).
+    add/find/duplicate-rejection semantics are untouched; the amendment is strictly stronger
+    than the old size() == 1 count and is recorded with its hash 72d05811... in
+    .ai/test-ownership.yaml:76,90-94.
+
+item_3_template_match:
+  frozen_spec: >-
+    Consistent with template_match_algorithm_v1 (.ai/project-contract.yaml:682-708): method
+    ccoeff_normed implemented as cv::TM_CCOEFF_NORMED (template_match.cpp:211), required
+    parameters and their validation (:68-137), measurements {score,x,y,width,height} with
+    global-frame coordinates (:227-233), PASS iff score >= threshold with a deterministic
+    template_mismatch defect on FAIL (:234-243), and the three documented deadline checks
+    (:173,:203,:220).
+  golden_cases: >-
+    Documented and executed: the independent suite's golden policy (exact template copy scores
+    1.0 for ccoeff_normed, 1e-6 absolute tolerance, exact integer coordinates;
+    .ai/reports/CVF-106-test-red.yaml:180-193) and the developer golden case
+    "CVF-106 developer: template.match golden image match within tolerance" passed at 74b3b3f
+    (CI log lines 1724-1725) and at 2461959 (batch-4 CI log lines 2888-2889).
+  degenerate_input: >-
+    Flat/constant template rejected at preparation (zero variance, template_match.cpp:297-302;
+    executed case tests/unit/cvf106_template_match_test.cpp:218). Template larger than the ROI
+    rejected at preparation (:292-295; test :208); ROI outside the actual frame rejected at
+    inspect with fail-closed algorithm_frame_invalid (:193-198); a flat (zero-variance) search
+    region in the scene yields non-finite TM_CCOEFF_NORMED scores which are clamped to 0.0 and
+    deterministically FAIL the threshold (:216-218,238-243). 1x1 template/ROI rejected by the
+    parameter bounds (:132-135; test :185). All documented bounds and error behaviors hold.
+
+item_4_example_and_packaging:
+  example_loads: >-
+    config/examples/recipes/template.match.json declares asset tmpl -> tmpl.asymmetric.png,
+    roi [0,0,64,48], method ccoeff_normed, threshold 0.8, capture 64x48 bgr8 (file lines 1-25);
+    the asset exists at config/examples/assets/tmpl.asymmetric.png; the developer case
+    "the shipped example recipe and asset load and match" (tests/unit/test_template_match_developer.cpp:
+    475-528) loads both through RecipeCatalog, asserts the parsed asset entry, and matches the
+    decoded template at a known location; it passed at 74b3b3f (CI log line 1727, test #442).
+  license: >-
+    LICENSES/README.md:45-50 documents the asset as a deterministic 12x8 project-authored
+    grayscale image with no third-party pixels or metadata, dedicated under the same terms as
+    the surrounding source; the OpenCV imgcodecs linkage it exercises is licensed in the same
+    mapping (LICENSES/README.md:19,23-24).
+  docs: >-
+    docs/development.md:380-406 documents the preparation/asset seam and all bounds and names
+    the example paths; :408-452 carries the cv2/NumPy -> cv::Mat mapping table with the
+    explicit statement that no Python runtime/interpreter/transpiler is packaged and that
+    production Python is hand-ported with representative images and explicit tolerances
+    (:410-413,415-423); :510-514 states the shared catalog lifecycle for example.threshold and
+    template.match; docs/usage.md:93,115 describes the asset handoff and the example.
+  cvf108_rename_regression: >-
+    NONE. The recipe JSON and the PNG asset contain no version tokens; the shipped-example case
+    passed again at the integrated candidate (batch-4 CI log lines 2892-2893, test #487 of
+    528/528 at 2461959), and CVF-108's own independent test asserts the docs still describe the
+    template.match example with its asset and recipe
+    (tests/unit/cvf108_release_metadata_test.cpp:805-821). The docs sections above survived the
+    1.1.0 rename intact in the current tree.
+
+item_5_test_adequacy:
+  independence: >-
+    The four independent files were authored before the seam existed (honest RED: absent-header
+    compile failure plus a from-spec ZNCC reference passing; .ai/test-ownership.yaml:1020-1051),
+    include frozen headers only, and read no production .cpp. The batch gate reconciled the
+    ownership hashes with 0 mismatches (batch-3-quality.json:103-106). The two test-owner
+    amendments (flat final object per final_result_payload_v1; fixed-frame camera for B8
+    determinism) were made by the test owner with previous hashes recorded and no assertion
+    removed, skipped, or weakened (.ai/reports/CVF-106-test-verify.yaml:13-61,99-115). The
+    developer did not modify any cvf1* file (.ai/reports/CVF-106-implementation.yaml:463-481).
+  coverage_at_candidate_sha: >-
+    All brief observables B1-B8 plus the boundary and negative cases have executed tests at
+    74b3b3f: 24 CVF-106 independent cases inside the 454/454 portable runs
+    (batch-3-quality.json:42-56,84-100) and the 497/497 Windows run, enumerated by name in the
+    batch-4 CI log lines 2838-2905 (B1 catalog/reload :2876-2883, B2/B3/B5/B6 and seam
+    :2838-2847, boundary/negatives :2848-2875, B4/B7/B8 :2870-2885, developer cases
+    :2886-2893, asset-reference cases :2894-2905).
+  reviewer_findings_status: >-
+    The task reviewer's five findings were all non-blocking and remain open as recorded; none
+    was blocking acceptance then or now. NB-4's superseding evidence exists inside the same
+    developer report (the post-amendment manifest hash at .ai/reports/CVF-106-implementation.yaml:
+    482-489 matches the gate-pinned value), so the stale header is a record-keeping defect
+    only.
+  untested_requirement: >-
+    B3R-03: no executed test pins the 16-asset count cap, the 64 MiB running total, or the
+    512-byte reference-length bound (the 16 MiB per-asset bound IS tested,
+    tests/unit/cvf106_lifecycle_test.cpp:25,152-160). The three untested bounds are simple
+    constant comparisons in src/recipes/recipe.cpp:258-261 and src/recipes/recipe_catalog.cpp:
+    87-94 that this review verified directly; non-blocking coverage gap for the test owner.
+
+item_6_platform_matrix: >-
+  Portable (WSL) EXECUTED and Windows CI EXECUTED at the exact candidate SHA 74b3b3f as detailed
+  under platform_coverage. What portable proves: GCC/Clang build health, the full deterministic
+  suite under debug and ASan, format and static analysis - it does NOT prove MSVC behavior,
+  package bytes, or hardware. What Windows CI proves: MSVC compile (including the portability
+  fix) and full-suite execution, the unchanged five-export ABI, package verification, and clean
+  consumer usability of the installed package - it does NOT prove physical-camera behavior or
+  FCT deployment readiness. Hardware NOT_RUN by design for this batch: CVF-106 touches no
+  camera path and the batch descriptor explicitly records hardware evidence as absent by
+  design. The contract's hardware production release requirement is tracked separately
+  (batch-4) and is NOT satisfied; it must not be reported as satisfied.
+
+item_7_residual_risk:
+  blocking: >-
+    None. All five passes are clean; every acceptance criterion of the batch descriptor
+    (committed CVF-106, task-reviewer approval, deterministic gate PASS at the frozen SHA,
+    windows-2022 CI green at that SHA including the clean package consumer and the
+    template.match example, portable behaviour verified on WSL) is met with evidence read in
+    this review.
+  carried: >-
+    The five task-review findings (see carried_findings below), the hardware production-release
+    requirement (batch-4 scope, OPEN, not satisfiable by this batch), and the three new
+    non-blocking findings below. None blocks the batch-3 code-work verdict.
+
+later_batches_impact:
+  statement: >-
+    NO later-batch change (CVF-107, CVF-108, or the subsequent fix/audit commits through
+    1f520a0) changed anything CVF-106 relies on. src/inspection, src/algorithms, src/recipes,
+    and src/runtime are unchanged between 74b3b3f and current main; the overlapping surfaces
+    (CMakeLists.txt, docs/**, tests/unit/**) changed only additively.
+  verification_method: >-
+    Shell/git-diff was unavailable to this role; the claim is verified from five independent
+    sources. (1) Scope contracts: CVF-107 declares src/** out of scope (.ai/changes/CVF-107.yaml:
+    40-44) and CVF-108 declares src/** out of scope (.ai/changes/CVF-108.yaml:46-49); the
+    CVF-108 implementation records "git status --porcelain -- src include is empty (untouched)"
+    (.ai/reports/CVF-108-implementation.yaml:112). (2) Commit subjects: every commit after
+    74b3b3f in .git/logs/HEAD (lines 16-23) is test/release/docs/review-scoped - 0e07e21d
+    "test(uvc): add opt-in hardware stress suite evidence", 7d3e3fe "release: synchronize
+    1.1.0", 04b3b3b "test(release): normalize line endings", 2461959 "test(uvc): fail closed on
+    mandatory colour", 4c83489 "review: publish audit trail", 1f520a0 fast-forward. (3)
+    Line-exact continuity: every file:line citation in the 74b3b3f task review matches the
+    current 1f520a0 tree byte-for-byte on the cited semantics (algorithm.h:106,109,115,124;
+    algorithm.cpp:38-52; registry.cpp:94-172; recipe.cpp:24-26,215-275,359-363; template_match.cpp:
+    68-137,139-160,170-249,272-306,308-322; example_threshold.cpp:109-174; context.cpp:
+    253-265,383,427-435,465-481,745-765) - a post-74b3b3f edit to any of these files would have
+    shifted the cited lines. (4) Behavioural: all 24 independent CVF-106 cases plus the
+    developer and asset-reference cases passed with identical names at the integrated candidate
+    2461959 on both WSL (485/485, batch-4-quality.json) and Windows (528/528, batch-4 CI log
+    lines 2838-2905). (5) Packaging: the CVF-108 1.1.0 rename touched only version tokens; the
+    example recipe/asset contain none, and the shipped-example test passed both before
+    (74b3b3f) and after (2461959) the rename.
+  overlapping_surfaces: >-
+    CMakeLists.txt gained the CVF-107 hardware wiring and CVF-108 metadata targets; the cvf106_*
+    and template_match_developer and recipe_asset_reference targets are intact and correctly
+    gated (CMakeLists.txt:1515-1650,173-199). docs/** gained 1.1.0 renames and retention docs;
+    all CVF-106 sections are intact (docs/development.md:380-452,510-514). tests/unit/** gained
+    new CVF-107/CVF-108 files; no cvf106_* or cvf003_registry file was modified after the
+    recorded amendments (identical case names and counts green at 2461959).
+
+findings:
+  - pass: testing
+    id: B3R-01
+    owner: build-controller
+    severity: non_blocking
+    issue: >-
+      The archived CI log covers only the test-enabled job; the release-job "Release build,
+      tests, abi-check, package" 332/332 claim for run 35412060643 rests on
+      .ai/reports/CVF-106-ci.yaml:9-12 and the run-level conclusion success, without a separate
+      archived release-job log.
+    why_not_blocking: >-
+      The run conclusion success covers all jobs of the run, the archived test-enabled log
+      internally proves the exact candidate checkout, and the same workflow's release job is
+      fully logged at the integrated candidate (batch-4). The release job exercises a strict
+      subset of the source compiled by the test-enabled job.
+    required_fix: >-
+      Controller to archive the release-job log for run 35412060643 (or note its absence) when
+      consolidating the release record.
+  - pass: summary
+    id: B3R-02
+    owner: build-controller
+    severity: non_blocking
+    issue: >-
+      The task review (.ai/reviews/CVF-106.yaml) predates the 74b3b3f portability fix: its
+      recipe_catalog.cpp citations reflect the pre-fix line numbering, and the MSVC C2665 fix
+      (commit 74b3b3f) was never re-reviewed by the task reviewer.
+    why_not_blocking: >-
+      The fix was gated mechanically at the exact candidate SHA (batch-3-quality.json PASS with
+      the 7 new asset-reference regression cases; Windows CI 497/497 proving the MSVC compile)
+      and is directly verified in this release review: the first-component ".." comparison
+      (src/recipes/recipe_catalog.cpp:72-81) is correct, ASCII-safe, no-throw, and covered by
+      tests/unit/test_recipe_asset_reference_developer.cpp cases 3-7 with recorded red-green
+      evidence (.ai/reports/CVF-106-implementation.yaml:384-408).
+    required_fix: >-
+      Record only; no code change. Future post-review fix commits should get a bounded reviewer
+      delta note rather than relying on the release review.
+  - pass: testing
+    id: B3R-03
+    owner: test-engineer
+    severity: non_blocking
+    issue: >-
+      No executed test pins the 16-asset count cap, the 64 MiB running-total bound, or the
+      512-byte reference-length bound; only the 16 MiB per-asset bound is directly tested
+      (tests/unit/cvf106_lifecycle_test.cpp:25,152-160).
+    why_not_blocking: >-
+      All three bounds are simple constant comparisons verified directly in this review
+      (src/recipes/recipe.cpp:258-261; src/recipes/recipe_catalog.cpp:87-94) and are exercised
+      indirectly by the negative catalog cases; the gap is coverage completeness, not a defect.
+    required_fix: >-
+      Test owner to add three bounded negative cases (17 assets; a second asset pushing the
+      running total past 64 MiB; a 513-byte reference) in a future amendment.
+
+carried_findings_detail:
+  - id: CVF106-NB-01
+    severity: non_blocking
+    owner: architect
+    summary: >-
+      Seam-declaration drift: the approved contract declares AlgorithmAsset::bytes as
+      shared_ptr<const vector<uint8_t>> and AlgorithmAssetBundle as a vector alias
+      (.ai/changes/CVF-106.yaml:51-57), while the as-built header uses a value vector and a
+      bundle class (src/inspection/algorithm.h:53-57,64-85). The value form was recorded as a
+      test-author assumption before implementation existed (.ai/reports/CVF-106-test-red.yaml:
+      198-199), so no test was edited to fit.
+    disposition: CARRY
+    judgment: >-
+      Semantics required by the baseline contract still hold: bytes are loaded once, bounded,
+      immutable during inspect, and the shipped prepare() copies what it needs
+      (src/algorithms/template_match.cpp:286-305), so no dangling prepared state exists. The
+      compile-time shared-lifetime guarantee of the declared form is absent; requires an
+      architect amendment note or a follow-up change if the shared_ptr form was binding.
+  - id: CVF106-NB-02
+    severity: non_blocking
+    owner: architect
+    summary: >-
+      ROI-versus-configured-frame is enforced at inspect time (fail-closed
+      algorithm_frame_invalid) rather than rejected at preparation
+      (src/algorithms/template_match.cpp:132-135,193-198), although template_match_algorithm_v1
+      says bounds are checked against configured capture dimensions
+      (.ai/project-contract.yaml:694) and the extension contract wants invalid cross-field
+      combinations rejected before publication (:660). The independent case passes only via the
+      compiled 64-pixel extent.
+    disposition: CARRY
+    judgment: >-
+      No wrong verdict is possible (fail-closed at inspect), but a recipe whose ROI fits 64x64
+      and exceeds the configured capture frame loads and then fails every inspect. Architect to
+      either accept inspect-time enforcement and sharpen the test label, or extend the
+      preparation seam to carry configured capture dimensions.
+  - id: CVF106-NB-03
+    severity: non_blocking
+    owner: developer
+    summary: >-
+      The legacy TemplateMatchAlgorithm::inspect always fails with
+      algorithm_error/algorithm_not_found "requires the prepared dispatch path"
+      (src/algorithms/template_match.cpp:308-322), so a caller of the retained legacy dispatch
+      overload would see a misleading code. Unreachable in production: the single dispatch call
+      site uses the prepared overload (src/runtime/context.cpp:435).
+    disposition: CARRY
+    judgment: >-
+      Optional cleanup; return a specific error or document the unsupported-overload behaviour.
+  - id: CVF106-NB-04
+    severity: non_blocking
+    owner: developer
+    summary: >-
+      .ai/reports/CVF-106-implementation.yaml still records status: NEEDS_CONTEXT with blocker
+      CVF106-B1 (lines 7,290-325), which the test-owner CVF-003 amendment and the post-fix
+      evidence supersede.
+    disposition: PARTIALLY_ADDRESSED__CARRY
+    judgment: >-
+      The superseding evidence is recorded inside the same report (post-amendment manifest hash
+      at lines 482-489 and the portability-fix verification at lines 409-452), and the batch gate
+      ran green afterwards, so the stale header cannot mislead the deterministic gate; a status
+      refresh remains desirable for the audit trail.
+  - id: CVF106-NB-05
+    severity: non_blocking
+    owner: developer
+    summary: >-
+      The default prepare() forwards through a const_cast stored reference
+      (src/inspection/algorithm.cpp:51), mirroring the dispatch const_casts (registry.cpp:112,152);
+      well-defined only while the registry owns non-const algorithms and outlives the catalog.
+    disposition: CARRY
+    judgment: >-
+      Documentation note only; keep the ownership precondition documented if the seam is reused
+      by out-of-registry algorithms.
+
+security_pass_note: >-
+  No secret exposure: no credentials, tokens, or key material appear in any CVF-106-changed file
+  read (source, tests, example recipe/asset, docs, LICENSES); CI log tokens are redacted
+  (CVF-106-ci-tests.log:38,79). Asset loading is bounded and canonicalized beneath
+  config_root/assets with symlink/reparse rejection (recipe_catalog.cpp:44-106) and the example
+  asset is project-authored (LICENSES/README.md:45-50), so no unlicensed third-party content is
+  packaged. No destructive or publishing command was introduced; the archived CI log shows only
+  build/test/abi-check/package/package-verify steps. Permission boundaries intact: no public
+  header, C API, export, or camera-module change (five exports verified at line 1772 of the CI
+  log; src/c_api, include, src/camera contain no CVF-106 content per the reviewer and the
+  change contract out_of_scope list CVF-106.yaml:31-35). Unsafe defaults: none - every
+  validation path is fail-closed, and the runtime override the reviewer flagged is reachable
+  only through an injected test hook (context.cpp:253-265,745-765), leaving production selection
+  on resolve_identity exactly as before.
+
+summary: >-
+  Retrospective batch-3 release review of CVF-106 (algorithm preparation/asset lifecycle,
+  template.match, example, docs) at candidate 74b3b3f, re-verified against the current main
+  1f520a0. All five passes are clean: the additive seam, extended registry dispatch, recipe
+  asset bounds, all-or-nothing reload, and template.match are implemented exactly per the
+  approved contract and are byte-for-byte unchanged in the current tree; the frozen virtuals and
+  legacy dispatch keep the pinned CVF-003 StubAlgorithm and example.threshold compiling and
+  green; every brief observable B1-B8 has an executed test at the candidate SHA; the independent
+  tests were authored pre-implementation, amended only by their owner, and reconciled with zero
+  ownership mismatches by the batch gate (PASS at 74b3b3f, 454/454 portable debug+ASan); and
+  windows-2022 run 35412060643 is green at exactly 74b3b3f (497/497 test-enabled including the
+  clean package consumer and the template.match example; release job 332/332 recorded). No
+  later batch changed anything CVF-106 relies on: CVF-107/CVF-108 are test/release/docs-scoped
+  with src/** out of scope, every 74b3b3f citation matches the current tree line-exactly, and
+  all CVF-106 tests passed unchanged at the integrated candidate 2461959 (485/485 WSL, 528/528
+  Windows). Verdict PASS_WITH_FINDINGS / RELEASE_READY for the batch-3 code gate with zero
+  blocking findings, three new non-blocking findings (B3R-01 release-job log not archived,
+  B3R-02 task review predates the portability-fix commit - fix directly verified here,
+  B3R-03 three asset bounds without direct tests) and the five task-review findings carried
+  with dispositions. Hardware evidence is correctly absent by design for this batch; the
+  contract's hardware production-release requirement remains open under batch-4 and is NOT
+  satisfied - this verdict must not be read as clearing FCT deployment.
