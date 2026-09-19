@@ -190,19 +190,35 @@ std::string join(const std::vector<std::string>& values, const std::string& sepa
     return out;
 }
 
+// Strip a single line's trailing line ending: CRLF ("\r\n"), LF ("\n"), or a
+// bare CR ("\r"). Repository checkouts on Windows produce CRLF text, and a
+// line left with a trailing '\r' defeats a whole-line std::regex_match whose
+// pattern ends in "(.*)$": in ECMAScript '.' does not match a carriage return
+// and regex_match still requires the entire line to be consumed, so the match
+// fails on every line. Every line-based parse in this file consumes lines
+// through this helper (directly or via split_lines), so no check can observe a
+// stray '\r'.
+std::string strip_line_ending(std::string line)
+{
+    while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) {
+        line.pop_back();
+    }
+    return line;
+}
+
 std::vector<std::string> split_lines(const std::string& text)
 {
     std::vector<std::string> lines;
     std::string current;
     for (const char character : text) {
         if (character == '\n') {
-            lines.push_back(current);
+            lines.push_back(strip_line_ending(std::move(current)));
             current.clear();
-        } else if (character != '\r') {
+        } else {
             current.push_back(character);
         }
     }
-    lines.push_back(current);
+    lines.push_back(strip_line_ending(std::move(current)));
     return lines;
 }
 
@@ -544,9 +560,7 @@ std::vector<std::pair<std::string, int>> extract_abi_version_macros(const std::s
 {
     static const std::regex pattern(R"(^\s*#\s*define\s+([A-Za-z_][A-Za-z0-9_]*)\s+(.*)$)");
     std::vector<std::pair<std::string, int>> macros;
-    std::istringstream stream(text);
-    std::string line;
-    while (std::getline(stream, line)) {
+    for (const std::string& line : split_lines(text)) {
         std::smatch match;
         if (!std::regex_match(line, match, pattern)) {
             continue;
@@ -586,10 +600,9 @@ std::vector<std::pair<std::string, int>> extract_abi_version_macros(const std::s
 std::vector<std::string> parse_def_exports(const std::string& text)
 {
     std::vector<std::string> names;
-    std::istringstream stream(text);
-    std::string line;
     bool in_exports = false;
-    while (std::getline(stream, line)) {
+    for (const std::string& raw_line : split_lines(text)) {
+        std::string line = raw_line;
         const auto comment = line.find(';');
         if (comment != std::string::npos) {
             line = line.substr(0, comment);
@@ -1042,6 +1055,109 @@ TEST_CASE("CVF-108 boundary: the ABI constant parser accepts exactly 1 and rejec
     const auto two = extract_abi_version_macros("#define CVF_ABI_VERSION_V1 2\n");
     REQUIRE(two.size() == 1u);
     CHECK(two.front().second == 2);
+}
+
+TEST_CASE("CVF-108 platform control: CRLF line endings are normalized for every line-based parse",
+          "[cvf-108][boundary][crlf]")
+{
+    // Detection control for the Windows CI defect. A checkout with CRLF line
+    // endings left a trailing '\r' on every line; the whole-line ABI-macro
+    // regex ends in "(.*)$", and in ECMAScript '.' does not match a carriage
+    // return while regex_match still requires the entire line to be consumed,
+    // so the macro list came back empty. The shared strip_line_ending() reached
+    // through split_lines() must make CRLF and LF inputs indistinguishable. The
+    // un-normalized path is reproduced here on purpose, so this control fails
+    // if the normalization is ever removed.
+
+    const std::string lf_block =
+        "#define CVF_ABI_VERSION_V1 1u\n"
+        "#define CVF_ABI_VERSION_CURRENT CVF_ABI_VERSION_V1\n"
+        "#define CVF_UNRELATED 7\n";
+    std::string crlf_block;
+    for (const char character : lf_block) {
+        if (character == '\n') {
+            crlf_block.push_back('\r');
+        }
+        crlf_block.push_back(character);
+    }
+
+    // Pre-fix reproduction: istringstream + getline with no line-ending
+    // normalization, matching the whole line with the same anchored pattern.
+    const auto naive_extract = [](const std::string& text) {
+        static const std::regex pattern(R"(^\s*#\s*define\s+([A-Za-z_][A-Za-z0-9_]*)\s+(.*)$)");
+        std::vector<std::pair<std::string, int>> macros;
+        std::istringstream stream(text);
+        std::string line;
+        while (std::getline(stream, line)) {
+            std::smatch match;
+            if (!std::regex_match(line, match, pattern)) {
+                continue;
+            }
+            const std::string name = match[1].str();
+            if (name.find("ABI") == std::string::npos || name.find("VERSION") == std::string::npos) {
+                continue;
+            }
+            std::string value = trim(match[2].str());
+            while (!value.empty() && (value.back() == 'u' || value.back() == 'U')) {
+                value.pop_back();
+            }
+            value = trim(value);
+            if (value.empty()) {
+                continue;
+            }
+            const bool numeric = std::all_of(value.begin(), value.end(), [](unsigned char character) {
+                return std::isdigit(character) != 0;
+            });
+            if (!numeric) {
+                continue;
+            }
+            macros.emplace_back(name, std::stoi(value));
+        }
+        return macros;
+    };
+
+    CHECK(naive_extract(lf_block).size() == 1u);
+    // This is the observed Windows failure: a CRLF block leaves a trailing
+    // '\r' on every line, so the un-normalized whole-line match returns nothing.
+    CHECK(naive_extract(crlf_block).empty());
+
+    // The shared normalization makes CRLF and LF equivalent line by line.
+    const std::vector<std::string> lf_lines = split_lines(lf_block);
+    const std::vector<std::string> crlf_lines = split_lines(crlf_block);
+    REQUIRE(lf_lines.size() == crlf_lines.size());
+    CHECK(crlf_lines == lf_lines);
+    for (const auto& line : crlf_lines) {
+        CHECK(line.find('\r') == std::string::npos);
+    }
+
+    const auto lf_macros = extract_abi_version_macros(lf_block);
+    const auto crlf_macros = extract_abi_version_macros(crlf_block);
+    REQUIRE_FALSE(crlf_macros.empty());
+    CHECK(crlf_macros == lf_macros);
+    CHECK(crlf_macros.size() == 1u);
+    CHECK(crlf_macros.front().first == "CVF_ABI_VERSION_V1");
+    CHECK(crlf_macros.front().second == 1);
+
+    // parse_def_exports() is the other getline-based line parse and must be
+    // CRLF-safe through the same shared normalization.
+    const std::string lf_def =
+        "; module-definition file\n"
+        "EXPORTS\n"
+        "    cvf_get_abi_version\n"
+        "    cvf_initialize @2\n"
+        "    cvf_shutdown\n";
+    std::string crlf_def;
+    for (const char character : lf_def) {
+        if (character == '\n') {
+            crlf_def.push_back('\r');
+        }
+        crlf_def.push_back(character);
+    }
+    const std::vector<std::string> lf_exports = parse_def_exports(lf_def);
+    const std::vector<std::string> crlf_exports = parse_def_exports(crlf_def);
+    REQUIRE(lf_exports.size() == 3u);
+    CHECK(crlf_exports == lf_exports);
+    CHECK(crlf_exports.front() == "cvf_get_abi_version");
 }
 
 TEST_CASE("CVF-108 boundary: a missing required file is detected as missing, never skipped",
