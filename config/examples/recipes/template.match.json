@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "recipe_id": "template.match",
+  "algorithm": "template.match",
+  "parameters": {
+    "template_asset": "tmpl",
+    "roi": [0, 0, 64, 48],
+    "method": "ccoeff_normed",
+    "threshold": 0.8
+  },
+  "assets": {
+    "tmpl": "tmpl.asymmetric.png"
+  },
+  "capture": {
+    "width": 64,
+    "height": 48,
+    "frame_rate": 15.0,
+    "pixel_format": "bgr8",
+    "settle_frames": 0
+  },
+  "artifacts": {
+    "save_policy": "fail_or_error",
+    "required": false
+  }
+}

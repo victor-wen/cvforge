@@ -357,8 +357,10 @@ on the `cvf_unit_tests` target; the independent CVF-003 cases are named
 6. Add a recipe document so the algorithm can be selected. Recipes live under
    `<config_root>/recipes/` and must carry `schema_version: 1`, a unique
    `recipe_id`, `algorithm` equal to the registry key, and a `parameters`
-   object. Start from `config/examples/recipes/` and see
-   [usage.md](usage.md) for the full schema.
+   object. Binary resources go in an optional `assets` object mapping a logical
+   key to a relative path under `<config_root>/assets/`. Start from
+   `config/examples/recipes/` and see [usage.md](usage.md) for the full schema
+   and the asset bounds.
 
 7. Add tests. Developer unit tests are Catch2 v3 sources under `tests/unit/`
    registered on the `cvf_unit_tests` target in `CMakeLists.txt` (or a
@@ -371,6 +373,80 @@ Rules that always apply: an algorithm never opens a camera, selects a recipe,
 persists a file, invokes a host callback, or touches the public ABI. Dispatch
 catches every escaped exception (`algorithm_exception`), so an algorithm must
 still be written not to leak exceptions.
+
+### The preparation/asset seam
+
+An algorithm that needs a binary resource (a template, a mask, a colour table)
+declares it in the recipe `assets` object and overrides the additive
+`prepare()` operation instead of reading files:
+
+```cpp
+core::Result<std::unique_ptr<inspection::IPreparedAlgorithm>> prepare(
+    const nlohmann::json& parameters,
+    const inspection::AlgorithmAssetBundle& assets) const override;
+```
+
+`prepare()` runs once, at candidate-recipe load time. It resolves each logical
+asset key with `assets.find(key)`, decodes the bounded in-memory bytes, checks
+the decoded resource against the validated `parameters`, and returns an
+immutable `IPreparedAlgorithm`. `inspect()` then runs with no disk I/O and no
+mutable global state, so one prepared object is safe for concurrent
+inspections and stays valid for in-flight work across an atomic reload.
+
+Assets live under `<config_root>/assets/` and are referenced by a relative path
+(no absolute path, no `..`, no backslash, no link/reparse escape); the catalog
+bounds a recipe to 16 assets, 16 MiB each, 64 MiB total, and a 512-byte
+reference. A recipe whose asset is missing, oversized, escaping, or undecodable
+rejects the whole catalog candidate and leaves the previous snapshot active.
+The shipped reference is `template.match` with the example
+`config/examples/recipes/template.match.json` and
+`config/examples/assets/tmpl.asymmetric.png`.
+
+### Porting cv2/NumPy inspection code to OpenCV C++
+
+Production inspection prototypes are often written in Python with `cv2` and
+NumPy. **There is no Python runtime, interpreter, or transpiler packaged with
+cvforwin, and none may be added.** Production Python source is ported by hand
+to OpenCV C++ and validated here:
+
+- Port one function at a time and keep it inside `src/algorithms/` behind the
+  `IInspectionAlgorithm`/`IPreparedAlgorithm` seam.
+- Re-run the original Python on **representative images** and record the
+  expected numbers (scores, coordinates, counts) as golden values with an
+  explicit tolerance. Reproduce those tolerances in a Catch2 case; do not
+  assert exact float equality.
+- Generate the test images deterministically in C++ (as
+  `tests/unit/cvf106_test.helpers.h` does) instead of committing opaque
+  fixtures, so a failing test is reproducible.
+
+cv2/NumPy construct to OpenCV C++ equivalent:
+
+| Python (`cv2` / NumPy) | OpenCV C++ (`cv::Mat`) |
+| --- | --- |
+| `cv2.imread(path, cv2.IMREAD_GRAYSCALE)` | `cv::imread(path, cv::IMREAD_GRAYSCALE)` |
+| `cv2.imdecode(buf, cv2.IMREAD_GRAYSCALE)` | `cv::imdecode(buf, cv::IMREAD_GRAYSCALE)` (`buf` is `cv::Mat`/`std::vector<uchar>`) |
+| `img.shape` -> `(h, w, c)` | `mat.rows`, `mat.cols`, `mat.channels()` (row/column, not x/y) |
+| `img[y, x]` | `mat.at<uchar>(y, x)` (cast per element type) |
+| `img[y0:y1, x0:x1]` | `mat(cv::Rect(x0, y0, x1 - x0, y1 - y0))` |
+| `img.dtype == np.uint8` / `img.ndim` | `mat.depth() == CV_8U` / `mat.type() == CV_8UC1` (or `CV_8UC3`) |
+| `np.zeros((h, w), np.uint8)` | `cv::Mat(h, w, CV_8UC1, cv::Scalar(0))` |
+| `cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)` | `cv::cvtColor(img, gray, cv::COLOR_BGR2GRAY)` |
+| `cv2.matchTemplate(img, t, cv2.TM_CCOEFF_NORMED)` | `cv::matchTemplate(img, t, scores, cv::TM_CCOEFF_NORMED)` |
+| `cv2.minMaxLoc(scores)` | `cv::minMaxLoc(scores, &min, &max, &min_loc, &max_loc)` |
+| `np.mean(img)` / `img.std()` | `cv::meanStdDev(mat, mean, stddev)`, then `mean[0]` / `stddev[0]` |
+| `img.astype(np.float32)` | `mat.convertTo(f, CV_32F)` |
+| `cv2.threshold(img, t, max, cv2.THRESH_BINARY)[1]` | `cv::threshold(img, out, t, max, cv::THRESH_BINARY)` |
+| `np.count_nonzero(mask)` | `cv::countNonZero(mask)` |
+| `np.argwhere(mask)` | `cv::findNonZero(mask, points)` |
+| `a.size` / `len(a)` | `mat.total()` (elements), `mat.total() * mat.elemSize()` (bytes) |
+| `np.isfinite(x)` | `std::isfinite(x)`; guard NaN/Inf before comparisons |
+
+Behavioural differences that cause silent porting bugs: NumPy indexes
+`[y, x]` while geometry helpers speak `(x, y)`; slicing is a view while
+`cv::Mat` region copies or shares data depending on the operation; NumPy
+broadcasts implicitly while `cv::Mat` requires explicit per-channel or
+`cv::Scalar` handling; and Python integers are unbounded while C++ `int` ROI
+arithmetic can overflow, so bounds-check as the reference algorithm does.
 
 ## 7. Adding a camera backend
 
@@ -428,6 +504,11 @@ Every deployment has one config root containing `cvforwin.json` and a
   persisted images.
 - `camera.backend` is `uvc` in the release package; `file` and `synthetic` are
   accepted only by test-enabled builds.
+- A recipe may declare `assets` (logical key -> relative reference under
+  `<config_root>/assets/`, bounded to 16 assets / 16 MiB each / 64 MiB total /
+  512-byte reference, with no escape or link). The catalog loads and prepares
+  every recipe before publishing, so `example.threshold` (no assets) and
+  `template.match` (one decoded template) share one lifecycle.
 - Recipes are validated as a complete candidate set; `cvf_reload_recipes`
   swaps the snapshot atomically and keeps the previous set on any error
   (`runtime_reload_failed`, broad status `config_error`).

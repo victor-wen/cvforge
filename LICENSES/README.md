@@ -42,3 +42,9 @@ that baseline.
   the license-bearing package.
 - `LICENSES/README.md` is the mapping source; the `*.txt` files are verbatim
   copies of the upstream license texts collected by vcpkg.
+- Project-authored example assets are not third-party components and carry no
+  notice here. `config/examples/assets/tmpl.asymmetric.png` (the CVF-106
+  `template.match` example template) is a deterministic 12x8 grayscale image
+  generated from an in-project formula; it is dedicated to the project under
+  the same terms as the surrounding source and embeds no third-party pixels or
+  metadata.

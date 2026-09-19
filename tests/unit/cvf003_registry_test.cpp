@@ -1,4 +1,5 @@
 // CVF-003 independent black-box tests: AlgorithmRegistry semantics (brief B1, B2).
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <vector>
@@ -150,7 +151,8 @@ TEST_CASE("CVF-003 B1 negative: find(unknown) fails with algorithm_not_found",
                   core::ErrorCode::algorithm_not_found);
 }
 
-TEST_CASE("CVF-003 B2: register_compiled_algorithms publishes example.threshold on a fresh registry",
+TEST_CASE("CVF-003 B2: register_compiled_algorithms publishes every compiled algorithm on a fresh "
+          "registry",
           "[cvf-003][B2][registry]")
 {
     insp::AlgorithmRegistry registry;
@@ -158,11 +160,21 @@ TEST_CASE("CVF-003 B2: register_compiled_algorithms publishes example.threshold 
     auto registered = alg::register_compiled_algorithms(registry);
 
     REQUIRE(registered.has_value());
-    CHECK(registry.size() == 1u);
-    auto found = registry.find("example.threshold");
-    REQUIRE(found.has_value());
-    REQUIRE(found.value() != nullptr);
-    CHECK(found.value()->key() == "example.threshold");
+    // FR-029 adds template.match alongside the CVF-003 example.threshold, so a successful
+    // registration must publish exactly this compiled set, not a hard-coded single entry.
+    // The contract does not pin compiled-registration order, so compare the key set order-independently.
+    const std::vector<std::string> expected_keys = {"example.threshold", "template.match"};
+    CHECK(registry.size() == expected_keys.size());
+    auto published_keys = registry.keys();
+    std::sort(published_keys.begin(), published_keys.end());
+    CHECK(published_keys == expected_keys);
+    for (const auto& key : expected_keys) {
+        INFO("compiled algorithm key: " << key);
+        auto found = registry.find(key);
+        REQUIRE(found.has_value());
+        REQUIRE(found.value() != nullptr);
+        CHECK(found.value()->key() == key);
+    }
 }
 
 TEST_CASE("CVF-003 B2 negative: a second registration fails with algorithm_duplicate_key and keeps "
@@ -179,6 +191,10 @@ TEST_CASE("CVF-003 B2 negative: a second registration fails with algorithm_dupli
     REQUIRE_FALSE(again.has_value());
     check_failure(again.failure(), core::Status::algorithm_error,
                   core::ErrorCode::algorithm_duplicate_key);
-    CHECK(registry.size() == 1u);
+    const std::vector<std::string> expected_keys = {"example.threshold", "template.match"};
+    CHECK(registry.size() == expected_keys.size());
+    auto published_keys = registry.keys();
+    std::sort(published_keys.begin(), published_keys.end());
+    CHECK(published_keys == expected_keys);
     CHECK(registry.find("example.threshold").value() == original);
 }

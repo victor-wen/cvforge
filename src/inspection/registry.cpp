@@ -131,4 +131,44 @@ core::Result<AlgorithmResult> dispatch(const IInspectionAlgorithm& algorithm, co
     }
 }
 
+core::Result<AlgorithmResult> dispatch(const IPreparedAlgorithm& prepared, const AlgorithmRequest& request)
+{
+    if (request.deadline.expired()) {
+        return core::make_failure(core::Status::timeout, core::ErrorCode::algorithm_deadline_exceeded,
+                                  "algorithm dispatch deadline expired before invocation");
+    }
+    if (request.frame.pixels.empty()) {
+        return core::make_failure(core::Status::algorithm_error, core::ErrorCode::algorithm_frame_invalid,
+                                  "algorithm dispatch requires a frame with pixels");
+    }
+
+    try {
+        /*
+         * IPreparedAlgorithm::inspect() is non-const in the frozen contract,
+         * while dispatch() accepts a const reference for a read-only call
+         * surface. Prepared objects are published once and never mutated during
+         * inspect, so removing the caller-side constness here is well-defined.
+         */
+        core::Result<AlgorithmResult> outcome = const_cast<IPreparedAlgorithm&>(prepared).inspect(request);
+        if (!outcome.has_value()) {
+            return outcome.failure();
+        }
+
+        AlgorithmResult result = std::move(outcome).value();
+        const std::size_t serialized_bytes = result.measurements.dump().size() + result.defects.dump().size();
+        if (serialized_bytes > k_max_result_json_bytes) {
+            return core::make_failure(core::Status::algorithm_error, core::ErrorCode::algorithm_output_too_large,
+                                      "algorithm result exceeds the " + std::to_string(k_max_result_json_bytes) +
+                                          "-byte JSON bound");
+        }
+        return result;
+    } catch (const std::exception& exception) {
+        return core::make_failure(core::Status::algorithm_error, core::ErrorCode::algorithm_exception,
+                                  std::string("prepared algorithm threw an exception: ") + exception.what());
+    } catch (...) {
+        return core::make_failure(core::Status::algorithm_error, core::ErrorCode::algorithm_exception,
+                                  "prepared algorithm threw an unknown exception");
+    }
+}
+
 }  // namespace cvforwin::inspection

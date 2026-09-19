@@ -21,6 +21,9 @@ using core::Status;
 
 constexpr std::size_t k_max_recipe_id_bytes = 128;
 constexpr std::size_t k_max_algorithm_key_bytes = 64;
+constexpr std::size_t k_max_asset_count = 16;
+constexpr std::size_t k_max_asset_reference_bytes = 512;
+constexpr std::size_t k_max_asset_key_bytes = 64;
 constexpr std::uint64_t k_max_settle_frames = 1000;
 constexpr std::uint64_t k_min_frame_dimension = 1;
 constexpr std::uint64_t k_max_frame_dimension = 16384;
@@ -209,6 +212,68 @@ std::optional<Failure> validate_artifacts(const nlohmann::json& object, Artifact
     return std::nullopt;
 }
 
+bool is_asset_key(std::string_view key) noexcept
+{
+    return matches_byte_pattern(key, k_max_asset_key_bytes, is_algorithm_key_char);
+}
+
+/*
+ * A reference must be a bounded relative forward-slash path with no empty,
+ * "." or ".." component and no backslash, drive prefix, URI scheme, or
+ * alternate-data-stream form. The catalog additionally resolves the file
+ * beneath config_root/assets and rejects any link or reparse escape.
+ */
+bool is_safe_asset_reference(std::string_view reference) noexcept
+{
+    if (reference.empty() || reference.size() > k_max_asset_reference_bytes) {
+        return false;
+    }
+    if (reference.front() == '/' || reference.find('\\') != std::string_view::npos ||
+        reference.find(':') != std::string_view::npos ||
+        reference.find("//") != std::string_view::npos) {
+        return false;
+    }
+    std::size_t start = 0;
+    while (true) {
+        const std::size_t separator = reference.find('/', start);
+        const std::string_view component =
+            reference.substr(start, separator == std::string_view::npos ? std::string_view::npos
+                                                                        : separator - start);
+        if (component.empty() || component == "." || component == "..") {
+            return false;
+        }
+        if (separator == std::string_view::npos) {
+            break;
+        }
+        start = separator + 1;
+    }
+    return true;
+}
+
+std::optional<Failure> validate_assets(const nlohmann::json& object, std::vector<RecipeAsset>& out)
+{
+    if (!object.is_object()) {
+        return recipe_failure(ErrorCode::recipe_value_invalid, "assets must be an object");
+    }
+    if (object.size() > k_max_asset_count) {
+        return recipe_failure(ErrorCode::recipe_value_invalid,
+                              "a recipe may declare at most 16 assets");
+    }
+    for (auto entry = object.begin(); entry != object.end(); ++entry) {
+        if (!is_asset_key(entry.key())) {
+            return recipe_failure(ErrorCode::recipe_value_invalid,
+                                  "asset key must match [a-z0-9._-]{1,64}");
+        }
+        std::string reference;
+        if (!read_string(*entry, reference) || !is_safe_asset_reference(reference)) {
+            return recipe_failure(ErrorCode::recipe_value_invalid,
+                                  "asset reference must be a bounded relative path beneath assets");
+        }
+        out.push_back(RecipeAsset{entry.key(), std::move(reference)});
+    }
+    return std::nullopt;
+}
+
 }  // namespace
 
 core::Result<Recipe> load_recipe_file(const std::filesystem::path& path,
@@ -234,8 +299,9 @@ core::Result<Recipe> load_recipe_file(const std::filesystem::path& path,
     if (!root.is_object()) {
         return recipe_failure(ErrorCode::recipe_value_invalid, "recipe root must be an object");
     }
-    if (auto failure = reject_unknown_keys(
-            root, {"schema_version", "recipe_id", "algorithm", "parameters", "capture", "artifacts"})) {
+    if (auto failure =
+            reject_unknown_keys(root, {"schema_version", "recipe_id", "algorithm", "parameters",
+                                       "capture", "artifacts", "assets"})) {
         return *failure;
     }
     if (auto failure =
@@ -289,6 +355,11 @@ core::Result<Recipe> load_recipe_file(const std::filesystem::path& path,
     }
     if (auto failure = validate_artifacts(root.at("artifacts"), recipe.artifacts)) {
         return *failure;
+    }
+    if (const auto entry = root.find("assets"); entry != root.end()) {
+        if (auto failure = validate_assets(*entry, recipe.assets)) {
+            return *failure;
+        }
     }
     return recipe;
 }

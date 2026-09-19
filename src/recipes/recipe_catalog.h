@@ -24,6 +24,7 @@
 #include <string_view>
 #include <vector>
 
+#include "inspection/algorithm.h"
 #include "recipes/recipe.h"
 
 namespace cvforwin::inspection {
@@ -52,16 +53,26 @@ public:
     /* Stable pointer into the catalog, or recipe_not_found/1622. */
     core::Result<const Recipe*> find(std::string_view recipe_id) const;
 
+    /*
+     * Immutable prepared state published with the recipe. Every successfully
+     * loaded recipe has exactly one prepared object; the pointer stays valid
+     * for as long as this catalog snapshot is alive, so an in-flight
+     * inspection keeps its prepared state across a reload.
+     */
+    core::Result<const inspection::IPreparedAlgorithm*> find_prepared(std::string_view recipe_id) const;
+
     /* Recipe ids in lexicographic byte order. */
     std::vector<std::string> recipe_ids() const;
 
     std::size_t size() const noexcept;
 
 private:
-    RecipeCatalog(std::vector<Recipe> recipes, std::map<std::string, std::size_t> index);
+    RecipeCatalog(std::vector<Recipe> recipes, std::map<std::string, std::size_t> index,
+                  std::vector<std::unique_ptr<inspection::IPreparedAlgorithm>> prepared);
 
     std::vector<Recipe> recipes_;
     std::map<std::string, std::size_t> index_;
+    std::vector<std::unique_ptr<inspection::IPreparedAlgorithm>> prepared_;
 };
 
 class RecipeHolder {

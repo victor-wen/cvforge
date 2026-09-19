@@ -20,6 +20,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -44,6 +45,17 @@ struct ArtifactsConfig {
     bool required = false;
 };
 
+/*
+ * One declared recipe asset: the logical key and the validated normalized
+ * relative reference. Bytes stay empty until the catalog resolves the
+ * reference beneath config_root/assets and loads bounded content into the
+ * candidate snapshot.
+ */
+struct RecipeAsset {
+    std::string key;
+    std::string reference;
+};
+
 struct Recipe {
     std::uint32_t schema_version = 0;
     std::string recipe_id;
@@ -51,6 +63,7 @@ struct Recipe {
     nlohmann::json parameters;
     CaptureOverrides capture;
     ArtifactsConfig artifacts;
+    std::vector<RecipeAsset> assets;
 };
 
 /*

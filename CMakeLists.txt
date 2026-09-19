@@ -137,6 +137,7 @@ endif()
 find_package(nlohmann_json CONFIG REQUIRED)
 
 add_library(cvforwin_inspection STATIC
+    src/inspection/algorithm.cpp
     src/inspection/registry.cpp
 )
 add_library(cvforwin::inspection ALIAS cvforwin_inspection)
@@ -165,13 +166,14 @@ cvforwin_apply_sanitizers(cvforwin_inspection)
 #
 # compiled_algorithms module: isolated OpenCV-based algorithms with strict
 # parameter validation and bounded structured results. It depends on the
-# inspection registry, approved OpenCV components (imgproc), and nlohmann-json
-# only; algorithms never reach a camera backend, the C ABI, files, or global
-# mutable state.
+# inspection registry, approved OpenCV components (core, imgproc, imgcodecs),
+# and nlohmann-json only; algorithms never reach a camera backend, the C ABI,
+# files, or global mutable state.
 
 add_library(cvforwin_algorithms STATIC
     src/algorithms/compiled_algorithms.cpp
     src/algorithms/example_threshold.cpp
+    src/algorithms/template_match.cpp
 )
 add_library(cvforwin::algorithms ALIAS cvforwin_algorithms)
 
@@ -184,7 +186,9 @@ target_link_libraries(cvforwin_algorithms
         cvforwin_inspection
         nlohmann_json::nlohmann_json
     PRIVATE
+        opencv_core
         opencv_imgproc
+        opencv_imgcodecs
 )
 set_target_properties(cvforwin_algorithms PROPERTIES
     CXX_STANDARD 20
@@ -1503,6 +1507,146 @@ if(CVFORWIN_BUILD_TESTS)
         catch_discover_tests(cvf105_hardening_developer_tests)
     else()
         message(STATUS "cvforwin: cvf105_hardening_developer_tests is not registered because CVFORWIN_BUILD_TEST_BACKENDS is OFF")
+    endif()
+
+
+    # --- independent CVF-106 prepared-asset / template.match tests (test-engineer owned)
+    #
+    # The cvf106_* sources are authored and hash-pinned by the test owner; this
+    # file only builds and registers them with CTest. The direct template.match
+    # and prepared-state suites include frozen headers and the deterministic
+    # run-time frame/template builders; the lifecycle suite additionally drives
+    # the runtime through the deterministic file and synthetic test backends.
+    # Nothing here is ever inside CVFORWIN_BUILD_HARDWARE_TESTS.
+
+    if(CVFORWIN_BUILD_TEST_BACKENDS)
+
+    add_executable(cvf106_template_match_tests
+        tests/unit/cvf106_template_match_test.cpp
+    )
+    target_include_directories(cvf106_template_match_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+    )
+    target_link_libraries(cvf106_template_match_tests PRIVATE
+        cvforwin_algorithms
+        cvforwin_inspection
+        cvforwin_runtime
+        cvforwin_test_backends
+        nlohmann_json::nlohmann_json
+        Threads::Threads
+        Catch2::Catch2WithMain
+    )
+    target_compile_definitions(cvf106_template_match_tests PRIVATE CVFORWIN_TEST_BACKENDS_ENABLED=1)
+    set_target_properties(cvf106_template_match_tests PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    cvforwin_apply_test_compile_options(cvf106_template_match_tests)
+    cvforwin_apply_sanitizers(cvf106_template_match_tests)
+    catch_discover_tests(cvf106_template_match_tests)
+
+    add_executable(cvf106_prepare_tests
+        tests/unit/cvf106_prepare_test.cpp
+    )
+    target_include_directories(cvf106_prepare_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+    )
+    target_link_libraries(cvf106_prepare_tests PRIVATE
+        cvforwin_algorithms
+        cvforwin_inspection
+        cvforwin_runtime
+        cvforwin_test_backends
+        nlohmann_json::nlohmann_json
+        Threads::Threads
+        Catch2::Catch2WithMain
+    )
+    target_compile_definitions(cvf106_prepare_tests PRIVATE CVFORWIN_TEST_BACKENDS_ENABLED=1)
+    set_target_properties(cvf106_prepare_tests PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    cvforwin_apply_test_compile_options(cvf106_prepare_tests)
+    cvforwin_apply_sanitizers(cvf106_prepare_tests)
+    catch_discover_tests(cvf106_prepare_tests)
+
+    add_executable(cvf106_lifecycle_tests
+        tests/unit/cvf106_lifecycle_test.cpp
+    )
+    target_include_directories(cvf106_lifecycle_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+    )
+    target_link_libraries(cvf106_lifecycle_tests PRIVATE
+        cvforwin_algorithms
+        cvforwin_inspection
+        cvforwin_recipes
+        cvforwin_runtime
+        cvforwin_test_backends
+        nlohmann_json::nlohmann_json
+        Threads::Threads
+        Catch2::Catch2WithMain
+    )
+    target_compile_definitions(cvf106_lifecycle_tests PRIVATE CVFORWIN_TEST_BACKENDS_ENABLED=1)
+    set_target_properties(cvf106_lifecycle_tests PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    cvforwin_apply_test_compile_options(cvf106_lifecycle_tests)
+    cvforwin_apply_sanitizers(cvf106_lifecycle_tests)
+    catch_discover_tests(cvf106_lifecycle_tests)
+
+    else()
+        message(STATUS "cvforwin: CVF-106 prepared-asset/template.match tests are not registered because CVFORWIN_BUILD_TEST_BACKENDS is OFF")
+    endif()
+
+    # --- developer-owned CVF-106 template.match/example tests --------------
+    #
+    # tests/unit/test_template_match_developer.cpp is the developer's own
+    # coverage for CVF-106: template.match parameter validation, a
+    # golden-image/tolerance match cross-checked against an independent
+    # cv::matchTemplate oracle, the shipped config/examples recipe and asset
+    # load, and the injected-override descriptor-authority regression. The
+    # independent cvf106_* suite remains owned by the test owner.
+
+    if(CVFORWIN_BUILD_TEST_BACKENDS)
+        add_executable(template_match_developer_tests
+            tests/unit/test_template_match_developer.cpp
+        )
+        target_include_directories(template_match_developer_tests PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/src"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        )
+        target_link_libraries(template_match_developer_tests PRIVATE
+            cvforwin_algorithms
+            cvforwin_inspection
+            cvforwin_recipes
+            cvforwin_runtime
+            cvforwin_test_backends
+            nlohmann_json::nlohmann_json
+            opencv_core
+            opencv_imgcodecs
+            opencv_imgproc
+            Threads::Threads
+            Catch2::Catch2WithMain
+        )
+        target_compile_definitions(template_match_developer_tests PRIVATE
+            CVFORWIN_TEST_BACKENDS_ENABLED=1
+            CVFORWIN_CONFIG_EXAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/config/examples"
+        )
+        set_target_properties(template_match_developer_tests PROPERTIES
+            CXX_STANDARD 20
+            CXX_STANDARD_REQUIRED ON
+            CXX_EXTENSIONS OFF
+        )
+        cvforwin_apply_test_compile_options(template_match_developer_tests)
+        cvforwin_apply_sanitizers(template_match_developer_tests)
+        catch_discover_tests(template_match_developer_tests)
     endif()
 
 endif()

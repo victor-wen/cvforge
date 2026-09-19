@@ -244,6 +244,26 @@ core::Result<std::shared_ptr<camera::ICameraBackend>> build_backend(const recipe
                               "unsupported camera backend: " + config.camera.backend);
 }
 
+/*
+ * Selects the enumerated descriptor. A config-driven backend resolves the
+ * unique device through the configured selector; an injected camera override
+ * is already the selected device (a testing hook), so its single enumerated
+ * descriptor is used as-is and the config selector is not applied.
+ */
+core::Result<camera::CameraDescriptor> select_descriptor(
+    const std::vector<camera::CameraDescriptor>& candidates, const camera::CameraSelector& selector,
+    bool overridden)
+{
+    if (!overridden) {
+        return camera::resolve_identity(candidates, selector);
+    }
+    if (candidates.size() != 1u) {
+        return core::make_failure(core::Status::camera_not_found, core::ErrorCode::camera_not_found,
+                                  "the injected camera override must enumerate exactly one device");
+    }
+    return candidates.front();
+}
+
 nlohmann::json serialize_measurements(const inspection::AlgorithmResult& result)
 {
     nlohmann::json output = result.measurements.is_object() ? result.measurements : nlohmann::json::object();
@@ -404,15 +424,15 @@ public:
             frame = std::move(next).value();
         }
 
-        const core::Result<const inspection::IInspectionAlgorithm*> algorithm_result =
-            registry_.find(recipe.algorithm);
-        if (!algorithm_result.has_value()) {
-            return finalize_post_frame(&algorithm_result.failure(), deadline, recipe, request, frame, fin,
+        const core::Result<const inspection::IPreparedAlgorithm*> prepared_result =
+            snapshot->find_prepared(recipe.recipe_id);
+        if (!prepared_result.has_value()) {
+            return finalize_post_frame(&prepared_result.failure(), deadline, recipe, request, frame, fin,
                                        nlohmann::json(), started);
         }
         const inspection::AlgorithmRequest algorithm_request{frame, recipe.parameters, algorithm_input, deadline};
         core::Result<inspection::AlgorithmResult> dispatched =
-            inspection::dispatch(*algorithm_result.value(), algorithm_request);
+            inspection::dispatch(*prepared_result.value(), algorithm_request);
         if (!dispatched.has_value()) {
             return finalize_post_frame(&dispatched.failure(), deadline, recipe, request, frame, fin, nlohmann::json(), started);
         }
@@ -722,8 +742,9 @@ core::Result<std::unique_ptr<Context>> Context::create(RuntimeOptions options)
     }
     std::unique_ptr<artifacts::CaptureStore> captures = std::move(captures_result).value();
 
+    const bool overridden = options.camera_override != nullptr;
     std::shared_ptr<camera::ICameraBackend> camera;
-    if (options.camera_override) {
+    if (overridden) {
         camera = std::move(options.camera_override);
     } else {
         core::Result<std::shared_ptr<camera::ICameraBackend>> built = build_backend(config);
@@ -741,7 +762,7 @@ core::Result<std::unique_ptr<Context>> Context::create(RuntimeOptions options)
     const camera::CameraSelector selector{config.camera.device_path, config.camera.vendor_id,
                                           config.camera.product_id, config.camera.friendly_name};
     core::Result<camera::CameraDescriptor> descriptor_result =
-        camera::resolve_identity(candidates.value(), selector);
+        select_descriptor(candidates.value(), selector, overridden);
     if (!descriptor_result.has_value()) {
         return descriptor_result.failure();
     }

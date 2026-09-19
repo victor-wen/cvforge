@@ -53,6 +53,14 @@ private:
  */
 core::Result<AlgorithmResult> dispatch(const IInspectionAlgorithm& algorithm, const AlgorithmRequest& request);
 
+/*
+ * Dispatches one immutable prepared recipe under the same containment rules as
+ * the algorithm overload: deadline check, non-empty frame, exception
+ * containment, and the result-size bound. The prepared object's own Failure is
+ * propagated unchanged.
+ */
+core::Result<AlgorithmResult> dispatch(const IPreparedAlgorithm& prepared, const AlgorithmRequest& request);
+
 }  // namespace cvforwin::inspection
 
 #endif /* CVFORWIN_SRC_INSPECTION_REGISTRY_H_ */
