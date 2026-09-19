@@ -66,6 +66,10 @@
  *                                          positive target: when orientation is
  *                                          required, CVF_HW_ORIENTATION_TEST
  *                                          must still be set or the check FAILS.
+ *                                          The control is captured and evaluated
+ *                                          separately from the positive target
+ *                                          and needs its own run with a
+ *                                          vertically symmetric card.
  *   The check measures the mean luma of the central top band and bottom band.
  *   It PASSES only when the absolute contrast is at least the threshold AND the
  *   bright band is at the visual top (no vertical flip). A symmetric image has
@@ -86,7 +90,9 @@
  *   must also be within TOLERANCE of its reference. A neutral card PASSES only
  *   the neutral control (channel spread <= MAX_SPREAD); a saturated card in
  *   neutral mode FAILS, and vice versa. Measured values and thresholds are
- *   printed for the release record.
+ *   printed for the release record. The neutral control is NOT a substitute for
+ *   the positive target: when the colour check is mandatory, the run fails
+ *   unless a saturated target (red, green, or blue) is actually tested.
  *
  * Forced timeout procedure
  *   Always exercised while the device is open, deterministically, with no
@@ -415,6 +421,18 @@ struct EvidenceRecord {
     bool require_orientation = false;
     bool require_color = false;
     bool require_timeout = false;
+    bool orientation_test = false;
+    double orientation_min_contrast = 0.0;
+    bool orientation_symmetric_control = false;
+    bool color_test = false;
+    std::string color_expect;
+    double color_min_dominance = 0.0;
+    double color_min_level = 0.0;
+    double color_max_spread = 0.0;
+    double color_tolerance = 0.0;
+    bool color_reference_configured = false;
+    bool unplug_test = false;
+    bool expect_zero_devices = false;
     std::string windows_version;
     std::string camera_driver;
     std::string camera_firmware;
@@ -477,6 +495,18 @@ std::string evidence_text(int exit_code)
     out << "require_orientation=" << (g_evidence.require_orientation ? "yes" : "no") << "\n";
     out << "require_color=" << (g_evidence.require_color ? "yes" : "no") << "\n";
     out << "require_timeout=" << (g_evidence.require_timeout ? "yes" : "no") << "\n";
+    out << "orientation_test=" << (g_evidence.orientation_test ? "yes" : "no") << "\n";
+    out << "orientation_min_contrast=" << g_evidence.orientation_min_contrast << "\n";
+    out << "orientation_symmetric_control=" << (g_evidence.orientation_symmetric_control ? "yes" : "no") << "\n";
+    out << "color_test=" << (g_evidence.color_test ? "yes" : "no") << "\n";
+    out << "color_expect=" << g_evidence.color_expect << "\n";
+    out << "color_min_dominance=" << g_evidence.color_min_dominance << "\n";
+    out << "color_min_level=" << g_evidence.color_min_level << "\n";
+    out << "color_max_spread=" << g_evidence.color_max_spread << "\n";
+    out << "color_reference_configured=" << (g_evidence.color_reference_configured ? "yes" : "no") << "\n";
+    out << "color_tolerance=" << g_evidence.color_tolerance << "\n";
+    out << "unplug_test=" << (g_evidence.unplug_test ? "yes" : "no") << "\n";
+    out << "expect_zero_devices=" << (g_evidence.expect_zero_devices ? "yes" : "no") << "\n";
     out << "windows_version=" << g_evidence.windows_version << "\n";
     out << "camera_driver=" << g_evidence.camera_driver << "\n";
     out << "camera_firmware=" << g_evidence.camera_firmware << "\n";
@@ -672,6 +702,35 @@ std::string format_double(double value)
     out.precision(2);
     out << std::fixed << value;
     return out.str();
+}
+
+const char* yes_no(bool value)
+{
+    return value ? "yes" : "no";
+}
+
+// B4A-03: describe the specific CVF_HW_* requirement/control flags actually set,
+// so every mandatory-check failure message is self-evidencing in an archive.
+std::string orientation_flag_state(bool orientation_test, bool symmetric_control)
+{
+    return std::string("flags in effect: stress_mode=") + yes_no(stress_mode(configured_cycles())) +
+           " CVF_HW_STRESS=" + yes_no(env_flag("CVF_HW_STRESS")) +
+           " CVF_HW_CYCLES=" + std::to_string(configured_cycles()) +
+           " CVF_HW_REQUIRE_ORIENTATION=" + yes_no(env_flag("CVF_HW_REQUIRE_ORIENTATION")) +
+           " CVF_HW_ORIENTATION_TEST=" + yes_no(orientation_test) +
+           " CVF_HW_ORIENTATION_SYMMETRIC_CONTROL=" + yes_no(symmetric_control) +
+           " CVF_HW_ORIENTATION_MIN_CONTRAST=" +
+           format_double(env_f64("CVF_HW_ORIENTATION_MIN_CONTRAST", kOrientationMinContrast));
+}
+
+std::string color_flag_state(bool color_test, const std::string& color_expect)
+{
+    return std::string("flags in effect: stress_mode=") + yes_no(stress_mode(configured_cycles())) +
+           " CVF_HW_STRESS=" + yes_no(env_flag("CVF_HW_STRESS")) +
+           " CVF_HW_CYCLES=" + std::to_string(configured_cycles()) +
+           " CVF_HW_REQUIRE_COLOR=" + yes_no(env_flag("CVF_HW_REQUIRE_COLOR")) +
+           " CVF_HW_COLOR_TEST=" + yes_no(color_test) +
+           " CVF_HW_COLOR_EXPECT=" + (color_expect.empty() ? std::string("unset (default red)") : color_expect);
 }
 
 // ---------------------------------------------------------------------------
@@ -968,6 +1027,7 @@ void run_orientation_case(Report& report, const cam::CameraDescriptor& descripto
 {
     const bool orientation_test = env_flag("CVF_HW_ORIENTATION_TEST");
     const bool symmetric_control = env_flag("CVF_HW_ORIENTATION_SYMMETRIC_CONTROL");
+    const double min_contrast = env_f64("CVF_HW_ORIENTATION_MIN_CONTRAST", kOrientationMinContrast);
 
     // The symmetric negative control is NOT a substitute for the positive
     // asymmetric target. A mandatory orientation check therefore fails when the
@@ -976,10 +1036,10 @@ void run_orientation_case(Report& report, const cam::CameraDescriptor& descripto
     // card can never evidence that the bright TOP band is at the visual top.
     if (required && !orientation_test) {
         report.check(false,
-                     "H7 orientation check is MANDATORY (stress mode or CVF_HW_REQUIRE_ORIENTATION=1) but "
-                     "CVF_HW_ORIENTATION_TEST is not set with the documented asymmetric CVF-ORIENT-1 target in "
-                     "view (the CVF_HW_ORIENTATION_SYMMETRIC_CONTROL negative control is not a substitute for "
-                     "the positive target)");
+                     "H7 orientation check is MANDATORY but CVF_HW_ORIENTATION_TEST is not set with the documented "
+                     "asymmetric CVF-ORIENT-1 target in view (the CVF_HW_ORIENTATION_SYMMETRIC_CONTROL negative "
+                     "control is not a substitute for the positive target; " +
+                         orientation_flag_state(orientation_test, symmetric_control) + ")");
         return;
     }
 
@@ -988,41 +1048,54 @@ void run_orientation_case(Report& report, const cam::CameraDescriptor& descripto
         return;
     }
 
-    auto captured = capture_one(descriptor, settings);
-    if (!captured.has_value()) {
-        report.check(false, "H7 capture the orientation target frame");
-        return;
-    }
-
-    const BandLuma bands = measure_orientation(captured.value().pixels);
-    if (!bands.valid) {
-        report.check(false, "H7 the captured frame is large enough for the top/bottom orientation bands");
-        return;
-    }
-    report.info("H7 orientation: top_luma=" + format_double(bands.top) +
-                " bottom_luma=" + format_double(bands.bottom) +
-                " contrast=" + format_double(bands.top - bands.bottom));
-
-    const double min_contrast = env_f64("CVF_HW_ORIENTATION_MIN_CONTRAST", kOrientationMinContrast);
-
-    // Run the positive asymmetric-target checks first. They are never skipped or
-    // short-circuited by the symmetric control below.
+    // B4A-02: the positive checks are evaluated only against the positive
+    // asymmetric target that is in view at positive-check time.
     if (orientation_test) {
-        report.check(std::fabs(bands.top - bands.bottom) >= min_contrast,
-                     "H7 orientation evidence present: top/bottom luma contrast >= " + format_double(min_contrast));
-        report.check(bands.top - bands.bottom >= min_contrast,
-                     "H7 orientation correct: the documented bright TOP band is at the visual top (no vertical "
-                     "flip)");
+        auto captured = capture_one(descriptor, settings);
+        if (!captured.has_value()) {
+            report.check(false, "H7 capture the orientation target frame");
+        } else {
+            const BandLuma bands = measure_orientation(captured.value().pixels);
+            if (!bands.valid) {
+                report.check(false, "H7 the captured frame is large enough for the top/bottom orientation bands");
+            } else {
+                report.info("H7 orientation: top_luma=" + format_double(bands.top) +
+                            " bottom_luma=" + format_double(bands.bottom) +
+                            " contrast=" + format_double(bands.top - bands.bottom));
+                report.check(std::fabs(bands.top - bands.bottom) >= min_contrast,
+                             "H7 orientation evidence present: top/bottom luma contrast >= " +
+                                 format_double(min_contrast));
+                report.check(bands.top - bands.bottom >= min_contrast,
+                             "H7 orientation correct: the documented bright TOP band is at the visual top (no "
+                             "vertical flip)");
+            }
+        }
     }
 
-    // Add the negative control in addition (never a replacement): do not return
-    // after it, so setting both flags still exercises the positive asymmetric
-    // checks.
+    // B4A-02: the negative control is captured and evaluated separately at
+    // control time, so the positive asymmetric target and the vertically
+    // symmetric control are never required to hold on one frame. A failure in
+    // one independent check does not prevent the other from being evaluated when
+    // the operator has set up only one of the two targets.
     if (symmetric_control) {
-        report.check(std::fabs(bands.top - bands.bottom) < min_contrast,
-                     "H7 negative control: a vertically symmetric target is NOT accepted as orientation evidence "
-                     "(contrast " +
-                         format_double(std::fabs(bands.top - bands.bottom)) + " < " + format_double(min_contrast) + ")");
+        auto control_captured = capture_one(descriptor, settings);
+        if (!control_captured.has_value()) {
+            report.check(false, "H7 capture the vertically symmetric control frame");
+        } else {
+            const BandLuma control_bands = measure_orientation(control_captured.value().pixels);
+            if (!control_bands.valid) {
+                report.check(false, "H7 the control frame is large enough for the top/bottom orientation bands");
+            } else {
+                const double control_contrast = std::fabs(control_bands.top - control_bands.bottom);
+                report.info("H7 control orientation: top_luma=" + format_double(control_bands.top) +
+                            " bottom_luma=" + format_double(control_bands.bottom) +
+                            " contrast=" + format_double(control_bands.top - control_bands.bottom));
+                report.check(control_contrast < min_contrast,
+                             "H7 negative control: a vertically symmetric target is NOT accepted as orientation "
+                             "evidence (contrast " +
+                                 format_double(control_contrast) + " < " + format_double(min_contrast) + ")");
+            }
+        }
     }
 }
 
@@ -1033,21 +1106,42 @@ void run_orientation_case(Report& report, const cam::CameraDescriptor& descripto
 void run_color_case(Report& report, const cam::CameraDescriptor& descriptor, const cam::CameraSettings& settings,
                     bool required)
 {
-    if (!env_flag("CVF_HW_COLOR_TEST")) {
-        if (required) {
-            report.check(false,
-                         "H8 color check is MANDATORY (stress mode or CVF_HW_REQUIRE_COLOR=1) but "
-                         "CVF_HW_COLOR_TEST is not set with the documented CVF-COLOR-1 target in view");
-        } else {
-            report.skip("H8 color target", "set CVF_HW_COLOR_TEST=1 with the CVF-COLOR-1 target in view");
-        }
+    const bool color_test = env_flag("CVF_HW_COLOR_TEST");
+    const std::string requested_expect = env_text("CVF_HW_COLOR_EXPECT");
+
+    // B4A-01: the neutral spread control is NOT a substitute for the positive
+    // saturated CVF-COLOR-1 swatch. A mandatory colour check fails closed when
+    // the documented saturated target is not requested, even when the operator
+    // asks for the neutral control.
+    if (required && !color_test) {
+        report.check(false,
+                     "H8 color check is MANDATORY but CVF_HW_COLOR_TEST is not set with the documented saturated "
+                     "CVF-COLOR-1 target in view (the neutral spread control is not a substitute for the positive "
+                     "target; " +
+                         color_flag_state(color_test, requested_expect) + ")");
+        return;
+    }
+
+    if (!color_test) {
+        report.skip("H8 color target", "set CVF_HW_COLOR_TEST=1 with the CVF-COLOR-1 target in view");
         return;
     }
 
     ColorTarget target = ColorTarget::red;
-    const std::string target_text = env_text("CVF_HW_COLOR_EXPECT");
+    const std::string target_text = requested_expect;
     if (!target_text.empty() && !parse_color_target(target_text, target)) {
         report.check(false, "H8 CVF_HW_COLOR_EXPECT must be red|green|blue|neutral (got \"" + target_text + "\")");
+        return;
+    }
+
+    // B4A-01: a mandatory colour check must exercise the saturated positive
+    // target; the neutral spread control can never satisfy it.
+    if (required && target == ColorTarget::neutral) {
+        report.check(false,
+                     "H8 color check is MANDATORY but CVF_HW_COLOR_EXPECT=neutral requests only the neutral "
+                     "spread control, which is not a substitute for the positive saturated CVF-COLOR-1 target; "
+                     "set CVF_HW_COLOR_EXPECT=red|green|blue with the saturated swatch in view (" +
+                         color_flag_state(color_test, requested_expect) + ")");
         return;
     }
 
@@ -1071,6 +1165,9 @@ void run_color_case(Report& report, const cam::CameraDescriptor& descriptor, con
     const double max_neutral_spread = env_f64("CVF_HW_COLOR_MAX_SPREAD", kColorMaxNeutralSpread);
 
     if (target == ColorTarget::neutral) {
+        // B4A-01: the neutral spread control is a non-required control and is
+        // never a substitute for the positive saturated target (a mandatory
+        // neutral request already failed closed above).
         const double highest = std::max(measurement.blue, std::max(measurement.green, measurement.red));
         const double lowest = std::min(measurement.blue, std::min(measurement.green, measurement.red));
         const double spread = highest - lowest;
@@ -1375,6 +1472,27 @@ void run_suite(Report& report, const std::vector<cam::CameraDescriptor>& devices
     g_evidence.require_orientation = require_orientation;
     g_evidence.require_color = require_color;
     g_evidence.require_timeout = require_timeout;
+    g_evidence.orientation_test = env_flag("CVF_HW_ORIENTATION_TEST");
+    g_evidence.orientation_min_contrast = env_f64("CVF_HW_ORIENTATION_MIN_CONTRAST", kOrientationMinContrast);
+    g_evidence.orientation_symmetric_control = env_flag("CVF_HW_ORIENTATION_SYMMETRIC_CONTROL");
+    g_evidence.color_test = env_flag("CVF_HW_COLOR_TEST");
+    {
+        const std::string color_expect = env_text("CVF_HW_COLOR_EXPECT");
+        g_evidence.color_expect =
+            color_expect.empty() ? std::string("red (default; CVF_HW_COLOR_EXPECT unset)") : color_expect;
+    }
+    g_evidence.color_min_dominance = env_f64("CVF_HW_COLOR_MIN_DOMINANCE", kColorMinDominance);
+    g_evidence.color_min_level = env_f64("CVF_HW_COLOR_MIN_LEVEL", kColorMinLevel);
+    g_evidence.color_max_spread = env_f64("CVF_HW_COLOR_MAX_SPREAD", kColorMaxNeutralSpread);
+    g_evidence.color_tolerance = env_f64("CVF_HW_COLOR_TOLERANCE", kColorDefaultTolerance);
+    {
+        double color_reference = 0.0;
+        g_evidence.color_reference_configured = env_double("CVF_HW_COLOR_REF_B", color_reference) &&
+                                                env_double("CVF_HW_COLOR_REF_G", color_reference) &&
+                                                env_double("CVF_HW_COLOR_REF_R", color_reference);
+    }
+    g_evidence.unplug_test = env_flag("CVF_HW_UNPLUG_TEST");
+    g_evidence.expect_zero_devices = env_flag("CVF_HW_EXPECT_ZERO_DEVICES");
     g_evidence.windows_version = detect_windows_version();
     g_evidence.camera_driver = env_text("CVF_HW_CAMERA_DRIVER");
     g_evidence.camera_firmware = env_text("CVF_HW_CAMERA_FIRMWARE");

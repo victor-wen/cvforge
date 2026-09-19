@@ -87,7 +87,9 @@ In stress mode:
 * `CVF_HW_EXPECT_ZERO_DEVICES=1` is rejected.
 
 The requirement flags are forced on in stress mode and cannot be disabled by an
-environment value there.
+environment value there. The requirement and control flags actually in effect are
+recorded in the release-evidence block (section 10) so an archived log proves
+which flags were set, and each mandatory-check failure message names them.
 
 ## 5. Orientation procedure (target CVF-ORIENT-1)
 
@@ -114,8 +116,14 @@ the documented negative check for this procedure. It is **not** a substitute for
 the positive asymmetric target: when the orientation check is required
 (`CVF_HW_STRESS=1` or `CVF_HW_REQUIRE_ORIENTATION=1`) and
 `CVF_HW_ORIENTATION_TEST` is unset, the run **fails** even when the symmetric
-control is set. When both flags are set, the positive asymmetric checks run
-first and the negative control is added afterwards; neither replaces the other.
+control is set.
+
+The positive asymmetric target and the symmetric control are **separate,
+non-required checks**: each is evaluated on its own separately captured frame, so
+they are never required to hold on one frame, and a failure in one does not
+prevent the other from being evaluated. Because the asymmetric card and the
+vertically symmetric card are physically different targets, run the symmetric
+control in its own run with a vertically symmetric card in view.
 
 ## 6. Color procedure (target CVF-COLOR-1)
 
@@ -140,6 +148,13 @@ The check computes the mean BGR of the central half of the frame. For `red`,
 `CVF_HW_COLOR_TOLERANCE` of its reference — pass inside tolerance, fail outside.
 For `neutral` it passes only when the channel spread is at most
 `CVF_HW_COLOR_MAX_SPREAD`. Measured values and thresholds are printed.
+
+The `neutral` target is the spread **control**, not the positive target. It is
+never a substitute for the saturated CVF-COLOR-1 swatch: when the colour check is
+required (`CVF_HW_STRESS=1` or `CVF_HW_REQUIRE_COLOR=1`) the run fails closed
+unless a saturated target (`red`, `green`, or `blue`) is actually tested, and it
+also fails when `CVF_HW_COLOR_TEST` is unset regardless of
+`CVF_HW_COLOR_EXPECT`.
 
 ## 7. Forced timeout procedure
 
@@ -207,6 +222,18 @@ stress_mode=yes
 require_orientation=yes
 require_color=yes
 require_timeout=yes
+orientation_test=yes
+orientation_min_contrast=40
+orientation_symmetric_control=no
+color_test=yes
+color_expect=red
+color_min_dominance=30
+color_min_level=60
+color_max_spread=30
+color_reference_configured=no
+color_tolerance=40
+unplug_test=no
+expect_zero_devices=no
 windows_version=Windows 10.0 build 19045
 camera_driver=...
 camera_firmware=...
@@ -227,6 +254,14 @@ checks_skipped=...
 Windows version is detected from `RtlGetVersion` (accurate, unlike the
 manifested `GetVersionEx`) and falls back to the `OS` environment variable plus
 the operator override. Driver/firmware are best-effort operator entries.
+
+The requirement and control flags actually in effect are recorded in the block
+(stress mode; `require_orientation`/`require_color`/`require_timeout`; the
+orientation test/control flags and contrast threshold; the colour test/expect
+flag and dominance/level/spread/tolerance thresholds plus whether references are
+configured; the unplug and zero-device probe flags). The mandatory orientation
+and colour failure messages also name the specific `CVF_HW_*` flags that were
+set, so each archived log is self-evidencing.
 
 ### Reading the console output
 
