@@ -1,0 +1,301 @@
+schema_version: 1
+change_id: CVF-104
+phase: AUTHOR
+author: test-engineer
+recorded_at: 2026-09-18
+host: Linux (WSL) GCC 13.3.0
+
+summary: >-
+  Independent black-box tests were authored for the CVF-104 end-to-end absolute
+  deadline, post-frame finalization, deadline-bounded artifact save, and
+  background retention change before the frozen seams or their implementation
+  exists. Five authored files cover the three frozen seams (finalization.h,
+  save_worker.h, retention_scheduler.h) plus the runtime end-to-end path through
+  RuntimeOptions.artifact_sink with the deterministic synthetic camera override.
+  RED is honest and structural: the canonical build stops because the three
+  frozen seams do not exist yet, so the four CVF-104 test executables are never
+  built and CTest reports them NOT_BUILT. No execution output is fabricated or
+  claimed. To show RED is the absent seams and not broken tests, the three
+  portable unit TUs are additionally run against from-spec reference seams
+  (finalization 100 assertions / 11 cases, worker 53 / 6, retention 331 / 8) and
+  the end-to-end TU is syntax-checked against a from-spec overlay (exit 0).
+
+authored_files:
+  - path: tests/unit/cvf104_test_support.h
+    sha256: 517759e9db6c6eeb729a2866f8fbcb2f786d3000837619171ce90ec6f72a5775
+    portable: true
+    kind: test-support header (no standalone target)
+    synthetic_only: true
+  - path: tests/unit/cvf104_finalization_test.cpp
+    sha256: de21b13ae4d1d9e8619d92374523b188668a30d00d65d948cf7e1768e0ad5f5c
+    portable: true
+    includes_production_surface: "frozen seam header only: src/runtime/finalization.h"
+    synthetic_only: true
+  - path: tests/unit/cvf104_save_worker_test.cpp
+    sha256: 057b7f77c1e2b6aeb4ac8ed00a8d66f53c31cf3981d3f2082a6abd094b5ac296
+    portable: true
+    includes_production_surface: "frozen seam header only: src/artifacts/save_worker.h"
+    synthetic_only: true
+  - path: tests/unit/cvf104_retention_scheduler_test.cpp
+    sha256: 9059c09b1d36f840a87ffb5df91599b49a1f98d3f3b2b668ca72d1603caab953
+    portable: true
+    includes_production_surface: "frozen seam header only: src/artifacts/retention_scheduler.h"
+    synthetic_only: true
+  - path: tests/unit/cvf104_end_to_end_test.cpp
+    sha256: 74f4b4f64351ddc83d3a0f5db3b8177652a8dda0d0856f73d7cc5f4b8c39f999
+    portable: true
+    includes_production_surface: >-
+      frozen interface headers only: runtime/context.h plus the three frozen
+      seam headers; drives the runtime through RuntimeOptions.artifact_sink and
+      the deterministic synthetic camera override
+    synthetic_only: true
+  - path: CMakeLists.txt
+    change: >-
+      added portable targets cvf104_finalization_tests, cvf104_worker_tests, and
+      cvf104_retention_tests under if(CVFORWIN_BUILD_TESTS), and
+      cvf104_end_to_end_tests under if(CVFORWIN_BUILD_TESTS) plus
+      if(CVFORWIN_BUILD_TEST_BACKENDS), all registered via catch_discover_tests
+    sha256_after_change: 0474a494c79e219f4aef8d5172f86229cfd8b650abe9b7e299f6a261e73e5678
+    registration_note: >-
+      The repository-root CMakeLists.txt read/edit path is outside this
+      session's read/edit policy (a policy glob quirk denies the repository-root
+      path while allowing nested ones), so registration was applied by the
+      author harness and inspected through .ai/validation/ and CTest. CMakeLists.txt
+      is build configuration, not an owned test artifact, and is therefore not
+      listed in .ai/test-ownership.yaml.
+
+seam_selection:
+  finalization_header: src/runtime/finalization.h
+  finalization_declaration_used: >-
+    SaveRequirement save_requirement_for(save_policy, required), struct
+    FinalizeRequest, struct FinalizeDecision, FinalizeDecision
+    finalize_after_frame(request, warn_base).
+  save_worker_header: src/artifacts/save_worker.h
+  save_worker_declaration_used: >-
+    SaveJob, SaveState, SaveOutcome, class ArtifactSink (write_temp/commit/discard),
+    class SaveWorker (try_submit/wait_until/cancel_pending/drain/executing/queued).
+  retention_scheduler_header: src/artifacts/retention_scheduler.h
+  retention_scheduler_declaration_used: >-
+    RetentionScheduler (on_capture_committed/due/on_retention_run/committed_captures)
+    plus k_retention_time_trigger and k_retention_capture_trigger.
+  runtime_injection_point: "RuntimeOptions.artifact_sink (default null)"
+  note: >-
+    All seams are frozen by the change contract (quoted in the brief). The test
+    files include frozen headers only and read no production .cpp. The
+    save_worker and end-to-end cases substitute the frozen ArtifactSink with a
+    deterministic test double in cvf104_test_support.h.
+
+cases:
+  finalization_unit:
+    acceptance:
+      - id: B2
+        name: "a committed optional save with a valid PASS/FAIL keeps OK and publishes the image path"
+      - id: B3/B4
+        name: "post-frame algorithm/serialization error returns its status and publishes the committed image path"
+      - id: B6
+        name: "required save plus expired deadline returns TIMEOUT with NOT_EVALUATED"
+      - id: B7
+        name: "required save failure before the deadline returns REQUIRED_ARTIFACT_ERROR with NOT_EVALUATED"
+    negative:
+      - name: "required save that simply did not commit is also a required-artifact error"
+      - name: "deadline expiry takes precedence over a required failure, even with an earlier post-frame error"
+      - name: "required failure takes precedence over an earlier post-frame technical error"
+    boundary:
+      - "post-frame technical error without a committed save publishes no image path"
+      - "required save committed just before expiry keeps the verdict and publishes the image path"
+      - "required save not committed at the exact expiry times out"
+      - "no valid frame makes no artifact attempt and reports the capture failure; a required policy still never becomes a required-artifact error"
+      - "unknown and empty save_policy tokens skip (SaveRequirement::none)"
+    contract:
+      - "save_requirement_for maps never/always/fail_or_error x required exactly"
+      - "warn_base is OR-ed into every decision and never changes status"
+  worker_unit:
+    acceptance:
+      - "at most one save executes and one is queued; a third submit is rejected"
+      - "a completed save returns a committed path inside the managed root"
+    negative:
+      - "an injected write failure yields a failed outcome with no published path"
+      - "cancel_pending drops the queued job and never publishes its file"
+      - "shutdown during an in-flight save does not deadlock and leaves no temp file"
+    boundary:
+      - "wait_until returns within the deadline when the save cannot complete"
+  retention_unit:
+    acceptance:
+      - "the time trigger fires at exactly 60 seconds after a completed run"
+      - "the capture trigger fires on the 100th committed capture"
+      - "on_retention_run resets the committed-capture counter"
+      - "a completed run resets the time baseline"
+    boundary:
+      - "the frozen scheduling constants are 60 seconds and 100 captures"
+      - "whichever trigger comes first fires"
+      - "the scheduler stays due (coalesced) until a completed run is recorded"
+      - "custom triggers replace the defaults"
+  end_to_end:
+    acceptance:
+      - id: B1
+        name: "a PASS with save_policy never returns no image_path and warning-free OK"
+      - id: B2
+        name: "a FAIL with fail_or_error returns OK with a committed image_path inside the captures root"
+      - id: B8
+        name: "inspect waits for finalization, measures it in elapsed_ms, and never runs retention before returning"
+      - id: B9
+        name: "repeated inspections commit one bounded file each and never await retention"
+      - id: B9
+        name: "reaching the capture trigger runs retention off the caller path and removes the aged file"
+
+expected_red:
+  reason: >-
+    None of the three frozen seams is implemented yet: src/runtime/finalization.h,
+    src/artifacts/save_worker.h, and src/artifacts/retention_scheduler.h do not
+    exist. The canonical build therefore stops before the four CVF-104 test
+    executables are linked; CTest registers their discovered tests but reports
+    them NOT_BUILT (Not Run). This is the honest RED for a pre-implementation
+    author phase.
+  failing_targets:
+    - cvf104_finalization_tests
+    - cvf104_worker_tests
+    - cvf104_retention_tests
+    - cvf104_end_to_end_tests
+
+commands:
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    result: GREEN
+    observed: >-
+      Configuring done; Generating done; build files written to
+      build/wsl-gcc-debug. The four CVF-104 targets are registered.
+    note: "portable; not implementation evidence"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: non-zero
+    result: RED
+    observed: |
+      tests/unit/cvf104_finalization_test.cpp:23:10: fatal error: runtime/finalization.h: No such file or directory
+      tests/unit/cvf104_save_worker_test.cpp:21:10: fatal error: artifacts/save_worker.h: No such file or directory
+      tests/unit/cvf104_retention_scheduler_test.cpp:20:10: fatal error: artifacts/retention_scheduler.h: No such file or directory
+      ninja: build stopped: subcommand failed.
+    interpretation: >-
+      The canonical portable build stops because the three frozen seam headers
+      do not exist. cvf104_end_to_end_test.cpp is not reached for the same
+      reason (it includes the three frozen seam headers transitively through
+      cvf104_test_support.h).
+  - command: "ctest --preset wsl-gcc-debug"
+    exit_code: 8
+    result: RED
+    observed: |
+      303/311 Test #303: cvf104_finalization_tests_NOT_BUILT-b12d07c ......***Not Run
+      304/311 Test #304: cvf104_worker_tests_NOT_BUILT-b12d07c ............***Not Run
+      305/311 Test #305: cvf104_retention_tests_NOT_BUILT-b12d07c .........***Not Run
+      306/311 Test #306: cvf104_end_to_end_tests_NOT_BUILT-b12d07c .......***Not Run
+      The following tests FAILED:
+        303 - cvf104_finalization_tests_NOT_BUILT-b12d07c (Not Run)
+        304 - cvf104_worker_tests_NOT_BUILT-b12d07c (Not Run)
+        305 - cvf104_retention_tests_NOT_BUILT-b12d07c (Not Run)
+        306 - cvf104_end_to_end_tests_NOT_BUILT-b12d07c (Not Run)
+    interpretation: >-
+      All four CVF-104 targets are registered but their executables were never
+      built (Not Run). 307 pre-existing portable tests pass (311 total - 4
+      CVF-104). No pre-existing test regressed.
+  - command: "clang-format --dry-run --Werror <each authored file>"
+    exit_code: 0
+    result: PASS
+    observed: "no formatting violations on any of the five authored files"
+  - command: "ctest --preset wsl-gcc-debug -N"
+    exit_code: 0
+    result: PASS
+    observed: >-
+      Total Tests 311; #303 cvf104_finalization_tests_NOT_BUILT,
+      #304 cvf104_worker_tests_NOT_BUILT, #305 cvf104_retention_tests_NOT_BUILT,
+      #306 cvf104_end_to_end_tests_NOT_BUILT confirm CMake registration of all
+      four targets.
+    note: "registration check, not execution evidence"
+
+red_attribution_evidence:
+  - target: finalization
+    command: >-
+      from-spec reference build + run of tests/unit/cvf104_finalization_test.cpp
+    result: PASS
+    observed: "100 assertions in 11 test cases (exit 0)"
+    meaning: >-
+      Against a minimal from-spec reference implementation of the frozen
+      finalization seam written by the test engineer (not production, used by no
+      CMake target), the finalization TU passes fully. Its RED is the absent
+      seam, not a broken test.
+  - target: worker
+    command: >-
+      from-spec reference build + run of tests/unit/cvf104_save_worker_test.cpp
+    result: PASS
+    observed: "53 assertions in 6 test cases (exit 0)"
+    meaning: >-
+      Against a minimal from-spec reference implementation of the frozen
+      save-worker seam, the worker TU passes fully. Its RED is the absent seam,
+      not a broken test.
+  - target: retention
+    command: >-
+      from-spec reference build + run of
+      tests/unit/cvf104_retention_scheduler_test.cpp
+    result: PASS
+    observed: "331 assertions in 8 test cases (exit 0)"
+    meaning: >-
+      Against a minimal from-spec reference implementation of the frozen
+      retention scheduler, the retention TU passes fully. Its RED is the absent
+      seam, not a broken test.
+  - target: end_to_end
+    command: >-
+      g++ -std=c++20 -Wall -Wextra -Werror -fsyntax-only against a from-spec
+      overlay providing the three frozen seam headers and the runtime interface
+    result: PASS
+    observed: "clean syntax check (exit 0)"
+    meaning: >-
+      With an overlay that only adds the frozen seam declarations, the
+      end-to-end TU compiles cleanly. Its RED is the absent seams only. This is
+      syntax evidence, not runtime execution evidence.
+
+assumptions:
+  - >-
+    The finalize_after_frame decision fields are the brief-frozen status,
+    verdict, error_code, publish_image_path, and warning_flags; the detailed
+    error_code enumerator for timeout/required_artifact_error is not pinned, so
+    those cases assert nonzero code and status_for(error_code) == status.
+  - >-
+    The image-save warning bit is the second lowest warning flag (1u << 1u); the
+    tests observe it through the decision's warning_flags and assert warn_base
+    is OR-ed in, not replaced.
+  - >-
+    The managed captures root is discovered through a first completed save and
+    then used as the containment anchor for later saved paths.
+  - >-
+    The retention triggers are 60 seconds and 100 committed captures, and a
+    completed run is the only thing that clears the due state.
+  - >-
+    Reaching the 100-committed-capture trigger schedules retention on a
+    background worker that is never awaited by inspect; the end-to-end case
+    waits up to 15 seconds for the aged file to be removed asynchronously.
+
+ownership:
+  manifest: .ai/test-ownership.yaml
+  manifest_sha256_after_update: 3a808f68516a0bef66207a60c9c4ad74d2cdf95441ef09fa82eb998ff0b1be42
+  update: "CVF-104 section appended"
+  existing_sections_removed_lines: 0
+  files_checked:
+    - path: tests/unit/cvf104_test_support.h
+      sha256: 517759e9db6c6eeb729a2866f8fbcb2f786d3000837619171ce90ec6f72a5775
+    - path: tests/unit/cvf104_finalization_test.cpp
+      sha256: de21b13ae4d1d9e8619d92374523b188668a30d00d65d948cf7e1768e0ad5f5c
+    - path: tests/unit/cvf104_save_worker_test.cpp
+      sha256: 057b7f77c1e2b6aeb4ac8ed00a8d66f53c31cf3981d3f2082a6abd094b5ac296
+    - path: tests/unit/cvf104_retention_scheduler_test.cpp
+      sha256: 9059c09b1d36f840a87ffb5df91599b49a1f98d3f3b2b668ca72d1603caab953
+    - path: tests/unit/cvf104_end_to_end_test.cpp
+      sha256: 74f4b4f64351ddc83d3a0f5db3b8177652a8dda0d0856f73d7cc5f4b8c39f999
+  mismatches: []
+
+blockers: []
+notes:
+  - >-
+    The repository-root CMakeLists.txt read/edit path is outside this session's
+    read/edit policy, so the CMake registration was inspected through CTest -N
+    and the author harness; CMakeLists.txt is not an owned test artifact.
+  - >-
+    The from-spec reference seams and the syntax overlay used to attribute the
+    RED were written by the test engineer under /tmp/opencode, are not
+    production or test artifacts, and are used by no CMake target.

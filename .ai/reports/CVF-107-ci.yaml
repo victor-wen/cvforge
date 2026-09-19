@@ -1,0 +1,37 @@
+schema_version: 1
+change_id: CVF-107
+artifact: ci-evidence
+candidate_sha: 0e07e21d2c834ed7600292ef47d2f25a7a8d1c5e
+repository: victor-wen/cvforge
+branch: main
+workflow: windows-ci
+run_id: 35434008928
+run_url: https://github.com/victor-wen/cvforge/actions/runs/35434008928
+conclusion: success
+jobs:
+  - name: "Release build, tests, abi-check, package"
+    conclusion: success
+    tests: "100% tests passed, 0 tests failed out of 336"
+  - name: "Test-enabled suite and clean package consumer"
+    conclusion: success
+    tests: "100% tests passed, 0 tests failed out of 501"
+commit_scope:
+  files:
+    - CMakeLists.txt
+    - tests/hardware/uvc_smoke.cpp
+    - tests/unit/test_cvf107_hardware_wiring_developer.cpp
+    - docs/hardware-uvc.md
+  note: >-
+    Only CVF-107 scope files were committed. No .ai/ state or local logs were published, consistent
+    with the delivery pattern of the earlier CVF-101..CVF-106 commits.
+annotations:
+  - >-
+    Node.js 20 deprecation warnings on the pinned actions (actions/cache, actions/checkout,
+    actions/upload-artifact). Pre-existing and unrelated to this change; both jobs still succeeded.
+log_path: .ai/reports/CVF-107-ci-tests.log
+log_sha256: 5ea2c5275e83c476743b16f82bb678a25b36c8c642bd89ff4b4187f2502b4bb0
+hardware_evidence_note: >-
+  Hosted CI never builds or runs cvf_hw_uvc_smoke; the hardware target is opt-in and WIN32-gated by
+  contract. The 501-test Windows run therefore represents portable and windows_uvc_component evidence
+  only. It does not and cannot certify NFR-019 orientation or colour checks, which remain UNVERIFIED
+  pending a station with the CVF-ORIENT-1 and CVF-COLOR-1 physical targets.

@@ -1,0 +1,257 @@
+schema_version: 1
+change_id: CVF-108
+reviewer: reviewer
+verdict: PASS_WITH_FINDINGS
+reviewed_artifacts:
+  - .ai/changes/CVF-108.yaml
+  - .ai/test-briefs/CVF-108.yaml
+  - .ai/reports/CVF-108-test-red.yaml
+  - .ai/reports/CVF-108-implementation.yaml
+  - .ai/reports/CVF-108-test-verify.yaml
+  - .ai/test-ownership.yaml
+  - .ai/project-contract.yaml
+  - .ai/workflow-state.yaml
+  - CMakeLists.txt
+  - CMakePresets.json
+  - cmake/CvfPackage.cmake
+  - cmake/CvfPackage.cmake.in
+  - cmake/CvfPackageVerify.cmake.in
+  - cmake/CvfAbiCheck.cmake
+  - vcpkg.json
+  - .github/workflows/windows.yml
+  - include/cvforwin/cvf_api.h
+  - src/c_api/cvforwin.def
+  - tests/unit/cvf108_release_metadata_test.cpp
+  - tests/unit/test_cvf108_release_naming_developer.cpp
+  - docs/usage.md
+  - docs/development.md
+  - docs/build.md
+  - docs/packaging.md
+  - LICENSES/README.md
+  - config/examples/**
+  - examples/c_host/**
+  - .ai/validation/cvf108-author-summary.txt
+  - .ai/validation/cvf108-verify-summary.txt
+  - .ai/validation/cvf108-verify-counts.log
+  - .ai/validation/cvf108-metadata-inventory.txt
+
+summary: >-
+  CVF-108 synchronizes the deliverable to release 1.1.0 without changing the public C ABI.
+  I verified independently that the product version is declared exactly once (CMakeLists.txt:4)
+  and that vcpkg.json, the CMake packaging modules, the CI workflow, the documentation, and the
+  notice mapping all present 1.1.0, while the public header keeps ABI version 1
+  (include/cvforwin/cvf_api.h:77) and the export allowlist stays exactly the five approved symbols
+  (src/c_api/cvforwin.def, enforced by cmake/CvfAbiCheck.cmake). No current-release 1.0.0 reference
+  survives on the delivery surface; the remaining 1.0.0 mentions are legitimate history or test
+  fixtures. The independent suite is black-box against the brief (reads delivery metadata as data),
+  was RED before the bump, is hash-pinned, and passes green with 116 assertions in 20 cases; the
+  developer suite pins the derivation and hardcode guards. The only defects I found are documentation
+  completeness/staleness issues and one residual scope question about the brief's OB-3 wording, none
+  of which contradict the shipped release state. Verdict PASS_WITH_FINDINGS, zero blocking findings.
+
+verification_items:
+  - id: VI-1
+    name: Build metadata declares product version 1.1.0 from a single source
+    evidence:
+      - "CMakeLists.txt:4 project(cvforwin VERSION 1.1.0 LANGUAGES C CXX)"
+      - "vcpkg.json:3 version-string 1.1.0 (the brief treats the manifest version field as release metadata)"
+      - "CMakePresets.json contains no product-version token and no whole-token 1.0.0"
+      - "tests/unit/cvf108_release_metadata_test.cpp:466-543 (OB-1 cases; exact-token matching rejects supersets)"
+    status: satisfied
+
+  - id: VI-2
+    name: Staged package, archives, and CI artifact names carry 1.1.0
+    evidence:
+      - ".github/workflows/windows.yml:76-77 artifact cvforwin-1.1.0-package and path build/.../package/cvforwin-1.1.0.zip"
+      - ".github/workflows/windows.yml:83-84 artifact cvforwin-1.1.0-symbols and path build/.../symbols/cvforwin-1.1.0-symbols.zip"
+      - ".github/workflows/windows.yml:125 clean-consumer root build/windows-msvc-tests/package/cvforwin-1.1.0"
+      - "docs/development.md:608-615,622 and docs/packaging.md:11,20-21,39,59 quote the same 1.1.0 names"
+      - "tests/unit/cvf108_release_metadata_test.cpp:549-585 (OB-2) and tests/unit/test_cvf108_release_naming_developer.cpp:237-252"
+    status: satisfied on the tracked tree; native uploaded artifact bytes are deferred (see deferred_acceptance)
+
+  - id: VI-3
+    name: Packaging derives names from the single declared project version; no hardcoded release name
+    evidence:
+      - "cmake/CvfPackage.cmake.in:9-10 cvforwin-@PROJECT_VERSION@ and package_root; :77 archive ${cvf_package_name}.zip"
+      - "cmake/CvfPackage.cmake:122 cvforwin-${PROJECT_VERSION}-symbols.zip"
+      - "cmake/CvfPackageVerify.cmake.in:17-18 verify the derived package"
+      - "tests/unit/test_cvf108_release_naming_developer.cpp:204-235 (derivation strings and hardcode guard over cmake/CvfPackage*); independent test :493-526"
+    status: satisfied
+
+  - id: VI-4
+    name: Documentation set reflects 1.1.0, the template.match example, and background retention
+    evidence:
+      - "docs/development.md:243,608-615,622 (1.1.0 names); :360-363 assets object and pointer to usage.md; :377-403 preparation/asset seam; :590-595 background retention"
+      - "docs/packaging.md:11,20-21,39,59 (1.1.0 names)"
+      - "docs/usage.md:57 references the deployment template; config/examples holds the template.match recipe and asset"
+      - "tests/unit/cvf108_release_metadata_test.cpp:591-619 (no non-historical stale doc names), :621-639 (template.match plus asset/recipe/.png), :641-683 (background-retention markers near retention lines)"
+    status: satisfied as a documentation set (OB-6 is a set-level statement); per-file gaps recorded as CVF108-NBF-01
+
+  - id: VI-5
+    name: License and notice material covers statically linked components including the image codec
+    evidence:
+      - "vcpkg.json:8-21 dependencies opencv4 (default-features false; fs, jpeg, png, thread), nlohmann-json, spdlog; :22-29 test feature catch2"
+      - "LICENSES/README.md:3 (cvforwin 1.1.0 release), :17-26 mapping OpenCV, nlohmann-json, spdlog, fmt, libjpeg-turbo, libpng, zlib, Catch2, each with license and notice file; :30-37 static-linkage and non-redistributed build-helper notes; :45-50 example asset is project-authored"
+      - "tests/unit/cvf108_release_metadata_test.cpp:739-773 (imgcodecs, libpng, libjpeg-turbo names; OpenCV notice present; release claim exactly 1.1.0)"
+    status: satisfied; the mapping covers the manifest and the enabled OpenCV features, and no missing statically linked component was identified
+
+  - id: VI-6
+    name: Public ABI stays version 1 with exactly five exports
+    evidence:
+      - "include/cvforwin/cvf_api.h:77 #define CVF_ABI_VERSION_V1 1u"
+      - "src/c_api/cvforwin.def export list is exactly cvf_get_abi_version, cvf_initialize, cvf_reload_recipes, cvf_inspect, cvf_shutdown"
+      - "cmake/CvfAbiCheck.cmake requires exactly those five names"
+      - "tests/unit/cvf108_release_metadata_test.cpp:689-733, :809-829, :958-998; tests/unit/test_cvf108_release_naming_developer.cpp:254-270"
+    status: satisfied
+
+  - id: VI-7
+    name: Both test sets are meaningful, deterministic, and independent
+    evidence:
+      - ".ai/reports/CVF-108-test-red.yaml records the pre-bump RED: 8 failed assertions in 6 of 16 cases (5 stale CI names, 14 stale non-historical doc names, stale CMakeLists/vcpkg/notice claims)"
+      - ".ai/reports/CVF-108-test-verify.yaml records green 116 assertions / 20 cases and the full canonical run 483/483 ctest plus format-check and abi-check"
+      - ".ai/test-ownership.yaml:1070 pins tests/unit/cvf108_release_metadata_test.cpp sha256 ad62725ca40a294d987b964676867a9278a782ef1fea11ebef7ee37e1dde2dca; the verify-phase regex amendment has documented pre-verify hash 03f07e57... and re-run controls"
+      - "Developer tests read the real files through CVF108_REPO_ROOT and pin derivation, hardcode absence, CI names, and the five-export set (tests/unit/test_cvf108_release_naming_developer.cpp:204-283)"
+    status: satisfied
+
+  - id: VI-8
+    name: No unintended changes, no scope violation, no missed current-release legacy reference
+    evidence:
+      - "All touched paths are inside the change scope (build_and_delivery, docs, licenses, tests/unit per the recorded scope amendment, .ai/validation); src/** and include/** were not modified per the implementation report and the author pre-implementation git status recorded in .ai/validation/cvf108-author-summary.txt"
+      - "CMakeLists.txt contains no 1.0.0 at all (targeted scan this session)"
+      - "No 1.0.0 as current release in CMakeLists.txt, CMakePresets.json, cmake/**, vcpkg.json, .github/workflows/**, docs/**, examples/**, config/**, LICENSES/**, tests/package/**"
+      - "Legitimate history/out of scope: src/algorithms/compiled_algorithms.h:4 (baseline 1.0.0 comment), src/inspection/registry.h:13 (baseline 1.0.0 comment), .ai/** archive/reports/reviews, and test-internal fixtures tests/unit/cvf108_release_metadata_test.cpp:41,799-800,933-955 and tests/unit/test_cvf108_release_naming_developer.cpp:275"
+      - "CMakeLists.txt:1722-1749 and :1751-1780 register both new CVF-108 test targets unconditionally within CVFORWIN_BUILD_TESTS, with no WIN32, hardware, or test-backend gate; the CVF-107 wiring block (1690-1720) is untouched"
+    status: satisfied, with mechanical hash/scope recomputation delegated to the deterministic quality script (no shell available to this reviewer)
+
+  - id: VI-9
+    name: Platform deferrals are honest and no unverified claim is presented as passed
+    evidence:
+      - ".ai/reports/CVF-108-implementation.yaml and .ai/reports/CVF-108-test-verify.yaml defer the Windows package build, the clean consumer, and native MSVC/dumpbin checks to the Windows presets and CI"
+      - "docs/packaging.md:3-6 and docs/development.md:601-606 state package targets are Windows-only by design, so no portable package evidence is possible"
+      - "The portable evidence that is claimed (483/483 ctest, format-check, abi-check) is recorded in .ai/validation/cvf108-verify-summary.txt and .ai/validation/cvf108-verify-counts.log"
+    status: satisfied; OB-3 wording residual recorded as CVF108-NBF-04
+
+acceptance_criteria:
+  satisfied:
+    - "Behavior 1 (version and names to 1.1.0): CMakeLists.txt:4, vcpkg.json:3, cmake/CvfPackage.cmake.in:9-10,77, cmake/CvfPackage.cmake:122, .github/workflows/windows.yml:76-77,83-84,125."
+    - "Behavior 2 (consistency across package verification, clean-consumer path, and documentation): cmake/CvfPackageVerify.cmake.in:17-18, docs/packaging.md:11,20-21,39,59, docs/development.md:608-615,622, .github/workflows/windows.yml:125."
+    - "Behavior 3 (notices accurate including the newly used image codec): vcpkg.json:8-21, LICENSES/README.md:17-26, independent test :739-773."
+    - "Behavior 4 (documentation reflects 1.1.0, the assets/template.match example, and background retention) at the documentation-set level required by brief OB-6: docs/development.md:360-363,377-403,590-595; docs/usage.md:57; independent test :591-683."
+    - "Behavior 5 and invariants (ABI 1, five exports, one runtime DLL, no source change masked as a version bump): include/cvforwin/cvf_api.h:77, src/c_api/cvforwin.def, cmake/CvfAbiCheck.cmake, CMakeLists.txt untouched apart from test registration (1690-1780)."
+    - "Contract NFR-009/NFR-011 release acceptance on package naming and unchanged ABI version: all tracked name sources agree on 1.1.0 and the ABI/export checks pass."
+  deferred_to_windows_package_evidence:
+    - "Native staged package directory, package ZIP, and symbols ZIP bytes and the uploaded CI artifact names: package targets are Windows-only by design (docs/packaging.md:3-6, docs/development.md:601-606), so the portable host cannot produce them; the clean evidence is the windows-ci and windows-tests-quality workflows."
+    - "Clean package consumer run against the installed 1.1.0 package: tests/package/package_checks.cmake is Windows-only and hash-pinned by the test owner, so it cannot run or be modified here (docs/packaging.md:46-60)."
+    - "Native package contents, no second runtime DLL, and the direct-import allowlist: these require the MSVC package-verify path and Windows dependency inspection (docs/packaging.md:24-44)."
+    - "OB-3 as literally worded (the installed package reports its own version to a consumer that reads the package's metadata): the package carries no version-bearing metadata artifact, so even the Windows deferral cannot fully exercise the brief's wording; recorded for release review in CVF108-NBF-04."
+    - "Native MSVC export verification: the portable abi-check passes, but dumpbin-level confirmation of the built DLL remains a Windows-only step."
+
+legacy_1_0_0_scan:
+  current_release_references_found: none
+  detail: >-
+    No file on the delivery surface presents 1.0.0 as the current product version. Every
+    cvforwin-<version> name in docs/**, .github/workflows/**, cmake/**, vcpkg.json, LICENSES/README.md,
+    and the top-level build definition is 1.1.0. Remaining 1.0.0 mentions are historical comments in
+    src/** (out of scope), archived .ai material, upstream Catch2 license text, and deliberate test
+    fixtures inside the two CVF-108 test files.
+
+blocking_findings: []
+
+non_blocking_findings:
+  - id: CVF108-NBF-01
+    severity: low-medium
+    file: docs/usage.md
+    location: lines 61-77 (recipe schema table and example paragraph)
+    issue: >-
+      docs/development.md:360-363 describes the recipe assets object and then points readers to
+      usage.md for the full schema and the asset bounds, but the usage.md recipe schema table has no
+      assets key, no asset path/extension bounds, and no template.match example. The change contract's
+      behavior 4 names usage.md among the documents that must reflect the new example. The independent
+      OB-6 checks are set-level over docs/** and pass because development.md carries the content.
+    required_fix: >-
+      Add an assets row with the relative-path rule and bounds plus a template.match example pointer to
+      docs/usage.md, or correct the pointer in docs/development.md. Documentation-only; owner is the
+      developer/controller follow-up, not a CVF-108 blocker.
+
+  - id: CVF108-NBF-02
+    severity: low
+    file: docs/development.md
+    location: lines 273-281 (independence rules), line 262 (suite table)
+    issue: >-
+      The independence section still describes the 1.0.0-era state: sections CVF-001 through CVF-008
+      and the pinned-file glob tests/unit/cvf00*_*.{cpp,h}, which does not match the 1.1.0 test-owner
+      files (cvf101_* through cvf108_*). A reader following the document cannot identify the currently
+      pinned unit suites.
+    required_fix: >-
+      Extend the section range and file glob to cover the current manifest entries (for example refer to
+      the sections listed in .ai/test-ownership.yaml rather than a fixed range). Docs-only follow-up.
+
+  - id: CVF108-NBF-03
+    severity: low
+    file: docs/packaging.md
+    location: line 15
+    issue: >-
+      The package-layout comment describes config/examples/ as cvforwin.json + recipes/*.json and omits
+      the assets/ subtree that the package ships and that the template.match example needs.
+    required_fix: Mention assets/ in the layout comment so the documented package contents match the staged tree.
+
+  - id: CVF108-NBF-04
+    severity: medium-low
+    file: cmake/CvfPackage.cmake.in
+    location: staged package contents (package_root assembly) and cmake/CvfPackage.cmake staging
+    issue: >-
+      Brief OB-3 asks that the installed package report its own version to a consumer that reads the
+      package's metadata. The package contains no version-bearing metadata artifact (no version file,
+      no VERSIONINFO/.rc anywhere in the tree); a consumer can only infer the release from the staged
+      directory or archive name. The reports defer OB-3 to a Windows package build, but there is no
+      metadata file to read even there, so the deferral cannot fully satisfy the literal wording.
+      This does not make the release state wrong: the name derivation is pinned and tested.
+    required_fix: >-
+      Controller/architect to adjudicate OB-3 intent (name-derived identity is sufficient, or add a
+      small version metadata file staged into the package and checked by the test owner's consumer
+      kit). Carry into release review as a residual risk if left as is.
+
+  - id: CVF108-NBF-05
+    severity: low
+    file: tests/unit/cvf108_release_metadata_test.cpp
+    location: lines 290-328 (historical-context window), 133-152 and 493-526 (packaging guard scope)
+    issue: >-
+      Two heuristic limits in the independent suite: a stale 1.0.0 current-release mention in docs can
+      be exempted by a history keyword or version heading anywhere within plus or minus three lines;
+      and the packaging consistency scan only inspects files named cmake/CvfPackage*, so a release name
+      hardcoded into some other packaging module would not be seen, while the single-source assertion
+      passes if any packaging module references PROJECT_VERSION. The developer suite supplements the
+      hardcode guard for the CvfPackage bodies, and the current tree is correct, so these are coverage
+      limits rather than observed defects.
+    required_fix: >-
+      Optional future test amendment by the test owner (tighten the historical window to the mention
+      line or its heading, and widen the hardcode scan to all packaging modules). No action required for
+      this change.
+
+independence_notes: >-
+  The independent suite is a new, black-box file authored by the test owner from the brief; it reads
+  delivery metadata as data and no production implementation source. Its current sha256 is pinned in
+  .ai/test-ownership.yaml:1070 (ad62725c...), and the verify-phase regex hardening (four-part superset
+  capture) is documented with explicit pre-verify and post-verify hashes and boundary controls, with the
+  test owner as the recorded editor. No implementation detail appears in the independent suite's
+  expectations. The developer suite is separate, reads the same files as data, and is not hash-pinned by
+  design. No independence violation was observed for CVF-108; the only reviewer-logged limitation is the
+  heuristic coverage noted in CVF108-NBF-05.
+
+evidence_limitations: >-
+  This reviewer had no shell access, so no git status/diff or sha256sum was recomputed. Scope cleanliness
+  and file hashes rest on the recorded ownership manifest, the implementation and verification reports,
+  the validation logs, and the line-level source inspection described above. The deterministic quality
+  script remains the mechanical gate for hashes and file-scope. .ai/workflow-state.yaml parses cleanly
+  when read during this review; the earlier parse checkpoint appears stale and the controller should
+  refresh it.
+
+security_scope: >-
+  No secrets, tokens, or credentials appear in the change. The CI edits are release-name strings only;
+  no publishing, deletion, or destructive command was added, and no sensitive path was edited.
+
+maintainability: >-
+  Naming is consistent (cvforwin-<PROJECT_VERSION> everywhere), the packaging derivation stays in one
+  place, both new test targets are portable and registered without platform gates, and no TODO or
+  placeholder was left behind. The version string appearing in test constants is intentional
+  black-box pinning of the release contract, not duplication of implementation state.

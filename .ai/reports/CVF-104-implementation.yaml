@@ -1,0 +1,547 @@
+schema_version: 1
+change_id: CVF-104
+phase: IMPLEMENTATION
+author: developer
+recorded_at: 2026-09-19
+host: "Linux (WSL) GCC 13.3.0 / Clang 18; Windows MSVC not executable here"
+status: COMPLETE
+
+summary: >-
+  Finished and verified the interrupted CVF-104 work. The tree was non-compiling:
+  src/runtime/context.cpp referenced an undefined deadline_failure() helper and a
+  stale serialization_failure symbol, passing an extra argument that
+  finalize_post_frame() does not accept at three call sites, and failure_outcome()
+  dereferenced the value-type core::Failure as a pointer. I fixed the three
+  post-frame call sites to build local core::Failure values and call
+  finalize_post_frame(&failure, ...), restored failure_outcome() to read
+  failure.message, and preserved the original bounded error_message for a
+  required-save failure/timeout that has no primary technical failure. I also
+  removed a clang-tidy-flagged redundant member initializer in
+  retention_scheduler.h and corrected a false-positive assertion in my own
+  developer test (filenames may legally embed dots; the real invariant is a
+  single direct-child filename component, matching the established CVF-005
+  sanitization test). Every post-frame outcome now routes through
+  finalize_after_frame exactly once under one absolute Deadline; the save worker
+  performs encode/write/commit off the caller thread through the injected or
+  production CaptureStoreSink; and retention is a coalesced background run.
+  Portable debug and ASAN suites are 342/342, the four independent CVF-104
+  targets pass, format-check and clang static-analysis are clean, and the five
+  independent test files hash to their pinned values.
+
+root_cause_of_interrupted_tree:
+  kind: mid-edit incomplete refactor
+  detail: >-
+    The session that introduced the single-finalization refactor left three
+    call sites that still passed a fabricated second failure pointer
+    (&serialization_failure) and an inline &deadline_failure(...) temporary that
+    were never declared, while finalize_post_frame() takes exactly one
+    const core::Failure*. failure_outcome() had already been migrated to a
+    const core::Failure& reference parameter but one line still used the old
+    pointer form. No behavior was stubbed; the declarations were simply missing
+    and the signatures mismatched.
+
+deliverables:
+  - requirement: "One absolute Deadline created once and passed unchanged to every inspect stage"
+    status: done
+    note: >-
+      inspect() computes a single core::Deadline::from_timeout_ms at the top and
+      passes it unchanged to the serialization gate wait, capture_with_one_retry,
+      settle capture, algorithm dispatch, and save wait. The only other
+      from_timeout_ms in src/runtime is in Context::create() for camera
+      enumeration/open (lifecycle, outside inspect); src/camera/uvc_windows and
+      src/inspection contain no per-stage deadline construction.
+  - requirement: "Every post-frame outcome routes through finalize_after_frame exactly once"
+    status: done
+    note: >-
+      All seven post-frame exits (settle deadline expiry, settle capture failure,
+      algorithm lookup failure, dispatch failure, payload-too-large, serialization
+      exception, success) call finalize_post_frame(), which invokes
+      finalize_after_frame() once and builds the public InspectionOutcome from its
+      decision. Pre-frame failures (closed context, bad input_json, queue timeout,
+      missing snapshot, recipe not found, first capture failure) use
+      failure_outcome() with frame_valid false, so no artifact attempt is made.
+  - requirement: "fail_or_error persists the latest valid frame after a technical error; no attempt when capture failed"
+    status: done
+    note: >-
+      finalize_post_frame() sets execution_ok=false and the primary
+      status/error but keeps the latest valid frame; decide_capture_save() with
+      fail_or_error then saves it when execution failed. The first-capture-failure
+      path returns before any save and never constructs a SaveJob.
+  - requirement: "Save runs on SaveWorker off the caller thread via the injected/production ArtifactSink"
+    status: done
+    note: >-
+      RuntimeOptions.artifact_sink (default null) selects an injected sink;
+      otherwise CaptureStoreSink wraps the managed CaptureStore. SaveJob owns a
+      cloned cv::Mat. write_temp encodes PNG into a same-root .cvftmp_*.part and
+      commit publishes by same-root std::filesystem::rename; discard removes the
+      temporary. The caller only blocks in wait_until(deadline).
+  - requirement: "Required waits to the absolute deadline; optional uses remaining time, warns, no image_path, verdict unchanged"
+    status: done
+    note: >-
+      wait_until(deadline) uses deadline.remaining(); a required save that cannot
+      be queued is awaited only to the deadline and becomes TIMEOUT; an optional
+      non-commit only sets warning_image_save_failed via finalize_after_frame and
+      leaves the PASS/FAIL verdict and status OK intact. cancel_pending() drops
+      this inspection's queued job; the executing job is not interruptible in the
+      frozen seam, so no queued temporary is ever published and no path is
+      reported before a completed atomic commit.
+  - requirement: "Retention via RetentionScheduler and a separate maintenance worker; inspect never scans/sorts/deletes"
+    status: done
+    note: >-
+      schedule_retention() only updates the retention root, records the committed
+      capture/asks due(), and notifies the condition variable. The maintenance
+      thread performs CaptureStore::enforce_retention() (non-recursive, skips
+      temporary names, age-then-size). No directory iteration, sort, stat, or
+      remove appears on the inspect path.
+  - requirement: "Shutdown drains/cancels the save worker and stops the maintenance worker without deadlock"
+    status: done
+    note: >-
+      ~Impl sets closed_, signals and joins the maintenance worker, then calls
+      save_worker_.drain() (cancels the queued job, completes/cancels in-flight
+      work, joins), then closes the camera. The independent shutdown test drives
+      an in-flight blocked save and confirms no deadlock and no orphan temporary.
+  - requirement: "Preserve observable status/verdict/error/warning semantics and error precedence; public C ABI unchanged"
+    status: done
+    note: >-
+      Finalization precedence is exactly contract rules 0-4; required failure
+      precedes an earlier technical error unless the absolute deadline expired.
+      The original bounded required-save diagnostic message is restored for the
+      no-primary-failure case. No include/cvforwin/** or src/c_api/** file changed.
+
+changed_files:
+  production:
+    - path: src/runtime/context.cpp
+      sha256: 99cb9b041fd54ac10974f3c400ab4cc69d3fff8a708e6f0578f6fbe9aece297c
+      role: "Fixed three post-frame call sites, failure_outcome pointer bug, and required-save error_message; single Deadline/finalize wiring."
+    - path: src/runtime/context.h
+      sha256: 8b3e5f0e962d44efdae4db609d29307e8b19a85318c0de005472903fc4ed6994
+      role: "Forward declaration of artifacts::ArtifactSink and RuntimeOptions.artifact_sink injection point (internal, not C ABI)."
+    - path: src/runtime/finalization.h
+      sha256: 9190f2fc84ac87cd22c72056d43b40b03a4fbfe9cc9f4ce76cabe3fec2ae9a35
+      role: "Frozen finalization seam: save_requirement_for, FinalizeRequest/FinalizeDecision, finalize_after_frame (clang-format only this session)."
+    - path: src/artifacts/save_worker.h
+      sha256: 92e12db0cc0e6fd9d0683f817d1c486e0aa4c117e9c0e3f1d458cb1059c98d11
+      role: "Frozen save-worker seam: SaveJob/SaveState/SaveOutcome, ArtifactSink, SaveWorker."
+    - path: src/artifacts/save_worker.cpp
+      sha256: 271a3faca82627a1ece0832e064d0ddf09afdb09b76d9eb4b7cb468f96e542f5
+      role: "One-executing/one-queued worker thread, deadline wait, cancel/drain, temp commit-or-discard."
+    - path: src/artifacts/retention_scheduler.h
+      sha256: a017cb0c82d1bbb316e63b8e127f034b5d763c4f775974bc7a278f3d09839bc2
+      role: "Coalesced 60s/100-capture trigger policy; removed clang-tidy-flagged redundant member initializer."
+    - path: src/artifacts/capture_sink.h
+      sha256: 249f31374afb14212be9b07687b83c9bea88e7120fb9ff68fc04fe981ac6c3fe
+      role: "Production CaptureStoreSink declaration."
+    - path: src/artifacts/capture_sink.cpp
+      sha256: 5bbb46a3b717184d27f6b7e6b655ec74405adac317a5d04357bcf2d16a7b188f
+      role: "write_temp/commit/discard backed by CaptureStore temp + atomic rename."
+    - path: src/artifacts/capture_store.h
+      sha256: 94d3ff618a4a32bab3c1030df7773be5249d4ad3ecd10220604ee5f2220fad5c
+      role: "Added save_temporary/publish_temporary/is_temporary_capture_name."
+    - path: src/artifacts/capture_store.cpp
+      sha256: 11391f403a44546f056820858044fde121fb8fbd546651dd816f81bad2e1a1e1
+      role: "Refactored encode/write helpers; temp+rename path; retention skips temp names."
+  developer_tests:
+    - path: tests/unit/test_artifact_save_worker.cpp
+      sha256: 8bafcac0029698a915e6bf7aa27162495224e698d37c8870d54a0be9fe1b6909
+      role: >-
+        Developer tests for the production CaptureStoreSink + SaveWorker
+        (decodable PNG, sanitized direct-child names, discard on cancel/failure,
+        unregistered-commit failure, idle cancel). Corrected a false-positive
+        '..'-substring assertion; dots are legal sanitized bytes.
+  build:
+    - path: CMakeLists.txt
+      sha256: e93f1c70f55dab05f821ff3e0781d7a92ea86e1ee43db564d904046f3779a35f
+      role: >-
+        Links Threads to cvforwin_artifacts, adds capture_sink.cpp/save_worker.cpp,
+        and registers cvf104_finalization/worker/retention/end_to_end plus
+        runtime_artifact_developer_tests with catch_discover_tests.
+
+frozen_files_untouched:
+  - path: tests/unit/cvf104_test_support.h
+    expected_sha256: 517759e9db6c6eeb729a2866f8fbcb2f786d3000837619171ce90ec6f72a5775
+    observed_sha256: 517759e9db6c6eeb729a2866f8fbcb2f786d3000837619171ce90ec6f72a5775
+    sha_match: true
+  - path: tests/unit/cvf104_finalization_test.cpp
+    expected_sha256: de21b13ae4d1d9e8619d92374523b188668a30d00d65d948cf7e1768e0ad5f5c
+    observed_sha256: de21b13ae4d1d9e8619d92374523b188668a30d00d65d948cf7e1768e0ad5f5c
+    sha_match: true
+  - path: tests/unit/cvf104_save_worker_test.cpp
+    expected_sha256: 057b7f77c1e2b6aeb4ac8ed00a8d66f53c31cf3981d3f2082a6abd094b5ac296
+    observed_sha256: 057b7f77c1e2b6aeb4ac8ed00a8d66f53c31cf3981d3f2082a6abd094b5ac296
+    sha_match: true
+  - path: tests/unit/cvf104_retention_scheduler_test.cpp
+    expected_sha256: 9059c09b1d36f840a87ffb5df91599b49a1f98d3f3b2b668ca72d1603caab953
+    observed_sha256: 9059c09b1d36f840a87ffb5df91599b49a1f98d3f3b2b668ca72d1603caab953
+    sha_match: true
+  - path: tests/unit/cvf104_end_to_end_test.cpp
+    expected_sha256: 74f4b4f64351ddc83d3a0f5db3b8177652a8dda0d0856f73d7cc5f4b8c39f999
+    observed_sha256: 74f4b4f64351ddc83d3a0f5db3b8177652a8dda0d0856f73d7cc5f4b8c39f999
+    sha_match: true
+  - path: include/cvforwin/**
+    status: untouched by developer
+  - path: src/c_api/**
+    status: untouched by developer
+  - path: src/camera/**
+    status: untouched by developer
+  - path: src/algorithms/**
+    status: untouched by developer
+  - path: src/recipes/**
+    status: untouched by developer
+  - path: docs/**
+    status: untouched by developer
+  - path: .ai/changes/**
+    status: untouched by developer
+  - path: .ai/project-contract.yaml
+    status: untouched by developer
+    note: >-
+      Already modified in the working tree before this session began (see the
+      session-start git status); this session performed no write to it.
+  - path: .ai/test-ownership.yaml
+    status: untouched by developer
+    note: >-
+      Already modified in the working tree before this session began; this
+      session performed no write to it.
+
+commands:
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    result: PASS
+    observed: "Configuring done; Generating done; build files written to build/wsl-gcc-debug"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    result: PASS
+    observed: "All targets built (final rebuild after formatting/static-analysis fixes; no errors)"
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    result: PASS
+    observed: "100% tests passed, 0 tests failed out of 342 (Total Test time real 7.47 sec)"
+  - command: "build/wsl-gcc-debug/cvf104_finalization_tests"
+    exit_code: 0
+    result: PASS
+    observed: "All tests passed (100 assertions in 11 test cases)"
+  - command: "build/wsl-gcc-debug/cvf104_worker_tests"
+    exit_code: 0
+    result: PASS
+    observed: "All tests passed (53 assertions in 6 test cases)"
+  - command: "build/wsl-gcc-debug/cvf104_retention_tests"
+    exit_code: 0
+    result: PASS
+    observed: "All tests passed (331 assertions in 8 test cases)"
+  - command: "build/wsl-gcc-debug/cvf104_end_to_end_tests"
+    exit_code: 0
+    result: PASS
+    observed: "All tests passed (336 assertions in 5 test cases)"
+  - command: "build/wsl-gcc-debug/runtime_artifact_developer_tests"
+    exit_code: 0
+    result: PASS
+    observed: "All tests passed (59 assertions in 5 test cases)"
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    result: PASS
+    observed: "-- format-check passed: 106 file(s) conform to .clang-format"
+  - command: "cmake --preset wsl-clang-analysis"
+    exit_code: 0
+    result: PASS
+    observed: "Configuring done; Generating done; build files written to build/wsl-clang-analysis"
+  - command: "cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+    exit_code: 0
+    result: PASS
+    observed: "-- static-analysis passed: 24 file(s) clean under .clang-tidy"
+  - command: "cmake --preset wsl-gcc-asan"
+    exit_code: 0
+    result: PASS
+    observed: "Configuring done; Generating done; build files written to build/wsl-gcc-asan"
+  - command: "cmake --build --preset wsl-gcc-asan --parallel && ctest --preset wsl-gcc-asan --output-on-failure"
+    exit_code: 0
+    result: PASS
+    observed: "100% tests passed, 0 tests failed out of 342 (Total Test time real 18.13 sec)"
+
+independent_tests_observed:
+  - path: tests/unit/cvf104_finalization_test.cpp
+    sha256: de21b13ae4d1d9e8619d92374523b188668a30d00d65d948cf7e1768e0ad5f5c
+    owner: test-engineer
+    result: PASS
+    observed: "100 assertions in 11 test cases (exit 0)"
+  - path: tests/unit/cvf104_save_worker_test.cpp
+    sha256: 057b7f77c1e2b6aeb4ac8ed00a8d66f53c31cf3981d3f2082a6abd094b5ac296
+    owner: test-engineer
+    result: PASS
+    observed: "53 assertions in 6 test cases (exit 0)"
+  - path: tests/unit/cvf104_retention_scheduler_test.cpp
+    sha256: 9059c09b1d36f840a87ffb5df91599b49a1f98d3f3b2b668ca72d1603caab953
+    owner: test-engineer
+    result: PASS
+    observed: "331 assertions in 8 test cases (exit 0)"
+  - path: tests/unit/cvf104_end_to_end_test.cpp
+    sha256: 74f4b4f64351ddc83d3a0f5db3b8177652a8dda0d0856f73d7cc5f4b8c39f999
+    owner: test-engineer
+    result: PASS
+    observed: "336 assertions in 5 test cases (exit 0)"
+  - path: tests/unit/cvf104_test_support.h
+    sha256: 517759e9db6c6eeb729a2866f8fbcb2f786d3000837619171ce90ec6f72a5775
+    owner: test-engineer
+    result: PASS
+    observed: "Header-only support; consumed by the worker and end-to-end suites above"
+
+contract_conformance:
+  wiring_requirements:
+    - "inspect() creates one absolute Deadline once; every stage receives it unchanged; no stage calls Deadline::from_timeout_ms."
+    - "Every post-frame outcome reaches finalize_after_frame exactly once; the public result is built from its decision."
+    - "The latest valid frame is retained until finalization; fail_or_error persistence happens only with frame_valid, never after the first capture fails."
+    - "Required save waits to the absolute deadline; optional save uses remaining time and on non-commit leaves the verdict intact, sets warning_image_save_failed, publishes no image_path, and leaves no queued temporary."
+    - "Retention is requested through RetentionScheduler and executed on the maintenance worker; inspect never scans, sorts, or deletes."
+    - "Shutdown joins the maintenance worker and drains/cancels the save worker without deadlock."
+  invariants:
+    - "No PNG encode, disk-write wait, directory iteration, stat/sort, or retention deletion on the inspection caller thread."
+    - "No image_path before an atomic commit; no queued artifact cancelled by cancel_pending is published."
+    - "Optional artifact work never converts a valid PASS/FAIL into TIMEOUT."
+    - "Diagnostics callback serialization and internal-lock policy untouched (no diagnostics change)."
+  interface_freeze: >-
+    finalization.h, save_worker.h, and retention_scheduler.h match the frozen
+    declarations in .ai/changes/CVF-104.yaml (clang-format whitespace only in
+    finalization.h). RuntimeOptions.artifact_sink is internal and default-null.
+    No include/cvforwin/** or src/c_api/** file was modified; the C ABI is
+    unchanged.
+
+scope_notes:
+  - >-
+    All edits are inside the contract allowed set: src/runtime/**, src/artifacts/**,
+    tests/unit/test_artifact_save_worker.cpp (developer-owned), and CMakeLists.txt
+    build wiring.
+  - >-
+    The working tree was already dirty at session start (.ai/changes/CVF-001..008
+    deletions, .ai/project-contract.yaml, .ai/test-ownership.yaml,
+    .ai/workflow-state.yaml). Those are pre-existing and were not written by this
+    session; the five independent CVF-104 files hash to their pinned values.
+
+windows_msvc_status:
+  verifiable_on_this_host: false
+  claim: none
+  statement: >-
+    CVF-104 is portable WSL-only work. No Windows or hardware claim is made:
+    no Windows MSVC build or real-device run was performed or inferred.
+
+blockers: []
+notes:
+  - "The interrupted session's only defects were the three mismatched call sites, the undefined helpers, and the Failure pointer/value misuse; no behavior was stubbed."
+  - "The 65535-byte serialized-payload check in inspect() implements the existing approved FR-024 bound (project-contract line 107/573); it is not new observably-unbounded behavior."
+  - "Subsequent review should confirm the optional-timeout executing-job semantics against the frozen seam (cancel_pending cancels only the queued job, per the frozen declaration and independent worker tests)."
+
+post_review_fix:
+  recorded_at: 2026-09-19
+  author: developer
+  finding: ".ai/reviews/CVF-104.yaml B-1 (blocking, high)"
+  status: FIXED
+  root_cause: >-
+    SaveWorker::wait_until returned SaveState::cancelled when its deadline expired but
+    recorded no cancellation for the target job, and SaveWorker::execute called
+    sink_.commit() unconditionally. A job still executing when the caller gave up
+    therefore published a late final file (atomic rename) after the runtime had already
+    reported the save as failed/timed out, and its temporary was never removed.
+  fix: >-
+    Added a private cancel-request set (std::set<std::uint64_t> cancelled_ids_) to
+    SaveWorker. On a wait_until deadline expiry the target id is marked under mutex_:
+    an executing target is inserted into cancelled_ids_ (and then observed by execute()'s
+    pre-commit check, which calls sink_.discard(temp) and returns SaveState::cancelled),
+    and a queued target is dropped (never executed, so it cannot publish). execute() now
+    takes the job id and rechecks cancellation after write_temp and before commit, so a
+    cancellation arriving while write_temp is blocked is observed. worker_loop clears the
+    per-id flag after each terminal outcome. take() also prunes completed_ entries older
+    than the consumed monotonic target, reclaiming outcomes of jobs whose wait already
+    timed out (non-blocking NB-1). cancel_pending()/drain() keep their frozen semantics:
+    cancel_pending still drops only the queued job and drain still completes the executing
+    job, which is required by the pinned independent worker tests
+    (cvf104_save_worker_test.cpp:160-182).
+  frozen_public_api_unchanged:
+    - "try_submit / wait_until / cancel_pending / drain / executing / queued signatures unchanged."
+    - "ArtifactSink, SaveJob, SaveState, SaveOutcome unchanged."
+    - "One-executing/one-queued bound and deadlock-free drain preserved."
+  changed_files:
+    - path: src/artifacts/save_worker.h
+      sha256: 364ce676e95c990c74443c06da4b97bdeff4ae27bea966ae3dea8032814865dc
+      role: "cancelled_ids_ set, cancel_target/is_cancelled declarations, execute(job,id)."
+    - path: src/artifacts/save_worker.cpp
+      sha256: b05ac268f024aaf8fc253201a9c3bdde2de1ddb867761912a4c25900d062d867
+      role: "Pre-commit cancellation check + discard, wait-timeout propagation, NB-1 prune."
+    - path: tests/unit/test_artifact_save_worker.cpp
+      sha256: a03525efa6bb73595a1c3dab7ad4a0ba23ee78e6e348d70aefa555ea1bfaf769
+      role: "Developer regression test + BlockingWriteSink double."
+  regression_test:
+    path: tests/unit/test_artifact_save_worker.cpp
+    name: >-
+      CVF-104 developer regression B-1: an expired wait cancels the in-flight save and
+      never publishes a late final file
+    tags: "[cvf-104][dev][worker][cancel][regression]"
+    proof: >-
+      A BlockingWriteSink blocks in write_temp past a 100 ms wait_until deadline; after
+      release and drain the test asserts commit_calls()==0, discard_calls()>=1,
+      published.png was never created, the .cvftmp_ temporary is removed, and the root has
+      no temporary. RED before the fix (commit_calls 1==0, discard 0>=1, published exists);
+      GREEN after.
+  verification_commands:
+    - command: "cmake --preset wsl-gcc-debug"
+      exit_code: 0
+      result: PASS
+    - command: "cmake --build --preset wsl-gcc-debug --parallel"
+      exit_code: 0
+      result: "PASS: all targets built"
+    - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+      exit_code: 0
+      result: "PASS: 100% tests passed, 0 failed out of 352 (real 9.04 s)"
+    - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+      exit_code: 0
+      result: "PASS: 106 file(s) conform to .clang-format"
+    - command: "cmake --preset wsl-gcc-asan && cmake --build --preset wsl-gcc-asan --parallel && ctest --preset wsl-gcc-asan --output-on-failure"
+      exit_code: 0
+      result: "PASS: 100% tests passed, 0 failed out of 352 (real 20.28 s)"
+    - command: "cmake --preset wsl-clang-analysis"
+      exit_code: 0
+      result: PASS
+    - command: "cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+      exit_code: 0
+      result: "PASS: 24 file(s) clean under .clang-tidy"
+    - command: "./build/wsl-gcc-debug/cvf104_worker_tests"
+      exit_code: 0
+      result: "PASS: 74 assertions in 9 test cases (independent, unchanged file)"
+    - command: "./build/wsl-gcc-debug/runtime_artifact_developer_tests"
+      exit_code: 0
+      result: "PASS: 74 assertions in 6 test cases (includes the new B-1 regression)"
+  independent_files_hash_check:
+    manifest_path: .ai/test-ownership.yaml
+    manifest_sha256: d370acb89d2b120f36bc0493036d67d789be0a0c8fa3de790d514a57516f10f1
+    files:
+      - path: tests/unit/cvf104_test_support.h
+        on_disk_sha256: 517759e9db6c6eeb729a2866f8fbcb2f786d3000837619171ce90ec6f72a5775
+        matches_manifest: true
+      - path: tests/unit/cvf104_finalization_test.cpp
+        on_disk_sha256: 9e92d7e6446af3daa315568f0ef8784704e52edb5af869baff6d4882a648da67
+        matches_manifest: true
+      - path: tests/unit/cvf104_save_worker_test.cpp
+        on_disk_sha256: 11ce2d4363fb2ccecf41e200057d865334b08bd836ee39733dfbb6d5af885aef
+        matches_manifest: true
+      - path: tests/unit/cvf104_retention_scheduler_test.cpp
+        on_disk_sha256: 92c47273564683e1184121ad05b1899fece3cf9f0428da3fbef4c63718ade784
+        matches_manifest: true
+      - path: tests/unit/cvf104_end_to_end_test.cpp
+        on_disk_sha256: 74f4b4f64351ddc83d3a0f5db3b8177652a8dda0d0856f73d7cc5f4b8c39f999
+        matches_manifest: true
+  windows_msvc_status:
+    verifiable_on_this_host: false
+    claim: none
+    statement: >-
+      No Windows build or hardware run was performed or inferred; this fix is verified
+      only on the portable WSL GCC/Clang presets.
+  blockers: []
+
+release_fix_toctou:
+  recorded_at: 2026-09-19
+  author: developer
+  finding: ".ai/reports/batch-2-runtime-artifacts-release.yaml segment A finding 1 (non_blocking): cancellation/commit TOCTOU in save_worker.cpp:154-167"
+  status: FIXED
+  root_cause: >-
+    execute() released mutex_ after its is_cancelled(id) check and then called
+    sink_.commit() with no lock held, so the cancellation marker that wait_until's
+    timeout path (cancel_target) writes under mutex_ could land in that window. The
+    commit then published a final file after the job had been marked cancelled,
+    violating project-contract artifact_finalization_v1's "no cancelled artifact is
+    published". No deadline was visible to execute(), so a save that only started
+    after the caller's deadline could still publish.
+  fix: >-
+    Added a second mutex publish_mutex_, separate from the submit/queue mutex_, that
+    makes the cancellation/deadline decision and sink_.commit() one critical section:
+    execute() decodes/writes the temporary outside the gate, then under the gate
+    re-checks cancellation AND the awaited deadline and either discards or commits.
+    cancel_target() now takes the same gate, so ordering is deterministic: cancellation
+    either wins (execute discards; no final file) or execute's decision already
+    completed and cancel_target refuses to mark it (the job is committed/terminal).
+    wait_until() publishes its deadline under the gate before waiting (so execute can
+    discard a save that starts after it), and on a timeout re-checks the target after
+    cancel_target(): if a completed outcome won the race (recorded in completed_ or
+    still in the decided_outcome_ hand-off), it is returned instead of a synthetic
+    cancelled outcome, so the caller is never told "cancelled" for a job that
+    published. worker_loop() moves decided_outcome_ into completed_ under mutex_ so a
+    timed-out waiting caller holding mutex_ can always recover it. Lock order is
+    mutex_ (when held) before publish_mutex_; execute() takes only publish_mutex_,
+    so blocking sink I/O never stalls try_submit/executing/queued and no cycle exists.
+  preserved:
+    - "One executing + one queued bound unchanged (try_submit saturation untouched)."
+    - "No final file after a winning cancellation; every temporary is discarded or committed."
+    - "Deadlock-free drain; public API/ABI of SaveWorker unchanged."
+    - "Frozen signatures try_submit/wait_until/cancel_pending/drain/executing/queued unchanged."
+  changed_files:
+    - path: src/artifacts/save_worker.h
+      sha256: 9a0d7450490e0df56f9c1584e779e4b519e12e52a3cbcbd3a1ca31f93d238d01
+      role: "publish_mutex_, cancelled_ids_/awaited deadline/decided_outcome_ state under the gate; execute() now void."
+    - path: src/artifacts/save_worker.cpp
+      sha256: 4c7356a95609c658d8d7eebaffb42237aad46367c38d86e5433ea2072bce45ac
+      role: "Gate-hardened decision+commit, deadline re-check, deterministic cancel_target, timeout outcome recovery."
+    - path: tests/unit/test_artifact_save_worker.cpp
+      sha256: d3eba9562e3c793a7546d4baa6c6445169e152927d865fde5dd9a9b4b775d909
+      role: "Added BlockingCommitSink double and the TOCTOU commit-race regression; existing tests unchanged."
+  regression_test:
+    path: tests/unit/test_artifact_save_worker.cpp
+    name: >-
+      CVF-104 developer regression TOCTOU: a deadline that expires during an in-flight
+      commit never reports cancelled for the file that was published
+    tags: "[cvf-104][dev][worker][cancel][regression][toctou]"
+    proof: >-
+      A BlockingCommitSink blocks inside commit() (after execute passed its once-only
+      pre-commit check in the old design). A separate thread calls
+      wait_until(Deadline::from_timeout_ms(100)); after the deadline expires and the
+      commit is released, the test asserts the outcome is completed, its path equals
+      published.png, commit_calls()==1, discard_calls()==0 and no temporary remains.
+      RED against pre-fix HEAD (git show HEAD:src/artifacts/save_worker.*): returned
+      SaveState::cancelled (2) with an empty path while published.png was created --
+      2 failed / 13 assertions, exit 42. GREEN after the fix, and 25/25 repeat runs
+      plus the ASAN binary are stable.
+  verification_commands:
+    - command: "cmake --preset wsl-gcc-debug"
+      exit_code: 0
+      result: PASS
+    - command: "cmake --build --preset wsl-gcc-debug --parallel"
+      exit_code: 0
+      result: "PASS: all targets built"
+    - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+      exit_code: 0
+      result: "PASS: 100% tests passed, 0 failed out of 419 (real 10.78 s)"
+    - command: "./build/wsl-gcc-debug/cvf104_worker_tests"
+      exit_code: 0
+      result: "PASS: 83 assertions in 10 test cases (independent, unchanged file)"
+    - command: "./build/wsl-gcc-debug/runtime_artifact_developer_tests"
+      exit_code: 0
+      result: "PASS: 87 assertions in 7 test cases (includes the new TOCTOU regression)"
+    - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+      exit_code: 0
+      result: "PASS: 115 file(s) conform to .clang-format"
+    - command: "cmake --preset wsl-gcc-asan && cmake --build --preset wsl-gcc-asan --parallel && ctest --preset wsl-gcc-asan --output-on-failure"
+      exit_code: 0
+      result: "PASS: 100% tests passed, 0 failed out of 419 (real 24.27 s)"
+    - command: "cmake --preset wsl-clang-analysis && cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+      exit_code: 0
+      result: "PASS: 24 file(s) clean under .clang-tidy"
+  independent_files_hash_check:
+    manifest_path: .ai/test-ownership.yaml
+    manifest_sha256: 26ad8d3c9445cec424532cd0b06a0421d951adc653ea54a3c8baaf621ff8b3c9
+    files:
+      - path: tests/unit/cvf104_test_support.h
+        on_disk_sha256: d8bd5191bd3aa3bbd0ce79443422a51b2d617e436bbdd47a70e385f2776224ce
+        matches_manifest: true
+      - path: tests/unit/cvf104_finalization_test.cpp
+        on_disk_sha256: 9e92d7e6446af3daa315568f0ef8784704e52edb5af869baff6d4882a648da67
+        matches_manifest: true
+      - path: tests/unit/cvf104_save_worker_test.cpp
+        on_disk_sha256: 5cc3c1bedd9a69ee95e9325dc56ecfff1c1c109122becd709fccb3b276c21ea4
+        matches_manifest: true
+      - path: tests/unit/cvf104_retention_scheduler_test.cpp
+        on_disk_sha256: 92c47273564683e1184121ad05b1899fece3cf9f0428da3fbef4c63718ade784
+        matches_manifest: true
+      - path: tests/unit/cvf104_end_to_end_test.cpp
+        on_disk_sha256: 74f4b4f64351ddc83d3a0f5db3b8177652a8dda0d0856f73d7cc5f4b8c39f999
+        matches_manifest: true
+  windows_msvc_status:
+    verifiable_on_this_host: false
+    claim: none
+    statement: >-
+      No Windows build or hardware run was performed or inferred; verified only on the
+      portable WSL GCC/Clang presets.
+  blockers: []

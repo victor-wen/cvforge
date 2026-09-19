@@ -1,0 +1,62 @@
+batch: batch-2-runtime-artifacts
+members: [CVF-104, CVF-105]
+candidate_sha: b4256e7e108e0631fb10622e08c9fe5e0823616c
+superseded_candidate_sha: ab47119c8abc00f9d2d69cb1d61c70b22ddc1813
+verdict: RELEASE_READY_WITH_FINDINGS
+blocking_count: 0
+basis:
+  quality_report: .ai/reports/batch-2-quality.json
+  quality_verdict: PASS
+  quality_test_counts: "419/419 debug and 419/419 ASan"
+  ci_report: .ai/reports/batch-2-ci.yaml
+  ci_run: "35400487206"
+  ci_counts: "463/463 test-enabled; 326/326 release (abi-check + package)"
+  descriptor_sha256: 92ef285f1ab826d3e9c34d8ced5cb13186c17d90c862f427cd8f7e20039a6bd4
+segments:
+  A_source_semantics:
+    verdict: PASS_WITH_FINDINGS
+    judgments: {compose: true, single_serialize: true, single_finalize: true, warnings_safe: true, abi_before_side_effects: true, shared_state_race: false}
+    blocking_finding:
+      id: B2-A1
+      file: src/artifacts/save_worker.cpp
+      issue: >-
+        Cancellation/commit TOCTOU: a timed-out wait could publish a final file after cancellation,
+        contradicting artifact_finalization_v1 forbidden_fields.
+      status: FIXED_IN_b4256e7
+      fix: >-
+        Cancellation decision, deadline re-check, and commit now run in one critical section under a
+        dedicated publish mutex; a wait that expires during an in-flight commit returns the completed
+        outcome when the file was actually published. Deterministic TOCTOU regression test added
+        (RED before the fix).
+  B_invariants_evidence:
+    verdict: PASS
+    judgments: {quality_pass: true, ci_sha_match: true, platform_matrix_distinguished: true}
+    findings: []
+  C_carry_forward:
+    verdict: PASS_WITH_FINDINGS
+    dispositions:
+    - {finding: "CVF-104 NB-1 completed_ map reclamation residual", decision: ACCEPT_TO_CARRY}
+    - {finding: "CVF-104 NB-2 CMake scope", decision: ACCEPT_TO_CARRY, note: "Resolved by the batch/change build_files scope addition; nothing carried."}
+    - {finding: "CVF-104 NB-3 missing explicit deadline check before serialization", decision: ACCEPT_TO_CARRY}
+    - {finding: "CVF-104 NB-4 independent temp->rename observation gap", decision: ACCEPT_TO_CARRY}
+    - {finding: "CVF-104 NB-5 stale doc comments", decision: ACCEPT_TO_CARRY}
+    - {finding: "CVF-105 NB-1 registry.cpp fragment-estimate guard", decision: ACCEPT_TO_CARRY}
+    - {finding: "CVF-105 NB-2 relaxed missing-root status comment", decision: ACCEPT_TO_CARRY}
+    - {finding: "CVF-105 NB-3 duplicated canonicalization", decision: ACCEPT_TO_CARRY}
+    - {finding: "CVF-105 NB-4 stale camera_backend.h:33 comment", decision: ACCEPT_TO_CARRY}
+    - {finding: "CVF-105 NB-5 independent coverage gaps", decision: ACCEPT_TO_CARRY}
+    - {finding: "CVF-105 NB-6 V2-3 codegraph independence incident", decision: ACCEPT_TO_CARRY, note: "Non-contaminating audit record."}
+    - {finding: "B2-A1 TOCTOU", decision: ACCEPT_TO_CARRY, note: "Fixed in b4256e7 and re-gated at the fix SHA; nothing carried."}
+    - {finding: "B2-A2 context.cpp:521 required-save busy-wait", decision: ACCEPT_TO_CARRY}
+platform_matrix:
+  portable_wsl: VERIFIED (419/419 debug, 419/419 ASan, format, static analysis at b4256e7)
+  windows_ci: VERIFIED (463/463 test-enabled, 326/326 release at b4256e7)
+  hardware: BLOCKED (CVF-107 designated station unavailable; not claimed)
+conditions:
+- CVF-107 hardware evidence (1000+ cycles with non-skipped timeout/reconnect/orientation/color) must be recorded before any production FCT deployment claim per NFR-019; batch-2 is not hardware-verified.
+- Route carried findings at next module touch: developer (CVF-104 NB-3/NB-5, CVF-105 NB-3/NB-4, B2-A2), test-engineer (CVF-104 NB-4, CVF-105 NB-2/NB-5), architect/controller (CVF-105 NB-1).
+- Traceability cleanup at next artifact touch: full 40-char SHA in CVF-105-ci.yaml; relabel batch-2-quality.json change_id (it reads CVF-105 while being the batch gate pinned by git_head/fingerprint).
+release_statement: >-
+  batch-2-runtime-artifacts is RELEASE_READY_WITH_FINDINGS at candidate b4256e7e108e0631fb10622e08c9fe5e0823616c. The one
+  blocking finding found in release review (B2-A1) was fixed and every gate re-ran at the fix SHA; all remaining carried
+  findings are residual limitations, not live defects. Hardware evidence is absent by design and must not be implied.

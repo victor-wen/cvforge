@@ -1,0 +1,62 @@
+schema_version: 1
+change_id: CVF-106
+program: cvforwin-hardening-1.1.0
+target: "Algorithm preparation/asset lifecycle and template.match behavior"
+in_scope:
+  - Immutable recipe-time preparation and asset loading behavior.
+  - template.match parameter validation, matching result, and deadline behavior.
+  - Reload atomicity and in-flight lifetime of prepared state.
+out_of_scope:
+  - UVC/Media Foundation, artifact worker internals, ABI pointer rules, JSON bound enforcement mechanics.
+constraints:
+  - "Deterministic and hardware-free; frames synthesized at run time."
+  - "Tests may use frozen interfaces and the documented algorithm key; they must not read production .cpp files."
+  - "Do not edit existing hash-pinned CVF-003/004 cases."
+  - "Frozen additive seam from the change contract: src/inspection/algorithm.h gains AlgorithmAsset{key, reference, bytes}, AlgorithmAssetBundle, IPreparedAlgorithm{inspect}, and IInspectionAlgorithm::prepare(parameters, assets) with a DEFAULT implementation (the existing key/validate_parameters/inspect pure virtuals and dispatch(IInspectionAlgorithm&, AlgorithmRequest&) are unchanged so the pinned CVF-003 StubAlgorithm still compiles). src/inspection/registry.h gains dispatch(const IPreparedAlgorithm&, const AlgorithmRequest&). Recipes gain an optional assets mapping bounded to 16 assets / 16 MiB each / 64 MiB total / 512-byte reference with no escape; the catalog prepares every recipe before publishing. template.match: src/algorithms/template_match.h, key template.match."
+interface_reference:
+  - "cvforwin::inspection::{IPreparedAlgorithm, IInspectionAlgorithm (prepare), AlgorithmAsset, AlgorithmAssetBundle, dispatch}"
+  - "cvforwin::recipes recipe/catalog headers (optional assets mapping)"
+  - "cvforwin::runtime::Context for end-to-end selection"
+  - "template.match key \"template.match\" and its documented parameters/measurements"
+observable_behaviors:
+  - id: B1
+    behavior: "A recipe whose algorithm preparation fails (missing/oversized/escaping asset, invalid ROI, zero-variance template) makes the whole catalog load/reload fail, and the previous snapshot stays active."
+  - id: B2
+    behavior: "A valid template.match recipe loads; inspect on a synthetic frame containing the template at a known location returns global-frame x/y matching that location and score >= threshold -> PASS."
+  - id: B3
+    behavior: "A frame without the template returns score < threshold -> FAIL with a deterministic defect entry."
+  - id: B4
+    behavior: "A recipe asset is decoded once at load: inspection performs no file read (a removed/renamed asset file after load does not affect inspect output)."
+  - id: B5
+    behavior: "ROI restricts the search: a template present only outside the ROI is not reported as a match inside it."
+  - id: B6
+    behavior: "An already-expired deadline fails with timeout/algorithm_deadline_exceeded."
+  - id: B7
+    behavior: "Reload with a new template changes subsequent inspect results only after the atomic swap; an in-flight inspect keeps its prior prepared state."
+  - id: B8
+    behavior: "example.threshold still loads and inspects with unchanged observable output through the new lifecycle."
+boundary_cases:
+  - "threshold boundary: score exactly == threshold -> PASS."
+  - "ROI at frame edges and 1x1 ROI/template rejection per documented rules."
+  - "Template exactly ROI-sized."
+negative_cases:
+  - "Unknown parameter key, non-finite threshold, template larger than ROI, and asset reference escaping the assets root are all rejected with algorithm_parameters_invalid or the documented config error."
+acceptance_criteria:
+  - "Portable debug+asan, format, and static analysis pass; golden-image/tolerance assertions documented."
+allowed_context:
+  - .ai/project-contract.yaml
+  - .ai/changes/CVF-106.yaml
+  - .ai/test-briefs/CVF-106.yaml
+  - tests/unit/**
+  - config/examples/**
+  - "frozen headers (may #include, must not open .cpp files): src/inspection/**, src/recipes/**, src/runtime/context.h, src/core/**"
+forbidden_context:
+  - "any src/** .cpp implementation file"
+  - .ai/changes/** (other than CVF-106.yaml), .ai/reports/**, .ai/reviews/**
+  - "any diff, changed-file list, developer note, or root-cause description"
+allowed_test_paths:
+  - tests/unit/**
+ownership_manifest: .ai/test-ownership.yaml
+evidence:
+  red_report: .ai/reports/CVF-106-test-red.yaml
+  verify_report: .ai/reports/CVF-106-test-verify.yaml

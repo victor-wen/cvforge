@@ -1,0 +1,130 @@
+schema_version: 1
+change_id: CVF-106
+phase: VERIFY
+kind: bounded-test-owner-amendment
+role: test-engineer
+owner: test-engineer
+recorded_at: 2026-09-19
+scope: >-
+  Bounded amendment of two authored CVF-106 expectations that were provably
+  inconsistent with the frozen production behaviour. No intent was weakened and
+  no assertion was removed, skipped, disabled, or deleted.
+
+corrections:
+  - id: C1
+    file: tests/unit/cvf106_test.helpers.h
+    symbol: outcome_measurements
+    before: >-
+      outcome_measurements() required the runtime output JSON to contain a nested
+      "measurements" key and returned output.at("measurements"); outcome_score()
+      and outcome_int("x"/"y") therefore required the nested shape.
+    after: >-
+      outcome_measurements() returns the flat top-level final result object and
+      its REQUIRE(output.is_object()) is retained; outcome_score() and
+      outcome_int() keep their meaning by reading score/x/y/width/height directly
+      from that top-level object. No nested-key requirement is added.
+    basis: >-
+      .ai/project-contract.yaml interfaces.final_result_payload_v1 requires one
+      final object "assembled from measurements and optional defects"; the frozen
+      runtime flattens the algorithm measurements and adds an optional "defects"
+      key at the top level (the hash-pinned CVF-006 expectations read
+      output_json.at("total_pixels") at the top level).
+    intent_preserved: >-
+      Every measurement accessor still fails if the named measurement is absent,
+      and still returns the same typed value as before.
+
+  - id: C2
+    file: tests/unit/cvf106_lifecycle_test.cpp
+    case: "CVF-106 B8 example.threshold keeps its observable output through the lifecycle"
+    before: >-
+      The case drove the synthetic camera and asserted output_text was
+      byte-identical across three Context::inspect calls, including across a
+      reload.
+    after: >-
+      The case drives a fixed single-frame file camera, so every capture serves
+      byte-identical pixels and the serialized output is genuinely deterministic.
+      The byte-identical output_text assertions (second and third versus first)
+      and output_json equality are retained across two inspects and across
+      reload, and the stable structural observables are additionally pinned:
+      same status, same verdict, top-level white_pixels/total_pixels/pass_ratio
+      present, and every numeric measurement finite.
+    basis: >-
+      The frozen SyntheticCameraBackend produces sequence-dependent pixels
+      (pixel = f(x, y, sequence)); white-pixel counts differ per capture,
+      observed 209/224/239 for sequences 0/1/2, so byte-identical text was not a
+      valid fixed expectation for that backend. Brief observable B8 still
+      requires example.threshold to keep its observable output through the new
+      lifecycle; a constant frame preserves that intent deterministically.
+    intent_preserved: >-
+      Not a tautology: the case still compares full serialized output text and
+      JSON across calls/reload and would fail if the lifecycle changed the
+      observable output at all.
+
+  - id: C3
+    files: unchanged
+      - tests/unit/cvf106_prepare_test.cpp
+      - tests/unit/cvf106_template_match_test.cpp
+
+commands:
+  - command: "bash .ai/validation/cvf106-test-engineer-amendment-verify.sh"
+    steps:
+      - command: "clang-format --dry-run --Werror tests/unit/cvf106_test.helpers.h"
+        exit_code: 0
+      - command: "clang-format --dry-run --Werror tests/unit/cvf106_lifecycle_test.cpp"
+        exit_code: 0
+      - command: "cmake --preset wsl-gcc-debug"
+        exit_code: 0
+      - command: "cmake --build --preset wsl-gcc-debug --parallel"
+        exit_code: 0
+      - command: "ctest --preset wsl-gcc-debug -R CVF-106 --output-on-failure"
+        exit_code: 0
+        summary: "100% tests passed, 0 tests failed out of 24"
+
+results:
+  ctest_cvf106:
+    passed: 24
+    failed: 0
+    skipped: 0
+  corrected_cases:
+    - id: C1
+      observed: "all CVF-106 lifecycle accessor checks pass with the flat object"
+    - id: C2
+      observed: "CVF-106 B8 example.threshold keeps its observable output through the lifecycle: Passed"
+  remaining_failures: []
+  classification: >-
+    none; no remaining CVF-106 failure in this run. The synthetic-camera
+    per-capture variation is a documented deterministic property of the test
+    backend, not a production defect.
+
+hashes:
+  changed:
+    - path: tests/unit/cvf106_test.helpers.h
+      previous: edd4427af3debd802488a3981484661342d5a079df5a438faf6cb57ce1ef26e5
+      sha256: 059c4a4030cfe37517c07b7c272faa043a9fb203e28a5241d8d6d652471c53d6
+    - path: tests/unit/cvf106_lifecycle_test.cpp
+      previous: 67b1691c791fbb1a521a2f64e7f89adb8aae3a58b0e6648961d6cccd49a83b95
+      sha256: 4c32847f8a1270d159982da170eb797efab3bf8afedb4df3610283301b2e0a57
+  unchanged_verified:
+    - path: tests/unit/cvf106_prepare_test.cpp
+      sha256: c900a558877bebe3ed1d9e89201b6c79c25d7518a3f993019c8028ba327ed4ef
+    - path: tests/unit/cvf106_template_match_test.cpp
+      sha256: 3b302dd545e3cce1524e5d611c1aba38efa4481d668c613f0fb4d6b1df36eed3
+  ownership_manifest:
+    path: .ai/test-ownership.yaml
+    sha256: 26bac6b0d3ffc51383de2f21d8e5464d2849bd1b6972e6e1f4d29787519ac0dc
+    note: "Only the CVF-106 section was updated; every other section is preserved byte-for-byte."
+
+evidence_logs:
+  - .ai/validation/cvf106-amendment-summary.txt
+  - .ai/validation/cvf106-amendment-configure.log
+  - .ai/validation/cvf106-amendment-build.log
+  - .ai/validation/cvf106-amendment-ctest.log
+  - .ai/validation/cvf106-amendment-format-cvf106_test.helpers.h.log
+  - .ai/validation/cvf106-amendment-format-cvf106_lifecycle_test.cpp.log
+
+notes: >-
+  The canonical implementation was present in this session's working tree, so
+  both corrected cases run green; this is not a RED run. No source, header,
+  change, test-brief, or contract file was modified; only the two owned test
+  files, the CVF-106 ownership section, this report, and the validation harness
+  were written.

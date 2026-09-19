@@ -1,0 +1,445 @@
+schema_version: 1
+change_id: CVF-103
+phase: IMPLEMENTATION
+author: developer
+recorded_at: 2026-09-18
+host: Linux (WSL) GCC 13.3.0 / Clang 18; Windows MSVC not executable here
+status: COMPLETE
+
+summary: >-
+  Implemented per-stream callback generation and stale-callback rejection for the
+  Windows-only UVC backend. Added the portable, dependency-free
+  src/camera/uvc_windows/uvc_stream_generation.h (StreamGenerationGate) exactly
+  per the frozen test seam; added UvcCallbackSnapshot and the Windows-only
+  UvcCameraBackend::callback_snapshot() const noexcept accessor to uvc_backend.h
+  without changing any ICameraBackend signature or the public C ABI; reworked the
+  read path so every started stream constructs a NEW ReadCallback carrying a fresh
+  monotonic generation from the gate, OnReadSample/OnFlush record the callback's
+  immutable generation and are applied only while the gate accepts it, rejected
+  events increment stale_events_discarded and never touch completion state, and
+  teardown retires the generation before releasing reader/source/callback. All
+  callback objects share a reference-counted generation state, so no dangling raw
+  pointer to a destroyed backend exists. The independent portable CVF-103 test now
+  passes (70 assertions in 9 test cases) and the canonical portable suite is
+  301/301 with format-check and static-analysis clean. Windows MSVC
+  compilation/execution of cvf103_windows_uvc_tests is deferred to the
+  windows-tests-quality CI and is NOT claimed here.
+
+deliverables:
+  - requirement: "Portable frozen seam header uvc_stream_generation.h with StreamGenerationGate"
+    status: done
+    note: >-
+      begin_stream()/retire()/accepts()/discard_stale()/active_generation()/
+      stale_events_discarded() exactly as declared. No Windows/MF/OpenCV
+      dependency; internally atomic so it is safe when a Media Foundation
+      work-queue thread calls accepts()/discard_stale() while the owned worker
+      calls begin_stream()/retire(). Generation 0 is the no-active-stream
+      sentinel and is never returned by begin_stream().
+  - requirement: "UvcCallbackSnapshot + callback_snapshot() Windows-only internal accessor"
+    status: done
+    note: >-
+      Struct fields active_generation, callbacks_created, stale_events_discarded,
+      stream_open; accessor is const noexcept and absent from ICameraBackend and
+      the C ABI. No existing signature changed.
+  - requirement: "Fresh callback + fresh generation per started stream"
+    status: done
+    note: >-
+      start_stream() calls begin_stream() and constructs a new ReadCallback every
+      time; the old callback is never reused by a replacement SourceReader.
+      callbacks_created increments once per started stream.
+  - requirement: "OnReadSample/OnFlush record immutable generation; completion accepted only for the active generation"
+    status: done
+    note: >-
+      Each callback stores a const generation and the shared gate; both callback
+      methods reject a non-accepted generation before touching any completion
+      field. The capture waiter predicate additionally requires
+      gate.accepts(generation).
+  - requirement: "Rejected events increment stale_events_discarded and set nothing else"
+    status: done
+    note: >-
+      Rejected OnReadSample/OnFlush call discard_stale() and return immediately;
+      read_completed, read_status, read_flags, read_sample, and flush_completed
+      are untouched.
+  - requirement: "Teardown retires the generation before releasing reader/source/callback"
+    status: done
+    note: >-
+      teardown_stream() retires the gate first, then releases callback/reader/source
+      on the worker. teardown_worker() no longer has a separate callback reset
+      because teardown_stream() now owns per-stream callback release.
+  - requirement: "active_generation monotonic across reconnect; stream_open reflects open/close"
+    status: done
+    note: >-
+      The gate's generation source is monotonic for the whole backend lifetime and
+      continues strictly upward across close/reconnect/re-open. stream_open is an
+      atomic mirror set on successful start_stream() and cleared by teardown.
+  - requirement: "Timeout/flush path clears a late completion and marks reconnect exactly as before"
+    status: done
+    note: >-
+      cancel_pending_read() keeps its Flush/grace-budget/begin_read() clearing
+      behavior and now also requires gate.accepts() for the flush completion.
+      When cancel returns false the stream is marked needs_reconnect_ as before.
+  - requirement: "No reuse of one callback across SourceReaders; reference-counted with no dangling backend pointer"
+    status: done
+    note: >-
+      ReadCallback holds std::shared_ptr<StreamGenerationState> (not a raw backend
+      pointer), so a callback kept alive by Media Foundation after teardown always
+      sees live state.
+  - requirement: "At most one reconnect/recapture, identity resolution, error mapping, deadline semantics unchanged"
+    status: done
+    note: >-
+      No change to src/runtime/** or the retry logic; identity resolution and
+      deadline handling were not modified.
+
+changed_files:
+  production:
+    - path: src/camera/uvc_windows/uvc_stream_generation.h
+      sha256: c2a7f220e1f9f0fd6a1687d3df2bda253ab631d3a76c5c52827948f742284ea2
+      role: "Portable StreamGenerationGate frozen seam (new file)."
+    - path: src/camera/uvc_windows/uvc_backend.h
+      sha256: 0e612eff6919d23c65b6b169b9f99f92d70d760a0a33c04f7c78fb4858773446
+      role: "Adds UvcCallbackSnapshot and callback_snapshot() const noexcept; no existing signature changed."
+    - path: src/camera/uvc_windows/uvc_backend.cpp
+      sha256: 4d0bfed310c771c91e723036c819ee33ab3bea7a70c9ad4336cdcb92920cabcd
+      role: "Per-stream callback/generation rework of start_stream, teardown_stream, capture_or_failure, cancel_pending_read."
+  developer_tests:
+    - path: tests/unit/uvc_stream_generation_test.cpp
+      sha256: ca0dfec9422a992f1fadba6bb40091419a315a842c81bfd7d63e8c8320b8239c
+      role: >-
+        Portable developer test for the gate: strictly increasing generations
+        across retire, exact-equality acceptance, discard_stale counting, and a
+        bounded concurrent begin/retire/accepts stress case.
+    - path: tests/unit/uvc_callback_snapshot_test.cpp
+      sha256: 2bc3cb196d7053a8cdba52ab496136e3d5547bd239bb36843d782854c6c232bc
+      role: >-
+        Windows-gated developer test for callback_snapshot(); empty TU off Windows
+        (reports one explicit portable-stub case).
+  build:
+    - path: CMakeLists.txt
+      sha256: 086fcd4fabbcbc53ddc5c9f6afc27b2ba0fcda9d862d9e2b15223a9e8d451f23
+      role: >-
+        Registers developer targets uvc_stream_generation_developer_tests and
+        uvc_callback_snapshot_developer_tests via catch_discover_tests, following
+        the existing uvc_*_developer_tests pattern.
+
+frozen_files_untouched:
+  - path: tests/unit/cvf103_stream_generation_test.cpp
+    expected_sha256: 589f82217fed240a13c447b2e705eb926959a104505bc81e49d3c87137e227be
+    observed_sha256_before: 589f82217fed240a13c447b2e705eb926959a104505bc81e49d3c87137e227be
+    observed_sha256_after: 589f82217fed240a13c447b2e705eb926959a104505bc81e49d3c87137e227be
+    sha_match: true
+    status: untouched
+  - path: tests/windows/uvc/cvf103_uvc_callback_snapshot_test.cpp
+    expected_sha256: 32e4d7826794849e5f8aca95ba55d0a8459ae3285ec1e531e9abf58c58c2dedf
+    observed_sha256_before: 32e4d7826794849e5f8aca95ba55d0a8459ae3285ec1e531e9abf58c58c2dedf
+    observed_sha256_after: 32e4d7826794849e5f8aca95ba55d0a8459ae3285ec1e531e9abf58c58c2dedf
+    sha_match: true
+    status: untouched
+  - path: .ai/test-ownership.yaml
+    observed_sha256_before: a2acfa82cea70a8effc3c515728907eddcad6bef4a5bd12e8ab34e8a6b8d7af8
+    observed_sha256_after: a2acfa82cea70a8effc3c515728907eddcad6bef4a5bd12e8ab34e8a6b8d7af8
+    status: untouched
+    note: >-
+      The observed hash matches the value recorded in CVF-103-test-red.yaml
+      (manifest_sha256_after_update). The two CVF-103 ownership entries pin the
+      hashes above, which were observed unchanged before and after this session.
+  - path: include/cvforwin/**
+    status: untouched by developer
+  - path: src/c_api/**
+    status: untouched by developer
+  - path: .ai/changes/**
+    status: untouched by developer
+  - path: .ai/project-contract.yaml
+    status: untouched by developer
+
+commands:
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    result: PASS
+    observed: "Configuring done (14.0s); Generating done; build files written to build/wsl-gcc-debug"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    result: PASS
+    observed: "[0/2] Re-checking globbed directories; ninja: no work to do (all targets already up to date after the targeted build below)"
+  - command: "cmake --build --preset wsl-gcc-debug --target cvf103_generation_tests uvc_stream_generation_developer_tests uvc_callback_snapshot_developer_tests --parallel"
+    exit_code: 0
+    result: PASS
+    observed: "6/6 objects compiled and linked (cvf103_generation_tests, uvc_stream_generation_developer_tests, uvc_callback_snapshot_developer_tests)"
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    result: PASS
+    observed: "100% tests passed, 0 tests failed out of 301 (Total Test time real 8.21 sec, final tree re-run)"
+  - command: "build/wsl-gcc-debug/cvf103_generation_tests"
+    exit_code: 0
+    result: PASS
+    observed: "All tests passed (70 assertions in 9 test cases)"
+    note: "Portable independent CVF-103 gate suite; must now pass because the frozen seam exists."
+  - command: "build/wsl-gcc-debug/uvc_stream_generation_developer_tests"
+    exit_code: 0
+    result: PASS
+    observed: "All tests passed (1048 assertions in 7 test cases)"
+  - command: "build/wsl-gcc-debug/uvc_callback_snapshot_developer_tests"
+    exit_code: 0
+    result: PASS
+    observed: "All tests passed (1 assertion in 1 test case)"
+    note: "Off Windows the TU is empty and reports exactly one explicit portable-stub case."
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    result: PASS
+    observed: "-- format-check passed: 94 file(s) conform to .clang-format"
+  - command: "cmake --preset wsl-clang-analysis"
+    exit_code: 0
+    result: PASS
+    observed: "Configuring done (17.5s); Generating done; build files written to build/wsl-clang-analysis"
+  - command: "cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+    exit_code: 0
+    result: PASS
+    observed: "-- static-analysis passed: 22 file(s) clean under .clang-tidy"
+  - command: >-
+      clang++ -D_WIN32 -fms-extensions -std=c++20 -Wall -Wextra -Werror -fsyntax-only
+      -include <throwaway align shim> -I /tmp/opencode/cvf102-mock -I src -I include
+      -I tests/unit -isystem <vcpkg>/include -isystem <vcpkg>/include/opencv4
+      src/camera/uvc_windows/uvc_backend.cpp
+      tests/windows/uvc/cvf103_uvc_callback_snapshot_test.cpp
+      tests/unit/uvc_callback_snapshot_test.cpp
+    exit_code: 0
+    result: PASS
+    observed: "clean syntax/type check"
+    note: >-
+      Linux parse-only check of the Windows-only translation units against
+      throwaway Media Foundation / Windows stub headers under /tmp/opencode (never
+      part of the repository or any CMake target). This is a parse/type check, NOT
+      MSVC compilation and NOT Windows execution evidence.
+
+developer_tests:
+  portable:
+    target: uvc_stream_generation_developer_tests
+    binary: build/wsl-gcc-debug/uvc_stream_generation_developer_tests
+    result: PASS
+    test_cases: 7
+    assertions: 1048
+    ctest_cases: 7
+    names:
+      - "UVC developer: a fresh gate has no active stream"
+      - "UVC developer: begin_stream starts at one and increases strictly across retire"
+      - "UVC developer: accepts is an exact equality against the active generation"
+      - "UVC developer: discard_stale counts only rejected generations"
+      - "UVC developer: accepting the active generation never marks it stale"
+      - "UVC developer: a late retired-generation completion is rejected after replacement"
+      - "UVC developer: concurrent begin/retire/accepts keep generations strictly increasing"
+  windows_gated:
+    target: uvc_callback_snapshot_developer_tests
+    binary: build/wsl-gcc-debug/uvc_callback_snapshot_developer_tests
+    result: PASS
+    host_behavior: >-
+      Off Windows the TU is empty and the binary reports exactly one case; on
+      Windows it drives the real UvcCameraBackend::callback_snapshot() seam. No
+      Windows result is claimed here.
+    test_cases: 1
+    assertions: 1
+    names:
+      - "UVC developer: Windows-only callback-generation seam is not exercised on portable builds"
+
+independent_tests_observed:
+  - path: tests/unit/cvf103_stream_generation_test.cpp
+    sha256: 589f82217fed240a13c447b2e705eb926959a104505bc81e49d3c87137e227be
+    pinned_sha256: 589f82217fed240a13c447b2e705eb926959a104505bc81e49d3c87137e227be
+    sha_match: true
+    owner: test-engineer
+    result: PASS
+    observed: "70 assertions in 9 test cases (exit 0)"
+  - path: tests/windows/uvc/cvf103_uvc_callback_snapshot_test.cpp
+    sha256: 32e4d7826794849e5f8aca95ba55d0a8459ae3285ec1e531e9abf58c58c2dedf
+    pinned_sha256: 32e4d7826794849e5f8aca95ba55d0a8459ae3285ec1e531e9abf58c58c2dedf
+    sha_match: true
+    owner: test-engineer
+    result: NOT RUN here
+    status_on_this_host: >-
+      NOT BUILT and NOT EXECUTED: the whole TU is guarded by #if defined(_WIN32), so
+      it is an empty TU on Linux. Parse/type-checked clean against throwaway stubs,
+      but no Windows execution result is claimed.
+
+contract_conformance:
+  wiring_requirements:
+    - "Every started stream constructs a NEW ReadCallback with the generation returned by begin_stream(); no callback instance is reused by a different SourceReader (start_stream)."
+    - "OnReadSample/OnFlush record their immutable callback generation and apply a completion only when gate.accepts(generation); the capture waiter predicate re-checks acceptance (uvc_backend.cpp)."
+    - "Rejected events call discard_stale() and return before touching read_completed/read_status/read_flags/read_sample/flush_completed."
+    - "teardown_stream() retires the generation before releasing reader/source/callback; teardown_worker() releases on the worker before MFShutdown then CoUninitialize."
+    - "callbacks_created increments once per started stream; the gate generation source is monotonic for the backend lifetime across reconnect; stream_open mirrors successful open/close."
+  invariants:
+    - "Monotonic generation ordering with equality-only acceptance."
+    - "No stale callback can produce a frame, a false completion, or a false flush success."
+    - "At most one reconnect/recapture per inspection is unchanged: no runtime or retry code was touched."
+  interface_freeze: >-
+    StreamGenerationGate matches .ai/changes/CVF-103.yaml
+    interface_v1.frozen_test_seam.portable_logic_declaration; UvcCallbackSnapshot
+    and callback_snapshot() match interface_v1.frozen_test_seam.backend_accessor.
+    No include/cvforwin or src/c_api change; ICameraBackend unchanged.
+  module_scope: >-
+    The change stays inside the uvc_windows_backend module. Every callback owns a
+    std::shared_ptr to the shared StreamGenerationState rather than a pointer to
+    the backend, satisfying the no-dangling-backend-pointer requirement. No vendor
+    SDK is used and no Media Foundation/OpenCV type crosses the module boundary.
+
+windows_msvc_status:
+  verifiable_on_this_host: false
+  statement: >-
+    Windows MSVC compilation and execution of cvf103_windows_uvc_tests (and of the
+    Windows-gated developer snapshot test) are NOT verifiable on this Linux host
+    and were NOT fabricated. No Windows SDK or MSVC toolchain is installed. The
+    successful Linux portable/ASAN-class runs exercise only the portable gate and
+    the empty-on-Linux Windows TUs and are not Windows evidence. Actual execution
+    of the independent Windows component suite is deferred to the
+    windows-tests-quality CI, where cvf103_windows_uvc_tests is registered under
+    the WIN32 + CVFORWIN_BUILD_TESTS + CVFORWIN_BUILD_TEST_BACKENDS gate, and
+    real-device behavior remains deferred to the designated station.
+
+scope_notes:
+  - >-
+    The change contract's allowed_files lists src/camera/uvc_windows/** and
+    tests/unit/**, not CMakeLists.txt. Registering the two developer test targets
+    required the same minimal build wiring that CVF-101/CVF-102 developer tests
+    already use in CMakeLists.txt (add_executable + catch_discover_tests under the
+    existing CVFORWIN_BUILD_TESTS block). CMakeLists.txt is not a hash-pinned
+    artifact and this session's explicit do-not-touch list did not include it; the
+    edit is limited to the two new developer targets and adds no production
+    behavior. Flagged for reviewer awareness.
+
+blockers: []
+notes:
+  - "No production code outside src/camera/uvc_windows/** was changed; include/cvforwin/**, src/c_api/**, .ai/changes/**, and .ai/project-contract.yaml were not touched."
+  - "The two frozen independent test files hash to their pinned values before and after the session; neither was modified."
+  - "Windows MSVC execution remains deferred to windows-tests-quality CI and is not claimed."
+
+# ===========================================================================
+# FIX SECTION: blocking finding B-1 (CVF-103 review) — build-wiring relocation
+# ===========================================================================
+fix:
+  finding: "B-1 in .ai/reviews/CVF-103.yaml"
+  recorded_at: 2026-09-18
+  author: developer
+  scope_authorization: >-
+    .ai/changes/CVF-103.yaml scope.allowed_files.build_files now lists
+    "CMakeLists.txt (build wiring only: register the CVF-103 targets; never
+    source logic)"; the controller authorized this build-wiring correction.
+  root_cause: >-
+    The entire CVF-103 Windows test block (comment header + inner
+    if(WIN32 AND CVFORWIN_BUILD_TESTS AND CVFORWIN_BUILD_TEST_BACKENDS) target)
+    had been inserted after the if(WIN32) ... else() ... endif() of the
+    UVC hardware smoke suite, i.e. nested directly inside
+    if(CVFORWIN_BUILD_HARDWARE_TESTS). That option defaults OFF
+    (cmake/CvfOptions.cmake:55) and is set by neither the windows-msvc-tests
+    preset (CMakePresets.json) nor .github/workflows/windows.yml, so
+    cvf103_windows_uvc_tests was never configured, built, or registered with
+    CTest in the mandatory Windows CI job. The inner gate was correct but
+    unreachable. This is a placement defect only; no target body changed.
+
+  change:
+    file: CMakeLists.txt
+    type: pure block relocation (verified byte-for-byte)
+    description: >-
+      Moved the CVF-103 Windows block out of the CVFORWIN_BUILD_HARDWARE_TESTS
+      conditional to a direct sibling position immediately after the
+      cvf102_windows_uvc_tests block, still inside if(CVFORWIN_BUILD_TESTS),
+      before the endif() that closes CVFORWIN_BUILD_TESTS. cvf_hw_uvc_smoke
+      remains inside if(CVFORWIN_BUILD_HARDWARE_TESTS) unchanged. No other
+      target, option, preset, or workflow was modified.
+
+  new_hash:
+    path: CMakeLists.txt
+    sha256_before_fix: 086fcd4fabbcbc53ddc5c9f6afc27b2ba0fcda9d862d9e2b15223a9e8d451f23
+    sha256_after_fix: 8948f6a54a5d5a22cc87be5fb77c8a99bb3471f2c689a9c07507a4ca4d84b05f
+    relocation_purity: >-
+      Reconstructing the pre-fix file from the post-fix file by moving the
+      relocated block (current lines 1106-1142) back after the hardware
+      if(WIN32) endif() reproduces sha256
+      086fcd4fabbcbc53ddc5c9f6afc27b2ba0fcda9d862d9e2b15223a9e8d451f23
+      exactly, proving the edit is a pure relocation with no other content
+      change (verified with a Python reconstruction + sha256sum).
+
+  conditional_structure_after_fix:
+    cvforwin_build_tests:
+      opens_line: 495
+      closes_line: 1143
+    cvforwin_build_hardware_tests:
+      opens_line: 1156
+      closes_line: 1177
+    cvf103_windows_uvc_tests:
+      comment_header_lines: "1106-1120"
+      inner_gate_line: 1122
+      inner_gate: "if(WIN32 AND CVFORWIN_BUILD_TESTS AND CVFORWIN_BUILD_TEST_BACKENDS)"
+      add_executable_line: 1123
+      inner_endif_line: 1142
+      enclosing_conditionals:
+        - "line 495: if(CVFORWIN_BUILD_TESTS)"
+        - "line 1122: if(WIN32 AND CVFORWIN_BUILD_TESTS AND CVFORWIN_BUILD_TEST_BACKENDS)"
+      under_cvforwin_build_tests: true
+      under_cvforwin_build_hardware_tests: false
+      proof_method: >-
+        Stack-based parse of if()/endif() nesting over CMakeLists.txt: the only
+        enclosing conditionals of add_executable(cvf103_windows_uvc_tests) are
+        line 495 and line 1122; CVFORWIN_BUILD_HARDWARE_TESTS does not appear in
+        the enclosing set. cvf_hw_uvc_smoke is enclosed by
+        if(CVFORWIN_BUILD_HARDWARE_TESTS) (1156) and if(WIN32) (1157).
+    cvf101_windows_uvc_tests_enclosing:
+      - "line 495: if(CVFORWIN_BUILD_TESTS)"
+      - "line 1046: if(WIN32 AND CVFORWIN_BUILD_TESTS AND CVFORWIN_BUILD_TEST_BACKENDS)"
+    cvf102_windows_uvc_tests_enclosing:
+      - "line 495: if(CVFORWIN_BUILD_TESTS)"
+      - "line 1084: if(WIN32 AND CVFORWIN_BUILD_TESTS AND CVFORWIN_BUILD_TEST_BACKENDS)"
+
+  verification_commands:
+    - command: "cmake --preset wsl-gcc-debug"
+      exit_code: 0
+      result: PASS
+      observed: "Configuring done (24.2s); Generating done; build files written to build/wsl-gcc-debug"
+    - command: "cmake --build --preset wsl-gcc-debug --parallel"
+      exit_code: 0
+      result: PASS
+      observed: "[0/2] Re-checking globbed directories; ninja: no work to do"
+    - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+      exit_code: 0
+      result: PASS
+      observed: "100% tests passed, 0 tests failed out of 307 (Total Test time real 9.34 sec)"
+    - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+      exit_code: 0
+      result: PASS
+      observed: "-- format-check passed: 94 file(s) conform to .clang-format"
+      note: >-
+        format-check covers C++ sources only and does not cover CMakeLists.txt.
+        No cmake-format/cmake-lint tool or config exists in the repository
+        (grep over CMakeLists.txt, cmake/, .github/workflows found none;
+        cmake-format is not installed), so no CMake formatting check applies.
+        The relocation itself introduces no new formatting: it reproduces the
+        pre-existing cvf102 block indentation exactly.
+
+  scope_confirmation:
+    out_of_scope_files_changed: none
+    allowed_file_changed: CMakeLists.txt only
+    untouched_verified:
+      - "tests/** (independent and developer test files byte-identical; only test-owner-owned)"
+      - "src/** and include/cvforwin/** and src/c_api/**"
+      - ".ai/changes/** and .ai/project-contract.yaml"
+      - "CMakePresets.json, .github/workflows/**, cmake/**"
+    method: >-
+      A targeted mtime scan for files under src/**, tests/**, include/**,
+      src/c_api/**, .ai/**, cmake/**, and CMakePresets.json created/modified
+      during the fix session returned only the two files read at session start
+      (.ai/changes/CVF-103.yaml, .ai/reviews/CVF-103.yaml); no production,
+      test, preset, or workflow file was written.
+
+  windows_status:
+    claim: none
+    statement: >-
+      Windows configuration/building/execution of cvf103_windows_uvc_tests is
+      NOT claimed here and remains deferred to the windows-tests-quality CI.
+      This host is Linux and cannot configure a WIN32 target. The fix makes the
+      target reachable under the CVFORWIN_BUILD_TESTS + WIN32 +
+      CVFORWIN_BUILD_TEST_BACKENDS gate that windows-msvc-tests enables; the
+      Windows run itself must be produced by CI.
+
+  residual_risk: >-
+    The edit cannot be directly exercised on this Linux host because the target
+    is WIN32-gated. Correctness of the gating is proven structurally (no
+    CVFORWIN_BUILD_HARDWARE_TESTS in the enclosing conditional set) and by the
+    byte-for-byte pure-relocation hash reconstruction; the actual Windows
+    configure+build is validated by the windows-tests-quality CI job.

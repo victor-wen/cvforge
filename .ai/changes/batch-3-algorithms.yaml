@@ -1,0 +1,44 @@
+change_id: batch-3-algorithms
+title: Batch 3 algorithm preparation lifecycle and template.match (CVF-106)
+risk: R2
+batch: batch-3-algorithms
+member_changes:
+- id: CVF-106
+  delivery_sha: 74b3b3f055ddd2408e8ea002b2f645ba4dfff812
+  superseded_sha: b102946
+  scope: >-
+    Additive algorithm preparation/asset lifecycle (IPreparedAlgorithm, prepare(), bounded recipe assets),
+    template.match reference algorithm, example recipe + license-cleared asset, and the cv2/NumPy porting guide.
+candidate_sha: 74b3b3f055ddd2408e8ea002b2f645ba4dfff812
+scope:
+  allowed_files:
+    production:
+    - src/inspection/**
+    - src/algorithms/**
+    - src/recipes/**
+    - src/runtime/**
+    examples_and_docs:
+    - config/examples/**
+    - docs/**
+    - LICENSES/**
+    developer_tests:
+    - tests/unit/** (non cvf1* independent names)
+    build_files:
+    - CMakeLists.txt
+  out_of_scope:
+  - include/cvforwin/**
+  - src/c_api/**
+  - src/camera/**
+invariants:
+- No public C symbol, status value, struct layout, or export change.
+- No inspect-time file I/O or lazy asset loading; prepared state is per recipe and immutable after publication.
+- Recipe reload is all-or-nothing across JSON, assets, and preparation.
+- No camera/ABI coupling in algorithms.
+acceptance: >-
+  CVF-106 is committed, the task reviewer verdict is consumed, the deterministic quality gate PASS at the frozen
+  candidate SHA, and the windows-2022 CI jobs succeed at that SHA (including the clean package consumer and the
+  template.match example). Portable behaviour is verified on the WSL host; hardware evidence is absent by design.
+verification:
+  canonical_gate: .ai/validation/batch-3-quality-plan.yaml -> .ai/reports/batch-3-quality.json
+  independent_manifest: .ai/test-ownership.yaml
+  release_review: .ai/reviews/batch-3.yaml

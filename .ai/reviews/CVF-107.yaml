@@ -1,0 +1,317 @@
+schema_version: 1
+change_id: CVF-107
+reviewer: reviewer (independent; read-only; no participation in authoring, implementation, or testing)
+# Role schema uses APPROVE/REQUEST_CHANGES; the task uses PASS/PASS_WITH_FINDINGS/FAIL.
+# Zero blocking findings, so the role-schema equivalent is APPROVE.
+role_verdict: APPROVE
+verdict: PASS_WITH_FINDINGS
+
+reviewed_artifacts:
+  - .ai/changes/CVF-107.yaml
+  - .ai/test-briefs/CVF-107.yaml
+  - .ai/project-contract.yaml (FR-019..FR-024, NFR-019, uvc_worker_lifecycle_v1, hardware_uvc suite policy, quality_commands)
+  - .ai/reports/CVF-107-test-red.yaml
+  - .ai/reports/CVF-107-test-amendment.yaml
+  - .ai/reports/CVF-107-build-fix.yaml
+  - .ai/reports/CVF-107-hardware.yaml
+  - .ai/test-ownership.yaml (CVF-007 and CVF-107 entries)
+  - tests/hardware/uvc_smoke.cpp (all 1527 lines)
+  - docs/hardware-uvc.md
+  - CMakeLists.txt (1690-1728; 96-125; cvf006 precedent at 774)
+  - cmake/CvfOptions.cmake (49-58, 124-136)
+  - CMakePresets.json (81-100)
+  - .github/workflows/** (grep for CVFORWIN_BUILD_HARDWARE_TESTS / cvf_hw_uvc_smoke / CVF_HW: no matches)
+  - src/camera/camera_backend.cpp (resolve_identity 62-87, capture_with_one_retry 89-118)
+  - src/camera/uvc_windows/uvc_backend.h and uvc_backend.cpp (bounded contract path for the H3 amendment)
+  - .ai/validation/cvf107-hardware-evidence/cvf107-hw-10cycles.txt
+  - .ai/validation/cvf107-hardware-evidence/cvf107-hw-1000cycles.txt
+  - .ai/validation/cvf107-hardware-evidence/cvf107-hw-reconnect-unplug.txt
+  - .ai/validation/cvf107-test-amendment.sh, cvf107-test-amendment-scope.sh (amendment harness)
+
+review_note: >-
+  Read-only source review. No shell is available to this reviewer, so no sha256 value was
+  recomputed and no test or hardware run was executed here; hash pins, manifest audits, the
+  portable ctest counts, and the claimed build results are report pointers whose mechanical
+  recomputation belongs to the deterministic quality gate. Every semantic claim below is backed
+  by source or raw-log lines that were read directly.
+
+summary: >-
+  CVF-107 hardens the opt-in Windows-only UVC hardware suite as contracted. The suite requires
+  an explicit exact selector and never falls back to the first enumerated device; a missing,
+  ambiguous, or non-matching selector fails closed (uvc_smoke.cpp:1397-1419; camera_backend.cpp:62-87).
+  The 1000-cycle path validates dimensions, BGR8/CV_8UC3, buffer continuity, and a strictly
+  increasing sequence per capture and asserts valid==cycles with invalid==0 (uvc_smoke.cpp:1138-1198);
+  the raw 1000-cycle log matches exactly (valid=1000 invalid=0, all violation counters 0). The
+  forced-timeout path is deterministic and mandatory in stress mode (910-956, 1454-1458) and passed
+  on the station, and the reconnect/manual-unplug case matches the capture_with_one_retry semantics
+  (capture -> camera_io -> reconnect -> recapture; camera_backend.cpp:89-118) with an operator gate
+  and bounded deadline checks (1246-1321); the observed 0xC00D3EA2 camera_io, 21 ms bounded failure,
+  and post-replug BGR8 recovery match the code, and the procedure cannot pass vacuously. The H3
+  amendment to a fresh backend instance is legitimate: production owns one worker for the backend's
+  whole lifetime and close() permanently joins it (uvc_backend.cpp:832-838, 886-888, 996-1000;
+  project-contract.yaml:742,747), the surrounding checks are preserved, and only the test file was
+  written by the amendment harness. The MSVC _CRT_SECURE_NO_WARNINGS fix is PRIVATE and scoped to
+  cvf_hw_uvc_smoke under if(MSVC) (CMakeLists.txt:1711-1716), matching the cvf006 precedent (774);
+  the target remains opt-in, WIN32-only, unregistered with CTest, and absent from every CI workflow.
+  The mandatory-check machinery honestly failed the 1000-cycle run with exit 1 for the two absent
+  physical targets instead of skipping them, and no check was weakened, deleted, or converted to a
+  skip to manufacture a pass. Six non-blocking findings are recorded: the symmetric orientation
+  control can substitute for the mandatory positive orientation check (NBF-01); the manual still
+  presents VID/PID selectors that can never match because enumeration returns empty VID/PID
+  (NBF-02); the reconnect "always runs" sentence is wrong (NBF-03); the documented build command
+  deviates from the canonical preset and omits the vcpkg toolchain (NBF-04); the pre-amendment
+  failing run has no archived log (NBF-05); and residual coverage/procedure gaps remain
+  (NBF-06). Hardware acceptance is partial by design: 1000 cycles, timeout, and reconnect are
+  verified; orientation and color are UNVERIFIED because no CVF-ORIENT-1 / CVF-COLOR-1 target was
+  available, which correctly leaves the project-contract release gate open.
+
+blocking_findings: []
+
+non_blocking_findings:
+  - id: CVF107-NBF-01
+    severity: medium
+    file: tests/hardware/uvc_smoke.cpp
+    location: "run_orientation_case: 965-975 and 994-1000"
+    issue: >-
+      When CVF_HW_ORIENTATION_SYMMETRIC_CONTROL is set, the function executes only the negative
+      control and returns (994-1000), so the positive asymmetric-target checks are never run even
+      if CVF_HW_ORIENTATION_TEST=1 is also set. In stress mode the missing-target failure is gated
+      on !symmetric_control (966-975), so an operator with only a vertically symmetric card can set
+      the control and satisfy the mandatory H7 requirement without ever demonstrating "an
+      asymmetric TOP/BOTTOM target is detected in the correct visual orientation". The captured
+      evidence did not take this path (the stress run hard-failed H7, cvf107-hw-1000cycles.txt:43),
+      and the substitution is visible in the log because the two positive H7 lines are absent, but
+      the stress-mode invariant is not unconditionally enforced.
+    required_fix: >-
+      When required is true and CVF_HW_ORIENTATION_TEST is unset, fail regardless of
+      CVF_HW_ORIENTATION_SYMMETRIC_CONTROL; when both flags are set, run the positive checks first
+      and the control additionally instead of returning after the control. Document that the
+      control is not a substitute for the positive target.
+
+  - id: CVF107-NBF-02
+    severity: medium
+    file: docs/hardware-uvc.md
+    location: "28-29 and 38-41 (also tests/hardware/uvc_smoke.cpp:31-34)"
+    issue: >-
+      The manual tells the operator to copy "the device_path (or the VID/PID)" and lists
+      CVF_HW_UVC_VID/PID as usable selectors, but on the measured platform every enumerated
+      descriptor has vendor_id="" and product_id="" (cvf107-hw-10cycles.txt:4-5,9;
+      cvf107-hw-1000cycles.txt:4-5,9), so a VID/PID selector always resolves to camera_not_found.
+      The suite fails closed correctly (no fallback; uvc_smoke.cpp:1413-1419) and the station used
+      CVF_HW_UVC_NAME successfully, but the documentation does not tell the operator which
+      selectors actually work. The contract's own hardware prerequisites also name only
+      DEVICE_PATH or the VID/PID pair (project-contract.yaml:995).
+    required_fix: >-
+      State that the current Windows UVC enumeration exposes only device_path and friendly_name,
+      so CVF_HW_UVC_DEVICE_PATH or CVF_HW_UVC_NAME is required to select a device (VID/PID remain
+      implemented and will match once the backend populates those fields), and route the
+      production identity gap (CVF107-HW-03) to the release reviewer.
+
+  - id: CVF107-NBF-03
+    severity: low
+    file: docs/hardware-uvc.md
+    location: "141-142"
+    issue: >-
+      "The suite always exercises a bounded reconnect to the attached device" is false:
+      run_manual_replug_case returns after report.skip unless CVF_HW_UNPLUG_TEST=1
+      (tests/hardware/uvc_smoke.cpp:1249-1253), including the pre-prompt reconnect at 1263-1268.
+      Both the 10-cycle and 1000-cycle logs show H6 as [skip] (cvf107-hw-10cycles.txt:57,
+      cvf107-hw-1000cycles.txt:68), and the same section later says the case is skipped when the
+      variable is unset, so the document contradicts itself.
+    required_fix: >-
+      Reword to: with CVF_HW_UNPLUG_TEST=1 the case first exercises a bounded reconnect to the
+      attached device; otherwise the whole case is reported as skipped.
+
+  - id: CVF107-NBF-04
+    severity: low
+    file: docs/hardware-uvc.md
+    location: "14-19 and 226; project-contract.yaml:1014-1016"
+    issue: >-
+      The documented build procedure is an ad-hoc Visual Studio generator command in build\hw with
+      no vcpkg toolchain file, while the contract's canonical hardware commands use the
+      windows-msvc-tests preset, which supplies
+      $env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake (CMakePresets.json:88-96). The station
+      evidence was produced from build\hw exactly as documented (CVF-107-hardware.yaml:12-14), so
+      the run is real, but release evidence cannot be traced to the canonical preset command and a
+      fresh operator following the doc alone may fail to configure without vcpkg integration.
+    required_fix: >-
+      Either align the doc and the release procedure with
+      "cmake --preset windows-msvc-tests -DCVFORWIN_BUILD_HARDWARE_TESTS=ON", or document the
+      vcpkg/toolchain prerequisite next to the ad-hoc command.
+
+  - id: CVF107-NBF-05
+    severity: low
+    file: .ai/reports/CVF-107-test-amendment.yaml
+    location: "11-13; .ai/validation/cvf107-hardware-evidence/"
+    issue: >-
+      The pre-amendment station run that produced CVF107-HW-02 (32 passed / 1 failed / 3 skipped,
+      H3 same-instance reopen) is reported only in prose; no raw console log is archived alongside
+      the three post-amendment logs, so the failure that motivated the H3 amendment cannot be
+      independently re-read.
+    required_fix: >-
+      Archive the pre-amendment console log, or state explicitly in the amendment report that it
+      was superseded and why it is not retained.
+
+  - id: CVF107-NBF-06
+    severity: low
+    file: tests/hardware/uvc_smoke.cpp / docs/hardware-uvc.md
+    location: "orientation case 962-1006; H4 post-loop enumeration 1203-1205; docs 80-101, 160-167"
+    issue: >-
+      Residual adequacy gaps in the captured evidence: (a) brief B2's inverted-target negative
+      ("with the target inverted, it fails") is only enforced logically by the signed check at
+      1004-1005; no procedure or env mode executes it and it was not run; (b) no CVF_HW_CYCLES=1
+      boundary run and no CVF_HW_EXPECT_ZERO_DEVICES run are in the evidence; (c) the H4
+      "still enumerated" check (1203-1205) accepts any non-empty enumeration rather than the
+      resolved descriptor; (d) a timeout (rather than camera_io) during unplug would fail H6 at
+      1280-1281 (fail-closed but untested). A vertically symmetric image cannot pass the
+      orientation check: the signed contrast test (1002-1005) plus the control's |diff| threshold
+      (994-998) make mirror-symmetric bands fail; only an operator-created lighting gradient
+      >= threshold could satisfy it, which the documented "even lighting" requirement (docs:84)
+      mitigates.
+    required_fix: >-
+      Add a documented inverted-target negative step (card upside down; expect the "orientation
+      correct" check to fail) and capture the CYCLES=1 boundary (and zero-device boundary if
+      possible) at the next station session; optionally re-resolve the descriptor instead of
+      accepting any non-empty enumeration after the stress loop.
+
+independence_notes: >-
+  No participation conflict: I authored none of the suite, docs, build wiring, reports, or
+  evidence, and I made no edits. The test file is owned by test-engineer; the hardware evidence
+  was recorded by build-controller and I read the raw logs. The H3 amendment was performed by the
+  test owner with the documented anchored replacement and reverse-hash scope proof
+  (cvf107-test-amendment.sh:19,31-95; cvf107-test-amendment-scope.sh:31-56); the production
+  contract confirms the old assertion contradicted the frozen one-worker-per-lifetime design, so
+  this is a legitimate correction rather than a weakened test, and the CVF-007 and CVF-107
+  manifest entries were updated in sync by the owner (test-ownership.yaml:356-357,400-401). The
+  change contract names .ai/reports/CVF-107-test-verify.yaml, which does not exist; the independent
+  execution evidence for this task is .ai/reports/CVF-107-hardware.yaml plus the three raw console
+  logs, and the deterministic quality gate should confirm whether the missing verify report is
+  required or intentionally replaced. Hash equality (test file d2df8836..., evidence files, manifest
+  audit, portable ctest counts) could not be recomputed without a shell and is delegated to that
+  gate; my content-level comparison confirms the amended block in the on-disk file matches the
+  documented transformation byte-for-byte in the changed region.
+
+acceptance_status:
+  task_acceptance: >-
+    The brief's acceptance criterion is met honestly: the portable suite is reported green
+    (quality gate to confirm) and the hardware evidence is recorded as PASS where verified and
+    UNVERIFIED where physical targets were absent. The change package satisfies the CVF-107
+    verification matrix; the single canonical stress command was executed as three equivalent
+    runs (10-cycle smoke, 1000-cycle stress, interactive reconnect), which covers every required
+    check except orientation and color.
+  satisfied:
+    - "Explicit exact selector required; missing, ambiguous, and non-matching selectors all fail closed with exit 1 and no first-device fallback (uvc_smoke.cpp:1397-1419; camera_backend.cpp:62-87)"
+    - "At least 1000 consecutive captures, each validated for configured dimensions, BGR8/CV_8UC3, continuity, and strictly increasing sequence; valid=1000 invalid=0 (uvc_smoke.cpp:1138-1198; cvf107-hw-1000cycles.txt:48-60)"
+    - "Forced timeout exercised deterministically and mandatory in stress mode; H5a-H5d and the H5 mandatory check passed (uvc_smoke.cpp:910-956,1454-1458; cvf107-hw-1000cycles.txt:34-42)"
+    - "Bounded reconnect plus operator-gated unplug/replug executed and passed (uvc_smoke.cpp:1246-1321; cvf107-hw-reconnect-unplug.txt:58-73)"
+    - "Release-evidence record with identity, cycles, Windows version, driver/firmware, check counts, and exit code (uvc_smoke.cpp:399-515; logs 62-85/75-101/78-98)"
+    - "Opt-in WIN32-only target, never CTest-registered, never in hosted CI (CMakeLists.txt:1701-1728; CvfOptions.cmake:55; no .github or preset references)"
+    - "H3 amendment legitimate (fresh instance) with surrounding checks preserved and no production file touched (uvc_backend.cpp:832-838,886-888,996-1000; amendment harness writes only the test file)"
+    - "Mandatory orientation/color checks fail closed when the target is absent instead of skipping; the 1000-cycle run correctly exited 1 (cvf107-hw-1000cycles.txt:43-44,70-73)"
+  unverified:
+    - "NFR-019 orientation check on real hardware: UNVERIFIED - no CVF-ORIENT-1 target; H7 recorded as a mandatory failure, never a pass"
+    - "NFR-019 color check on real hardware: UNVERIFIED - no CVF-COLOR-1 target; H8 recorded as a mandatory failure, never a pass"
+    - "The symmetric negative control and the inverted-target negative were not executed on hardware"
+    - "CVF_HW_CYCLES=1 and CVF_HW_EXPECT_ZERO_DEVICES boundary runs were not captured on the station (only two cameras attached)"
+    - "Portable ctest 454/454, the MSVC rebuild with the CMake fix, and all sha256 pins are report-claimed; recomputation is delegated to the deterministic quality gate"
+  release_implication: >-
+    project-contract.yaml:975 (hardware_uvc.production_release_requirement) requires a recorded
+    PASS with at least 1000 cycles and no skipped timeout, reconnect, orientation, or color
+    checks before FCT deployment. That gate is NOT yet met: orientation and color remain
+    UNVERIFIED. The release reviewer must keep this open and the station must run H7/H8 with the
+    documented physical targets. This task review does not fail the package for that gap: the
+    brief explicitly permits honest BLOCKED/UNVERIFIED hardware evidence, and the suite failed
+    closed instead of skipping.
+
+item_1_contract_fidelity:
+  status: PASS
+  evidence:
+    - "B1 cycles/dimensions/BGR8/continuity/sequence: uvc_smoke.cpp:1101-1208 (checks 1190-1198); default 50 and max 100000 at 179-181; stress minimum 1000 at 182, 1106-1110"
+    - "B2 orientation: 962-1006; absolute contrast 1002-1003; correct visual orientation 1004-1005; symmetric control rejects 994-998"
+    - "B3 color: 1012-1095; documented defaults 1048-1050, 1081; reference tolerance 1080-1090"
+    - "B4 forced timeout: 910-956; mandatory in stress 1348-1358, 1454-1458"
+    - "B5 bounded reconnect and gated unplug: 1246-1321; helper semantics camera_backend.cpp:89-118"
+    - "B6 explicit selector, no fallback: 1397-1419; negatives 755-808"
+    - "B7 release-evidence record: 399-515 (identity 462-467, cycles 471, OS 476, driver/firmware 477-478, exit code 479)"
+    - "B8 never CTest, never CI: CMakeLists.txt:1701-1728 has no add_test/catch_discover_tests; CvfOptions.cmake:55 default OFF; no .github or CMakePresets reference"
+  gaps: "None in the promised behavior set. NBF-01 qualifies the stress-mode enforcement of B2 under the non-default symmetric-control flag; execution of B2/B3 remains UNVERIFIED on hardware."
+
+item_2_selector_rule:
+  status: PASS (fail-closed); documentation truth gap NBF-02
+  evidence:
+    - "No selector: report.check(false) at 1404-1406, then skip H2-H8 at 1409, return; finish() returns 1 because failed_>0 (242-248)"
+    - "Ambiguous selector: resolve_identity returns camera_not_found/camera_identity_ambiguous (camera_backend.cpp:75-78), check at 1414 fails, H3-H8 skipped at 1417, exit 1"
+    - "Non-matching selector: camera_not_found (camera_backend.cpp:82-85), same fail-closed path"
+    - "No first-device fallback anywhere: the only selection is resolve_identity(devices, selector) at 1413; the ambiguity negative uses synthetic twins (731-753) and no real device is ever indexed (no devices[0]/front usage)"
+    - "VID/PID cannot match on the measured platform: logs show vendor_id=\"\" product_id=\"\" (cvf107-hw-10cycles.txt:4-5,9); H1 accepts empty fields (703-704); documentation still presents VID/PID as usable (docs 28-29,38-40) - NBF-02"
+
+item_3_mandatory_check_honesty:
+  status: PASS
+  evidence:
+    - "Stress forces require_orientation/color/timeout at 1348-1350; missing orientation target is check(false) at 966-970; missing color target is check(false) at 1015-1019; timeout mandatory check at 1454-1458"
+    - "Stress rejects the zero-device boundary at 1374-1377; short stress runs are refused at 1106-1110"
+    - "Hardware evidence: stress run logged both mandatory failures as [fail] and RESULT: FAIL with process_exit_code=1 (cvf107-hw-1000cycles.txt:43-44,70-73); the report classifies them UNVERIFIED, never PASS (CVF-107-hardware.yaml:44-49,70-75)"
+    - "All report.skip sites are either documented non-required gates or preceded by a failing prerequisite: 805-807 (friendly_name boundary), 972/1021 (non-required orientation/color), 1250 (unplug gate), 1385 (zero-device boundary), 1393 (no devices, with H1 fail), 1409 (no selector, with fail), 1417 (unresolved selector, with fail)"
+    - "No assertion was weakened or deleted for the amendment: the replaced block is exactly the documented one and the three guarded markers are unchanged (amendment.sh:31-78); surrounding H3 checks remain at 827, 836-866, 868-871, 873-880, 1445-1452"
+  caveat: "NBF-01: the symmetric-control flag can satisfy mandatory H7 without the asymmetric target, and replaces the positive checks when both flags are set."
+
+item_4_1000_cycle_path:
+  status: PASS
+  evidence:
+    - "Per cycle: dimensions on metadata and pixels (1143-1146), BGR8 metadata plus CV_8UC3 and non-empty pixels (1147-1148), continuity (1149), strictly increasing sequence (1150)"
+    - "Counters increment per violation (1151-1162) and ok is the conjunction (1164); valid/invalid counted at 1174-1178"
+    - "Aggregate assertions: invalid==0 && valid==cycles (1190-1191); with cycles>1 all four violation counters zero, sequence_strictly_increasing true, and last_sequence>first_sequence (1192-1198)"
+    - "Progress lines every 100 only in stress (1179-1182); raw log matches exactly valid=1000 invalid=0 with all counters 0 (cvf107-hw-1000cycles.txt:48-60)"
+    - "CVF_HW_CYCLES=1 is documented and the strictly-increasing aggregate check is correctly not asserted (1192; docs 57-58)"
+
+item_5_reconnect_unplug:
+  status: PASS
+  evidence:
+    - "Procedure is operator-gated by CVF_HW_UNPLUG_TEST (1249-1253) and each manual step waits on stdin (1270-1277, 1298-1305); EOF fails the case (1273-1276)"
+    - "After unplug the code requires failure with status camera_io (1279-1281); the bounded retry must also fail camera_io (1292-1293) and return within deadline+slack (1286-1296); after replug one bounded capture_with_one_retry must recover and the frame must validate as BGR8 (1307-1318)"
+    - "capture_with_one_retry genuinely performs capture -> camera_io -> reconnect(settings, deadline) -> recapture (camera_backend.cpp:89-118), matching the documented 'bounded reconnect + recapture'"
+    - "Observed station behavior matches: camera_io HRESULT 0xC00D3EA2 (cvf107-hw-reconnect-unplug.txt:64-65), bounded retry failure at 21 ms (66-67), recovery to a valid 640x480 BGR8 frame sequence=1 (71-73)"
+    - "Vacuous pass is not possible: pressing Enter without unplugging leaves the first post-unplug capture succeeding and failing the camera_io check; recovery additionally requires a valid frame"
+
+item_6_h3_amendment:
+  status: PASS
+  evidence:
+    - "Amended block uses a fresh HwBackend instance (uvc_smoke.cpp:882-896); the old same-instance block and the reverse-match scope proof are in the harness (cvf107-test-amendment.sh:31-57; cvf107-test-amendment-scope.sh:36-56)"
+    - "Surrounding checks preserved: open 827; three captures with dimensions/BGR8/ownership/sequence 836-866; frame ownership 868-871; idempotent double close and capture-after-close camera_io 873-880; held-pixels validity after close and destruction 1445-1452"
+    - "Amendment is legitimate under the frozen design: one worker for the backend's whole lifetime (uvc_backend.cpp:832-838), open after close returns worker-unavailable (886-888), close() joins the worker permanently (996-1000); uvc_worker_lifecycle_v1 requires one balanced MFStartup/MFShutdown lifetime and close-joins-worker (project-contract.yaml:742,747); neither the contract, change file, nor brief requires instance reuse"
+    - "Only the test file was written by the amendment harness (amendment.sh:19,91); report records production_files_touched: none; both manifest pins for the file were updated in sync by the test owner (test-ownership.yaml:356-357,400-401)"
+    - "Post-amendment hardware evidence shows both fresh-instance checks passing (cvf107-hw-10cycles.txt:31-32 and the other two logs)"
+  limitation: "Byte-level hash equality (d2df8836...) could not be recomputed here; the deterministic quality gate owns that check. NBF-05 notes the missing pre-amendment log."
+
+item_7_msvc_build_fix:
+  status: PASS
+  evidence:
+    - "target_compile_definitions(cvf_hw_uvc_smoke PRIVATE _CRT_SECURE_NO_WARNINGS) is inside if(MSVC) inside if(CVFORWIN_BUILD_HARDWARE_TESTS)/if(WIN32), after target_link_libraries and before set_target_properties (CMakeLists.txt:1711-1716)"
+    - "PRIVATE and target-scoped: no other target is modified in the block; the if(MSVC) guard makes it a no-op on non-MSVC Windows toolchains; the existing cvf006_lifecycle precedent is CMakeLists.txt:774"
+    - "Justification: the test intentionally calls std::getenv (uvc_smoke.cpp:263) and the test compile options enable /W4 /WX (CvfOptions.cmake:124-135), so C4996 becomes C2220"
+    - "No byte change to the pinned test source was required by the fix; the on-disk amended block matches the test-owner pin d2df8836... recorded in test-ownership.yaml:357,401 (hash equality delegated to the quality gate)"
+
+item_8_registration_discipline:
+  status: PASS
+  evidence:
+    - "The block at CMakeLists.txt:1701-1728 contains only add_executable, include dirs, linking, the MSVC define, target properties, and test/sanitizer option helpers; there is no add_test, catch_discover_tests, install, or workflow reference"
+    - "Option default OFF (CvfOptions.cmake:55); CMakePresets.json contains no CVFORWIN_BUILD_HARDWARE_TESTS override (only windows-msvc-tests preset names appear)"
+    - ".github has no reference to CVFORWIN_BUILD_HARDWARE_TESTS, cvf_hw_uvc_smoke, or CVF_HW; the windows workflow uses the test-enabled preset without the option, so the target is never created in hosted CI"
+    - "The target is independent of CVFORWIN_BUILD_TESTS (the tests block ends at CMakeLists.txt:1688; the hardware block follows), which matches the opt-in manual-station policy (project-contract.yaml:967-976,993-996)"
+
+item_9_test_adequacy_and_boundaries:
+  status: PASS_WITH_OBSERVATIONS
+  evidence:
+    - "Covered: ambiguous selector via synthetic twin pair (731-779), empty and non-matching selectors (758-772), stale descriptor camera_not_found (1225-1236), capture-before-open camera_io (1218-1223), 1000 cycles (1138-1198), forced timeout (910-956), unplug/replug (1246-1321)"
+    - "Symmetric images cannot pass orientation: the check requires signed top-bottom contrast >= threshold (1002-1005) and the control requires |top-bottom| < threshold (994-998); mirror-symmetric bands cannot satisfy the signed condition"
+    - "Residual gaps: inverted-target negative not executable/documented as a step; no CYCLES=1 or zero-device boundary run in the captured evidence; timeout-during-unplug not covered (would fail closed at 1280-1281); mid-run enumeration change not covered and the post-loop enumeration check is not descriptor-specific (1203-1205) - NBF-06"
+    - "Symmetric acceptance outside the check is bounded by the documented even-lighting requirement (docs:84); no wildcard/first-device path exists (item 2)"
+
+item_10_documentation_accuracy:
+  status: PASS_WITH_FINDINGS
+  evidence:
+    - "Environment-variable parity is complete in both directions: every CVF_HW_* read by the code (uvc_smoke.cpp:320,434,485,965-966,992,1015-1081,1107,1249,1330-1359,1374,1398-1401,1435-1437) is documented in docs/hardware-uvc.md (lines 38-41,50-53,64-67,88-90,111-117,145,163,202-205), and no documented variable is unread"
+    - "Defaults and semantics match: cycles 50/1/100000 (docs:53 vs 179-181), FPS 0 (docs:52 vs 1437-1438), orientation contrast 40 (docs:89 vs 184), color 30/60/30/40 (docs:113-117 vs 185-188), stress implication and forced requirements (docs:64-78 vs 330-338,1348-1350), zero-device rejection (docs:75 vs 1374-1377), timeout semantics (docs:127-137 vs 910-956), evidence block (docs:173-209 vs 458-515)"
+    - "Documented location/measurement geometry is consistent with the code for the color ROI (central half, docs:105-107 vs 581-586) and workable for the orientation bands (docs:82-84 vs 547-567)"
+    - "Discrepancies: VID/PID guidance that cannot work on this platform (NBF-02); 'always exercises a bounded reconnect' (NBF-03); ad-hoc build command vs canonical preset and missing vcpkg note (NBF-04); Windows-version precedence wording reads as RtlGetVersion-first while the operator override is actually checked first (docs:207-209 vs 432-437; cosmetic)"
+    - "The symmetric-control procedure interacts with the mandatory stress requirement as described in NBF-01 and should be documented as a control, not a substitute"

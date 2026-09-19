@@ -1,0 +1,213 @@
+schema_version: 1
+change_id: CVF-108
+phase: FIX
+owner: test-engineer
+recorded_at: 2026-09-19
+title: >-
+  CVF-108 independent test host-portability fix: normalize line endings so the
+  whole-line ABI-macro parse is CRLF-safe (Windows CI run 35442730937)
+
+context:
+  failing_ci_run: 35442730937
+  failing_commit: 7d3e3fe
+  failing_test: "CVF-108 OB-4: the public header keeps ABI version 1 and the five v1 entry points"
+  observed_failure: >-
+    tests/unit/cvf108_release_metadata_test.cpp(876): FAILED: REQUIRE_FALSE(
+    macros.empty() ) with message "ABI version macros observed: []" on the
+    Windows runner (CRLF checkout); the same test passed on WSL (LF checkout).
+  production_header_changed: false
+
+root_cause:
+  statement: >-
+    extract_abi_version_macros() consumed lines with std::istringstream +
+    std::getline and required a whole-line std::regex_match with a pattern
+    ending in "(.*)$". On a CRLF line the trailing '\r' remains; in ECMAScript
+    '.' does not match a carriage return and regex_match requires the entire
+    line to be consumed, so every line failed to match and the macro list came
+    back empty.
+  scope: >-
+    Test-host defect only. The production public header is correct and was not
+    changed.
+
+files_changed:
+  - path: tests/unit/cvf108_release_metadata_test.cpp
+    role: independent test (owned by test-engineer)
+    previous_sha256: ea5f286d6b92e242ac5629b0b35611d2ac03558c9f530a3420d904032670e173
+    new_sha256: 97077e20bc3a1a5ecf9797474e61bc0b55a60777b655190265b1894b5676c0a0
+  - path: .ai/test-ownership.yaml
+    role: ownership manifest (test-engineer entry, CVF-108)
+    previous_sha256: ef2b774ff719e96deb804e085848b2f216c8e0cdf88954eaf9f4f18ec968c206
+    new_sha256: a3a02d64c2e271537948d02d6de5bccb082f1fea32ff48131619d0e75f105af2
+  - path: .ai/validation/cvf108-crlf-fix-verify.sh
+    role: test-owner verification harness (not a CMake target, not a pinned test file)
+  - path: .ai/validation/cvf108-crlf-probe.cpp
+    role: test-owner CRLF probe (not a CMake target, not a pinned test file)
+
+changes:
+  - location: "shared text helpers, before split_lines()"
+    kind: added
+    detail: >-
+      Added strip_line_ending(std::string) which removes a trailing "\r\n",
+      "\n", or bare "\r" from a line. This is the single shared normalization
+      every line-based parse now reaches.
+  - location: "split_lines()"
+    kind: refactor
+    detail: >-
+      split_lines() now splits on '\n' and passes every produced line through
+      strip_line_ending() (previously it dropped every '\r' by character but
+      still returned a raw string to callers that bypassed it). It is the
+      canonical line source for the file.
+  - location: "extract_abi_version_macros() (the failing helper)"
+    kind: fix
+    detail: >-
+      Replaced the std::istringstream + std::getline loop with a ranged-for
+      over split_lines(text). The anchored pattern
+      R"(^\s*#\s*define\s+([A-Za-z_][A-Za-z0-9_]*)\s+(.*)$)" is unchanged; the
+      input line is now normalized, so the whole-line match is CRLF-safe. No
+      parsing rule, filter, or expectation changed.
+  - location: "parse_def_exports() (the only other getline-based line parse)"
+    kind: fix
+    detail: >-
+      Replaced the std::istringstream + std::getline loop with a ranged-for
+      over split_lines(text). It was already trim()-protected, but it is now
+      routed through the same shared normalization so the defect class cannot
+      reappear.
+  - location: "new detection control test case"
+    kind: added
+    detail: >-
+      Added TEST_CASE "CVF-108 platform control: CRLF line endings are
+      normalized for every line-based parse" ([cvf-108][boundary][crlf]). It
+      feeds a synthetic LF block and its CRLF twin to split_lines(),
+      extract_abi_version_macros(), and parse_def_exports(), requires the CRLF
+      result to equal the LF result, and reproduces the pre-fix un-normalized
+      whole-line match, asserting it returns empty on CRLF (the exact Windows
+      symptom). If the normalization is removed, the control fails.
+
+audit_other_call_sites:
+  description: >-
+    Every line-oriented construct in the file was audited for the same hazard
+    (whole-line regex_match/regex_search anchored with '$', and line
+    equality/prefix/suffix comparisons that could see a trailing '\r').
+  findings:
+    - site: "extract_abi_version_macros()"
+      hazard: "yes - getline + regex_match ending in (.*)$"
+      action: "fixed via split_lines()/strip_line_ending()"
+    - site: "parse_def_exports()"
+      hazard: "latent - getline + trim(), no trailing '\\r' survived trim, but bypassed the shared normalizer"
+      action: "fixed (routed through split_lines()) for defense in depth"
+    - site: "split_lines()"
+      hazard: "no - already removed '\\r'; hardened to strip trailing line endings explicitly"
+      action: "refactored through strip_line_ending()"
+    - site: "line_spans()"
+      hazard: "no - already decrements end past a trailing '\\r' (lines 317-319)"
+      action: "none (already CRLF-safe)"
+    - site: "line_text(), sentence_span(), is_historical_context()"
+      hazard: "no - all read lines through line_spans() (CR-stripped) or trim()"
+      action: "none"
+    - site: "trim()"
+      hazard: "no - find_first/last_not_of includes '\\r' and '\\n'"
+      action: "none"
+    - site: "is_version_heading_line(), unit_is_historical()"
+      hazard: "no - regex_search patterns are unanchored (end with \\b, no '$'); inputs are CR-stripped lines"
+      action: "none"
+    - site: "extract_cmake_project_version()"
+      hazard: "no - regex_search over the whole text, no '$' anchor"
+      action: "none"
+    - site: "find_semver_tokens(), find_cvforwin_versions(), extract_json_version_fields()"
+      hazard: "no - global sregex_iterator patterns, no '$' anchor"
+      action: "none"
+    - site: "LICENSES phrase regex (cvforwin <semver>)"
+      hazard: "no - global sregex_iterator pattern, no '$' anchor"
+      action: "none"
+    - site: "background-retention docs scan"
+      hazard: "no - consumes split_lines() (now normalized)"
+      action: "none"
+    - site: "is_table_row_line(), is_list_item_line(), is_heading_line(), is_sentence_terminator()"
+      hazard: "no - all compare trim()-ed or CR-stripped text"
+      action: "none"
+
+assertion_integrity:
+  assertions_removed: 0
+  assertions_weakened: 0
+  assertions_skipped_or_disabled: 0
+  cases_before: 21
+  assertions_before: 121
+  cases_after: 22
+  assertions_after: 137
+  note: >-
+    The only additions are the shared normalization, the two getline loops
+    converted to ranged-for, and the new detection control. No existing
+    CHECK/REQUIRE/section was deleted, altered, skipped, or disabled.
+
+crlf_control_evidence:
+  in_suite_control:
+    case: "CVF-108 platform control: CRLF line endings are normalized for every line-based parse"
+    pass_inputs:
+      - "split_lines(crlf_block) == split_lines(lf_block) and contains no '\\r'"
+      - "extract_abi_version_macros(crlf_block) == extract_abi_version_macros(lf_block), non-empty, size 1"
+      - "parse_def_exports(crlf_def) == parse_def_exports(lf_def)"
+    fail_capable_control:
+      - "naive_extract(crlf_block) (pre-fix getline + (.*)$ whole-line match) is asserted empty - the Windows symptom"
+      - "naive_extract(lf_block) is asserted size 1, proving the same code path succeeds on LF"
+  standalone_probe:
+    artifact: .ai/validation/cvf108-crlf-probe.cpp
+    host: WSL libstdc++
+    header: include/cvforwin/cvf_api.h
+    header_bytes_lf: 9349
+    header_bytes_crlf: 9598
+    results:
+      naive_lf: 1
+      naive_crlf: 0
+      normalized_lf: 1
+      normalized_crlf: 1
+      regex_match_line_cr_only: 0
+      normalized_matches_lf: 1
+      un_normalized_observably_broken: 1
+      PROBE_RESULT: PASS
+    interpretation: >-
+      Against a CRLF copy of the real public header the pre-fix un-normalized
+      path returns 0 macros (the observed Windows failure), while the
+      normalized path returns the same result as LF (1).
+
+commands:
+  - command: "bash .ai/validation/cvf108-crlf-fix-verify.sh probe"
+    exit_code: 0
+    summary: "PROBE_RESULT=PASS; naive_lf=1 naive_crlf=0 normalized_lf=1 normalized_crlf=1"
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    summary: "configure; GNU 13.3.0 Debug"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    summary: "rebuilt cvf108_release_metadata_tests (compile + link)"
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    summary: "100% tests passed, 0 tests failed out of 485 (was 484/484 before the fix)"
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    summary: "format-check passed: 127 file(s) conform to .clang-format"
+  - command: "cvf108_release_metadata_tests -r compact"
+    exit_code: 0
+    summary: "All tests passed (137 assertions in 22 test cases)"
+
+ctest:
+  before: "484/484 passed"
+  after: "485/485 passed"
+  failed: 0
+  newly_added_test: "CVF-108 platform control: CRLF line endings are normalized for every line-based parse"
+
+hashes:
+  test_file_sha256: 97077e20bc3a1a5ecf9797474e61bc0b55a60777b655190265b1894b5676c0a0
+  ownership_manifest_sha256: a3a02d64c2e271537948d02d6de5bccb082f1fea32ff48131619d0e75f105af2
+  previous_test_file_sha256: ea5f286d6b92e242ac5629b0b35611d2ac03558c9f530a3420d904032670e173
+  previous_ownership_manifest_sha256: ef2b774ff719e96deb804e085848b2f216c8e0cdf88954eaf9f4f18ec968c206
+
+constraints_respected:
+  - "Edited only tests/unit/cvf108_release_metadata_test.cpp and the CVF-108 entry in .ai/test-ownership.yaml (plus test-owner validation/report artifacts)."
+  - "Did not edit tests/unit/test_cvf108_release_naming_developer.cpp, src/**, include/**, .github/**, CMakeLists.txt, docs/**, vcpkg.json, or .ai/project-contract.yaml."
+  - "Production header include/cvforwin/cvf_api.h unchanged."
+  - "No assertion removed, weakened, disabled, or skipped."
+
+deferred:
+  - "Native Windows MSVC re-run of the CVF-108 suite is deferred to the next windows-tests-quality CI run (run 35442730937) and is not claimed here."
+
+blockers: []

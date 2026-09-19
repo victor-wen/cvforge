@@ -1,0 +1,109 @@
+schema_version: 1
+change_id: CVF-105
+phase: AMENDMENT
+owner: test-engineer
+generated_at: 2026-09-19
+program: cvforwin-hardening-1.1.0
+brief: .ai/test-briefs/CVF-105.yaml
+contract: .ai/project-contract.yaml
+ownership_manifest: .ai/test-ownership.yaml
+requirement: FR-025
+scope: >-
+  Bounded, test-only amendment of one case in tests/unit/cvf105_abi_pairs_test.cpp.
+  No production source, public header, .ai/changes/**, or .ai/project-contract.yaml
+  was modified.
+
+reason: >-
+  The B3 section "object with surrounding whitespace is accepted" fed input_json
+  "  { \"a\" : 1 }  " and asserted cvf_inspect == CVF_STATUS_OK. The
+  example.threshold algorithm rejects unknown input_json keys as
+  algorithm_input_invalid, and that strict rejection behaviour is independently
+  pinned by tests/unit/cvf003_example_threshold_test.cpp ("an unsupported
+  input_json key is rejected" -> invalid_argument / algorithm_input_invalid). The
+  case therefore conflated "the JSON text was parsed" with "the algorithm accepted
+  the keys" and could never pass against the frozen algorithm.
+
+change:
+  file: tests/unit/cvf105_abi_pairs_test.cpp
+  previous_sha256: 726c4646ae36754c61b7ae39dd102fccd306afdaa94f129f33cbb28e4cc2fcbb
+  new_sha256: 16ee2d563d5f2f6d4edd83576a23158c59d140afc5e635846fbc00d234fde8e7
+  preserved_intent: >-
+    The amended section still proves leading/trailing whitespace is accepted by
+    the C ABI input path; only the payload is changed to an algorithm-accepted
+    object.
+  cases:
+    - name: "object with surrounding whitespace is accepted"
+      old_input_json: "  { \"a\" : 1 }  "
+      new_input_json: "  { \"invert\" : false }  "
+      assertion: "CHECK(status == CVF_STATUS_OK) (unchanged)"
+      rationale: >-
+        example.threshold accepts the optional boolean key "invert" (pinned by
+        cvf003_example_threshold_test.cpp "a boolean invert value is accepted"),
+        so the object is valid JSON and algorithm-accepted while still carrying
+        surrounding whitespace.
+    - name: "malformed JSON with surrounding whitespace is rejected"
+      added_input_json: "  { \"a\" : }  "
+      assertions:
+        - "CHECK(status == CVF_STATUS_INVALID_ARGUMENT)"
+        - "CHECK(buffer.result.verdict == CVF_VERDICT_NOT_EVALUATED)"
+      rationale: >-
+        Brief boundary_cases already require "invalid JSON" coverage; this
+        distinct section proves the whitespace-tolerant JSON input path still
+        rejects malformed JSON with a technical INVALID_ARGUMENT and no
+        NOT_EVALUATED verdict, consistent with the existing malformed-JSON case.
+  not_weakened: >-
+    No other assertion, SECTION, or test case was removed, skipped, disabled, or
+    weakened. The pre-existing malformed-JSON and non-object-top-level sections
+    are untouched.
+
+hash_update:
+  manifest: .ai/test-ownership.yaml
+  section: CVF-105
+  other_sections: byte-for-byte unchanged
+  new_manifest_sha256: ecdd9b7960a8340738a393804dcdd13f41c6c78810568458a393be2c20eabee1
+  note: >-
+    The CVF-105 notes gained the amendment paragraph and the amendment report
+    reference; all other CVF sections were preserved byte-for-byte.
+
+independence:
+  inspected_production_source: false
+  inputs_used:
+    - .ai/project-contract.yaml
+    - .ai/test-briefs/CVF-105.yaml
+    - tests/unit/cvf105_abi_pairs_test.cpp
+    - tests/unit/cvf105_test.helpers.h
+    - tests/unit/cvf003_example_threshold_test.cpp
+    - .ai/test-ownership.yaml
+  note: >-
+    The expectation that example.threshold accepts "invert" and rejects unknown
+    keys is derived from the contract (algorithm_extension_contract strict
+    preparation/input validation) and from the existing independent CVF-003
+    black-box test, not from reading any production implementation.
+
+commands:
+  - command: "clang-format --dry-run --Werror tests/unit/cvf105_abi_pairs_test.cpp"
+    exit_code: 0
+  - command: "bash .ai/validation/cvf105-test-engineer-author.sh"
+    exit_code: 0
+    summary: >-
+      configure exit 0; build exit 0; full ctest --preset wsl-gcc-debug exit 0;
+      100% tests passed, 0 failed out of 406.
+  - command: "bash .ai/validation/cvf105-test-amendment-verify.sh"
+    exit_code: 0
+    summary: >-
+      direct binary build/wsl-gcc-debug/cvf105_abi_pairs_tests:
+      "All tests passed (162 assertions in 8 test cases)", run exit 0.
+  - command: "sha256sum tests/unit/cvf105_abi_pairs_test.cpp"
+    exit_code: 0
+    summary: "16ee2d563d5f2f6d4edd83576a23158c59d140afc5e635846fbc00d234fde8e7"
+  - command: "sha256sum .ai/test-ownership.yaml"
+    exit_code: 0
+    summary: "ecdd9b7960a8340738a393804dcdd13f41c6c78810568458a393be2c20eabee1"
+
+results:
+  format: PASS
+  direct_suite: "162 assertions in 8 test cases, 0 failed, exit 0"
+  full_ctest: "406/406 passed, exit 0"
+  other_cvf105_suites: green
+  amended_cvf004_test: green
+  remaining_failures: []

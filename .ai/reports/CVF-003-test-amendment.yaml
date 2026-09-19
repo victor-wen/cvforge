@@ -1,0 +1,154 @@
+schema_version: 1
+change_id: CVF-003
+phase: AMENDMENT
+owner: test-engineer
+recorded_at: 2026-09-19
+program: cvforwin-hardening-1.1.0
+amendment_of: .ai/reports/CVF-003-test-red.yaml
+amendment_number: 2
+implementing_change: CVF-106
+reason: >-
+  Contract 1.1.0 FR-029 (approved) adds the compiled template.match reference
+  algorithm, and algorithm_extension_contract.required_fields plus the CVF-003 B2
+  intent require registration to publish every compiled algorithm by stable key.
+  register_compiled_algorithms() therefore publishes two keys, example.threshold and
+  template.match. The hash-pinned CVF-003 B2 cases in tests/unit/cvf003_registry_test.cpp
+  still asserted a hard-coded registry.size() == 1u (lines 161 and 182) and therefore
+  became stale relative to FR-029: the test asserted the pre-FR-029 set, not the
+  contract's registration invariant. This is the same class of correction as the
+  CVF-004 Amendment 4 (FR-024) precedent and is test-only.
+prior_amendment_note: >-
+  .ai/reports/CVF-003-test-amendment.yaml did not exist at write time (recorded as
+  "File not found"), so there was no prior amendment content to append to. This report
+  is recorded as amendment 2 per the task instruction; no earlier separate CVF-003
+  amendment report exists in .ai/reports/. The CVF-003 verify-phase coverage update did
+  not modify cvf003_registry_test.cpp.
+artifact:
+  path: tests/unit/cvf003_registry_test.cpp
+  previous_sha256: d43c2ec1b75848e3bcfb8d2b7dc09cd67234f3a8072975bfc385fee8c2186937
+  new_sha256: 72d058116187731df1aa85f844c7f5254a282ecea2fd39ed1ae9279bd76c4076
+  case_count_change: "0 (11 registry cases before and after; 37 CVF-003 cases before and after)"
+include_change:
+  added:
+    - "#include <algorithm>"
+  reason: std::sort for the order-independent exact key-set comparison.
+changed_assertions:
+  # The registration precondition and the duplicate-key failure expectation are unchanged.
+  - case: "CVF-003 B2: register_compiled_algorithms publishes example.threshold on a fresh registry"
+    renamed_to: "CVF-003 B2: register_compiled_algorithms publishes every compiled algorithm on a fresh registry"
+    location: tests/unit/cvf003_registry_test.cpp:161 (old) -> tests/unit/cvf003_registry_test.cpp:167-176 (new)
+    old_assertion: 'CHECK(registry.size() == 1u);'
+    new_assertions:
+      - 'CHECK(registry.size() == expected_keys.size());  // expected_keys = {example.threshold, template.match}'
+      - 'CHECK(published_keys == expected_keys);  // keys() sorted, exact set independent of registration order'
+      - 'REQUIRE(registry.find(key).has_value()) and REQUIRE(found.value() != nullptr) and CHECK(found.value()->key() == key) for each of example.threshold and template.match'
+    rationale: >-
+      The old count-only assertion pinned the pre-FR-029 snapshot. The new assertions pin
+      the exact registered key set and each key's find() resolution, which is strictly
+      stronger (a count of 2 with a wrong key would now fail).
+  - case: "CVF-003 B2 negative: a second registration fails with algorithm_duplicate_key and keeps the original"
+    location: tests/unit/cvf003_registry_test.cpp:182 (old) -> tests/unit/cvf003_registry_test.cpp:195-198 (new)
+    old_assertion: 'CHECK(registry.size() == 1u);'
+    new_assertions:
+      - 'CHECK(registry.size() == expected_keys.size());  // two-key set after the duplicate rejection'
+      - 'CHECK(published_keys == expected_keys);  // exact set retained, order-independent'
+      - 'CHECK(registry.find("example.threshold").value() == original);  // unchanged pointer-identity retention'
+    rationale: >-
+      The negative case still proves the second registration is rejected with
+      algorithm_error/algorithm_duplicate_key and that the pre-existing entry is retained.
+      It now pins the exact two-key set instead of a stale count.
+behavior_preserved:
+  registration_publishes_every_compiled_algorithm: >-
+    Both amended cases still assert that a successful register_compiled_algorithms()
+    publishes every compiled algorithm and that find() resolves each published key to a
+    non-null instance whose key() equals that key. The intent "registration publishes
+    every compiled algorithm" is preserved and no longer hard-codes the count.
+  duplicate_rejection_and_retention: >-
+    The B2 negative case still requires the second call to fail with
+    core::Status::algorithm_error / core::ErrorCode::algorithm_duplicate_key and still
+    requires the original example.threshold pointer to be retained by find().
+  no_case_deleted: >-
+    No test case was deleted. All 11 registry cases and all 37 CVF-003 cases remain.
+assertion_integrity: >-
+  No assertion was removed, skipped, disabled, or weakened. The two count assertions were
+  replaced by exact-set and per-key assertions that are strictly stronger than the old
+  hard-coded count; no test case, boundary case, or negative case was deleted. The change
+  is test-only: no production source, header, build file, or interface was modified.
+ownership:
+  manifest: .ai/test-ownership.yaml
+  manifest_section: CVF-003
+  new_manifest_sha256: a91813e0f2bf13820f41bc8b31344051ee7f51cfe4ae4d30a28fe51231338089
+  other_sections_preserved_byte_for_byte: true
+  other_cvf003_files_rehashed_to_manifest:
+    - path: tests/unit/cvf003_test_support.h
+      computed_sha256: db9b17fcbf1f36abeff72e2be3976fa694b0d5f1eb82045bda6889bff0ec0485
+      manifest_sha256: db9b17fcbf1f36abeff72e2be3976fa694b0d5f1eb82045bda6889bff0ec0485
+      match: true
+    - path: tests/unit/cvf003_dispatch_test.cpp
+      computed_sha256: 9ffd09e1d22a1e0b385ec5b4cda092d5311e719415caa18ddfe54f858301f306
+      manifest_sha256: 9ffd09e1d22a1e0b385ec5b4cda092d5311e719415caa18ddfe54f858301f306
+      match: true
+    - path: tests/unit/cvf003_example_threshold_test.cpp
+      computed_sha256: 0b40a3a77134661520bf54e741dfca84a07cc1a2ebe2a2f9acc7238cef5d5c5f
+      manifest_sha256: 0b40a3a77134661520bf54e741dfca84a07cc1a2ebe2a2f9acc7238cef5d5c5f
+      match: true
+  mismatches: []
+evidence:
+  harness: .ai/validation/cvf003-fr029-amendment.sh
+  summary: .ai/validation/logs/cvf003-fr029-amendment-summary.txt
+  raw_logs:
+    - .ai/validation/logs/cvf003-fr029-format.log
+    - .ai/validation/logs/cvf003-fr029-configure-debug.log
+    - .ai/validation/logs/cvf003-fr029-build-debug.log
+    - .ai/validation/logs/cvf003-fr029-ctest-debug.log
+    - .ai/validation/logs/cvf003-fr029-configure-asan.log
+    - .ai/validation/logs/cvf003-fr029-build-asan.log
+    - .ai/validation/logs/cvf003-fr029-ctest-asan.log
+  format_check:
+    command: "clang-format --dry-run --Werror tests/unit/cvf003_registry_test.cpp"
+    exit_code: 0
+    result: "no format drift; no reformatting was required, so the recorded sha256 is stable"
+  configure_debug:
+    command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+  build_debug:
+    command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    result: "cvf003_registry_test.cpp.o rebuilt; cvf003_tests relinked"
+  ctest_debug:
+    command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "total=447, passed=447, failed=0, skipped=0 ('100% tests passed, 0 tests failed out of 447')"
+  configure_asan:
+    command: "cmake --preset wsl-gcc-asan"
+    exit_code: 0
+  build_asan:
+    command: "cmake --build --preset wsl-gcc-asan --parallel"
+    exit_code: 0
+    result: "cvf003_registry_test.cpp.o rebuilt; cvf003_tests relinked"
+  ctest_asan:
+    command: "ctest --preset wsl-gcc-asan --output-on-failure"
+    exit_code: 0
+    counts: "total=447, passed=447, failed=0, skipped=0 ('100% tests passed, 0 tests failed out of 447')"
+  focused_cvf003:
+    command: "ctest --preset wsl-gcc-debug -R CVF-003 --output-on-failure"
+    exit_code: 0
+    counts: "total=37, passed=37, failed=0, skipped=0"
+    amended_cases_passing:
+      - "CVF-003 B2: register_compiled_algorithms publishes every compiled algorithm on a fresh registry (ctest #120)"
+      - "CVF-003 B2 negative: a second registration fails with algorithm_duplicate_key and keeps the original (ctest #119)"
+notes:
+  - >-
+    Test-only amendment: no file under src/, include/cvforwin/, .ai/changes/,
+    .ai/test-briefs/, or .ai/project-contract.yaml was read or modified. The test-engineer
+    derived the expected set solely from the approved contract FR-029 and the B2
+    registration intent; no production implementation source was read.
+  - >-
+    The order-independent comparison was chosen because the contract does not pin the
+    compiled registration order; B1 separately pins that keys() preserves registration
+    order for explicit add() calls.
+  - >-
+    The new registry manifest sha256 is
+    a91813e0f2bf13820f41bc8b31344051ee7f51cfe4ae4d30a28fe51231338089. The CVF-004
+    Amendment 4 precedent (reason FR-024) is followed.
+blockers: []

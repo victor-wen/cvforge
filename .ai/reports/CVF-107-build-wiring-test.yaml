@@ -1,0 +1,158 @@
+schema_version: 1
+change_id: CVF-107
+role: developer
+title: "Developer-owned regression test pinning the opt-in Windows UVC hardware-suite build wiring"
+status: COMPLETE
+date: 2026-09-19
+
+summary: >-
+  Added tests/unit/test_cvf107_hardware_wiring_developer.cpp, a portable Catch2 v3
+  test that reads the real CMakeLists.txt at run time and pins the CVF-107 hardware
+  suite wiring: add_executable(cvf_hw_uvc_smoke ...) must be lexically inside both
+  if(CVFORWIN_BUILD_HARDWARE_TESTS) and a nested if(WIN32); the source must be exactly
+  tests/hardware/uvc_smoke.cpp; the target must never be registered with CTest; the
+  target-scoped MSVC _CRT_SECURE_NO_WARNINGS opt-out must not reach any unexpected
+  target; and the target must appear in no file under .github. Registered as the
+  portable target cvf107_hardware_wiring_developer_tests inside if(CVFORWIN_BUILD_TESTS)
+  only, with a target-scoped CVFORWIN_TEST_SOURCE_DIR compile definition.
+
+files_changed:
+  - path: tests/unit/test_cvf107_hardware_wiring_developer.cpp
+    sha256: f5bc3251da1a4df363e1605b93e20e38cf8bbea167e847b38b5805ebcc6449f8
+    note: >-
+      New developer-owned regression test (437 lines). Four TEST_CASEs:
+      (a) opt-in Windows gate + exact source path, (b) never CTest-registered,
+      (c) _CRT_SECURE_NO_WARNINGS target-scoped, (d) absent from .github.
+  - path: CMakeLists.txt
+    sha256: 273b750b2126b957f04a92deb4fb4267fb367663d3074324866a2eb01b56e9c4
+    note: >-
+      Added the portable cvf107_hardware_wiring_developer_tests target inside the
+      existing if(CVFORWIN_BUILD_TESTS) block (after recipe_asset_reference_developer_tests,
+      before the block endif): add_executable, tests/unit include dir, Catch2::Catch2WithMain,
+      target-scoped CVFORWIN_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}", CXX_STANDARD 20,
+      cvforwin_apply_test_compile_options, cvforwin_apply_sanitizers, catch_discover_tests.
+      The pre-existing (uncommitted CVF-107 build-fix) cvf_hw_uvc_smoke if(MSVC)
+      _CRT_SECURE_NO_WARNINGS block was not touched. No other target's flags changed.
+
+verification:
+  format:
+    - command: "clang-format -i tests/unit/test_cvf107_hardware_wiring_developer.cpp"
+      exit_code: 0
+    - command: "clang-format --dry-run --Werror tests/unit/test_cvf107_hardware_wiring_developer.cpp"
+      exit_code: 0
+    - command: "cmake --build --preset wsl-gcc-debug-format-check"
+      exit_code: 0
+      summary: "format-check passed: 125 file(s) conform to .clang-format (was 124 before the new file)"
+  configure:
+    - command: "cmake --preset wsl-gcc-debug"
+      exit_code: 0
+      summary: "Configured with cvf107_hardware_wiring_developer_tests registered"
+  build:
+    - command: "cmake --build --preset wsl-gcc-debug --parallel"
+      exit_code: 0
+      summary: "Built cvf107_hardware_wiring_developer_tests cleanly under -Wall -Wextra -Werror"
+  focused:
+    - command: "./build/wsl-gcc-debug/cvf107_hardware_wiring_developer_tests --reporter compact"
+      exit_code: 0
+      summary: "All tests passed (33 assertions in 4 test cases)"
+    - command: "ctest --test-dir build/wsl-gcc-debug -R CVF-107 --output-on-failure"
+      exit_code: 0
+      summary: "4/4 CVF-107 test cases passed"
+  full_suite:
+    - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+      exit_code: 0
+      summary: "458/458 tests passed, 0 failed"
+  ctest_counts:
+    before: 454
+    after: 458
+    delta: 4
+    failures: 0
+
+cmake_structure_evidence:
+  hardware_target_gate:
+    - "add_executable(cvf_hw_uvc_smoke tests/hardware/uvc_smoke.cpp) is at CMakeLists.txt:1703"
+    - "enclosed by if(CVFORWIN_BUILD_HARDWARE_TESTS) opened at 1701, matching endif() at 1728"
+    - "enclosed by if(WIN32) opened at 1702, matching endif() at 1726, nested in the hardware gate"
+  ctest_registration: "No add_test mentions cvf_hw_uvc_smoke; no catch_discover_tests/gtest_discover_tests applies to it"
+  crt_definition: >-
+    target_compile_definitions(cvf_hw_uvc_smoke PRIVATE _CRT_SECURE_NO_WARNINGS) at 1715 inside
+    if(MSVC); the only other target carrying the opt-out is the pre-existing
+    target_compile_definitions(cvf006_lifecycle PRIVATE _CRT_SECURE_NO_WARNINGS) at 774
+  github: ".github/workflows/windows.yml and the rest of .github contain no reference to cvf_hw_uvc_smoke"
+
+mutation_check:
+  method: >-
+    The test reads CMakeLists.txt at run time, so each mutation was applied to CMakeLists.txt and the
+    already-built test binary was re-run (no rebuild needed). CMakeLists.txt was restored from a
+    byte-identical backup after every mutation.
+  mutations:
+    - id: i
+      description: "Moved add_executable(cvf_hw_uvc_smoke tests/hardware/uvc_smoke.cpp) outside the if(CVFORWIN_BUILD_HARDWARE_TESTS) gate (appended after the hardware block endif)."
+      result: RED
+      exit_code: 42
+      failing_test_case: "CVF-107 add_executable(cvf_hw_uvc_smoke) is inside the opt-in Windows gate"
+      failing_section: "the executable is inside an if(CVFORWIN_BUILD_HARDWARE_TESTS) block"
+      failing_check: "add_executable(cvf_hw_uvc_smoke ...) must be lexically inside if(CVFORWIN_BUILD_HARDWARE_TESTS)"
+      counts: "1 of 4 test cases failed"
+    - id: ii
+      description: "Added a second target carrying _CRT_SECURE_NO_WARNINGS: target_compile_definitions(cvf_unit_tests PRIVATE _CRT_SECURE_NO_WARNINGS)."
+      result: RED
+      exit_code: 42
+      failing_test_case: "CVF-107 _CRT_SECURE_NO_WARNINGS is target-scoped and not applied to any unexpected target"
+      failing_section: "no target beyond the documented exceptions carries the opt-out"
+      failing_check: "_CRT_SECURE_NO_WARNINGS is applied to unexpected target 'cvf_unit_tests'; exactly the documented targets may carry _CRT_SECURE_NO_WARNINGS"
+      counts: "1 of 4 test cases failed"
+    - id: iii
+      description: "Registered the target with CTest: added add_test(NAME cvf.hw.smoke COMMAND cvf_hw_uvc_smoke) inside the hardware block."
+      result: RED
+      exit_code: 42
+      failing_test_case: "CVF-107 cvf_hw_uvc_smoke is never registered with CTest"
+      failing_check: "add_test at CMakeLists.txt:1738 registers cvf_hw_uvc_smoke with CTest"
+      counts: "1 of 4 test cases failed"
+    - id: iv
+      description: "Removed the target-scoped definition target_compile_definitions(cvf_hw_uvc_smoke PRIVATE _CRT_SECURE_NO_WARNINGS)."
+      result: RED
+      exit_code: 42
+      failing_test_case: "CVF-107 _CRT_SECURE_NO_WARNINGS is target-scoped and not applied to any unexpected target"
+      failing_check: "cvf_hw_uvc_smoke must carry a target-scoped _CRT_SECURE_NO_WARNINGS; exactly the documented targets may carry _CRT_SECURE_NO_WARNINGS"
+      counts: "1 of 4 test cases failed"
+  reverted:
+    confirmed: true
+    evidence:
+      - "cp /tmp/opencode/cvf107/CMakeLists.intended.txt CMakeLists.txt; diff -q reported no differences"
+      - "final CMakeLists.txt sha256 273b750b2126b957f04a92deb4fb4267fb367663d3074324866a2eb01b56e9c4 equals the pre-mutation backup hash"
+      - "focused test re-run after revert: All tests passed (33 assertions in 4 test cases), exit 0"
+      - "full ctest re-run after revert: 458/458 passed, exit 0"
+
+deviations:
+  - id: assertion-c-pre-existing-exception
+    topic: >-
+      The task text says _CRT_SECURE_NO_WARNINGS is applied "only to cvf_hw_uvc_smoke and not to any
+      other target". The baseline already applies the identical opt-out to cvf006_lifecycle
+      (CMakeLists.txt:774, pre-existing CVF-006 C ABI test), and the hard constraint forbids changing
+      any other target's flags. A literal "exactly one target" assertion cannot be GREEN.
+    resolution: >-
+      The test asserts the scoped property that gives the invariant its value: the opt-out is only ever
+      applied through target_compile_definitions(... PRIVATE ...) (never add_compile_definitions /
+      add_definitions), cvf_hw_uvc_smoke must carry it, and the exact set of targets carrying it must be
+      the documented allow-list {cvf006_lifecycle, cvf_hw_uvc_smoke}. Mutation (ii) proves the intended
+      failure mode: any additional target acquiring the opt-out goes RED. The exception is documented
+      in the test header and in this report.
+  - id: assertion-d-not-mutation-tested
+    topic: "A .github mutation (adding a cvf_hw_uvc_smoke reference) would violate the hard constraint 'Do NOT modify .github/**'."
+    resolution: >-
+      Assertion (d) is exercised GREEN on the real .github tree. Its failure path is a direct
+      contains_identifier check over every regular file under .github, so a future reference fails the
+      named check; no mutation was applied to .github because the constraint forbids editing it.
+  - id: catch2-message-macro
+    topic: "The vendored Catch2 v3.16.0 in this toolchain does not declare CHECK_MESSAGE/REQUIRE_MESSAGE."
+    resolution: >-
+      Added two local helpers, check_message()/require_message(), that attach the invariant text with
+      INFO and then call CHECK/REQUIRE. A failing REQUIRE throws Catch::TestFailureException out of the
+      helper and aborts the test case exactly like an inline REQUIRE.
+
+hard_constraints_respected:
+  - "tests/hardware/uvc_smoke.cpp not modified"
+  - "src/**, include/**, .github/**, .ai/project-contract.yaml not modified"
+  - "the new file was not added to .ai/test-ownership.yaml"
+  - "no other target's flags changed"

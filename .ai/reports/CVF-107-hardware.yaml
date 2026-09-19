@@ -1,0 +1,218 @@
+schema_version: 1
+change_id: CVF-107
+artifact: hardware-execution-evidence
+recorded_by: build-controller
+recorded_at: "2026-09-19"
+
+station:
+  os: "Windows 11 Pro for Workstations (reported by the suite as Windows 10.0 build 26200)"
+  toolchain: "MSVC 19.44.35229.0 (Visual Studio 2022 BuildTools, toolset 14.44.35207)"
+  cmake: "cmake 4.4.3 + Ninja 1.13.2 (Tsinghua PyPI mirrors), Visual Studio 17 2022 generator"
+  dependencies: "vcpkg classic mode, triplet x64-windows-static: opencv4 4.12.0 [core,fs,jpeg,png,thread], nlohmann-json 3.12.0, spdlog 1.17.0, Catch2 3.16.0"
+  source_snapshot: "C:\\src\\cvforwin (rsync of the workspace excluding .git and build*)"
+  executable: "C:\\src\\cvforwin\\build\\hw\\Release\\cvf_hw_uvc_smoke.exe"
+  build_result: "exit 0"
+
+device_under_test:
+  friendly_name: "YLX-4K-S858"
+  device_path: '\\?\usb#vid_1bcf&pid_2cd2&mi_00#6&1f8daae&0&0000#{e5323777-f976-4f5b-9b55-b94699c46e44}\global'
+  selector_used: CVF_HW_UVC_NAME=YLX-4K-S858
+  second_device_present_but_not_used: "ACER QHD User Facing"
+  configured_format: "640x480 BGR8"
+
+runs:
+  - id: smoke-10-cycles
+    command: "$env:CVF_HW_UVC_NAME='YLX-4K-S858'; $env:CVF_HW_CYCLES='10'; & cvf_hw_uvc_smoke.exe"
+    exit_code: 0
+    result: PASS
+    passed: 34
+    failed: 0
+    skipped: 3
+    evidence: .ai/validation/cvf107-hardware-evidence/cvf107-hw-smoke-10cycles.txt
+    evidence_sha256: 7087a30e75c49d186395337d4649a6a5c988d20726c842a18afdc8a05fd0821e
+
+  - id: stress-1000-cycles
+    command: "$env:CVF_HW_CYCLES='1000'; $env:CVF_HW_STRESS='1'; $env:CVF_HW_REQUIRE_TIMEOUT='1'; & cvf_hw_uvc_smoke.exe"
+    exit_code: 1
+    result: PARTIAL
+    passed: 35
+    failed: 2
+    skipped: 1
+    repeated_captures: "valid=1000 invalid=0 of 1000; dimension_violations=0 type_violations=0 continuity_violations=0 sequence_violations=0"
+    forced_timeout: "H5a/H5b/H5c/H5d all passed (expired deadline, timeout_ms==0, bounded one-retry, device usable afterwards)"
+    failures:
+      - check: "H7 orientation check is MANDATORY ... but CVF_HW_ORIENTATION_TEST is not set with the documented CVF-ORIENT-1 target in view"
+        classification: UNVERIFIED
+        reason: "No physical CVF-ORIENT-1 asymmetric target available at the station; the operator declined to improvise one. Recorded as unverified, never as a pass."
+      - check: "H8 color check is MANDATORY ... but CVF_HW_COLOR_TEST is not set with the documented CVF-COLOR-1 target in view"
+        classification: UNVERIFIED
+        reason: "No physical CVF-COLOR-1 colour target available at the station. Recorded as unverified, never as a pass."
+    evidence: .ai/validation/cvf107-hardware-evidence/cvf107-hw-1000cycles.txt
+    evidence_sha256: cf770fd0bfe6c1cd79a11832207e363fa31c8049b679bc33ba85e8b7140626a3
+
+  - id: reconnect-unplug-replug
+    command: "$env:CVF_HW_CYCLES='20'; $env:CVF_HW_UNPLUG_TEST='1'; $env:CVF_HW_REQUIRE_TIMEOUT='1'; & cvf_hw_uvc_smoke.exe   (interactive)"
+    exit_code: 0
+    result: PASS
+    passed: 43
+    failed: 0
+    skipped: 2
+    operator_steps: "Manual step 1 (physical unplug + Enter) and step 2 (replug into the same USB port + Enter) were performed by the operator."
+    observations:
+      after_unplug: "first capture fails camera_io ('IMFSourceReader::ReadSample failed with HRESULT 0xC00D3EA2')"
+      bounded_retry: "capture_with_one_retry fails with camera_io within its deadline (elapsed=21 ms)"
+      after_replug: "bounded reconnect + recapture recovers a valid BGR8 frame (sequence=1, 640x480)"
+    skipped: "H7 orientation and H8 colour (same missing physical targets)"
+    evidence: .ai/validation/cvf107-hardware-evidence/cvf107-hw-reconnect-unplug.txt
+    evidence_sha256: 1791b08749ab48dd4c0abc66022e0699c3540689cc7bd30455e60b16cb6ab53d
+
+additional_runs_after_scope_amendment:
+  note: >-
+    Recorded after the CVF-107 scope amendment that added the developer wiring test and after the
+    CMakeLists.txt registration change. The external YLX-4K-S858 had by then been physically
+    removed from the station, leaving only the laptop's integrated sensor, which is why the
+    confirmation run used a second, different device.
+  - id: builtin-acer-10-cycles
+    device: "ACER QHD User Facing (USB\\VID_04F2&PID_B7A0&MI_00, integrated laptop sensor)"
+    command: "$env:CVF_HW_UVC_NAME='ACER QHD User Facing'; $env:CVF_HW_CYCLES='10'; & cvf_hw_uvc_smoke.exe"
+    exit_code: 0
+    result: PASS
+    passed: 34
+    failed: 0
+    skipped: 3
+    repeated_captures: "valid=10 invalid=0 of 10; dimension_violations=0 type_violations=0 continuity_violations=0 sequence_violations=0"
+    amended_h3_confirmed: >-
+      "[pass] H3 a fresh backend instance can reopen the same descriptor after close" and
+      "[pass] H3 a capture from the fresh backend instance succeeds (descriptor stays usable)"
+      both pass on this second device, confirming the test-owner amendment is not device-specific.
+    evidence: .ai/validation/cvf107-hardware-evidence/cvf107-hw-builtin-acer-10cycles.txt
+    evidence_sha256: 65079c05625a0f001512080b8175740ea420f4e1750282178bfbc70b38a44641
+
+  - id: selector-fail-closed
+    purpose: >-
+      Demonstrates the selector invariant on real hardware: with the configured device absent the
+      suite must fail closed and must never fall back to the first enumerated camera.
+    command: "$env:CVF_HW_UVC_NAME='YLX-4K-S858'; $env:CVF_HW_CYCLES='10'; & cvf_hw_uvc_smoke.exe   (YLX-4K-S858 physically absent; ACER QHD present)"
+    exit_code: 1
+    result: FAIL_AS_DESIGNED
+    passed: 6
+    failed: 1
+    skipped: 1
+    observation: >-
+      H1 enumerated 1 descriptor (the ACER). H2 failed with
+      CVF_STATUS_CAMERA_NOT_FOUND/camera_not_found "camera selector matches no enumerated device".
+      The suite did not silently capture from the single attached camera, which is the required
+      fail-closed behaviour. This is an expected configuration failure, not a product defect, and it
+      is not counted as a passing check.
+    evidence: .ai/validation/cvf107-hardware-evidence/cvf107-hw-selector-failclosed.txt
+    evidence_sha256: b648f15b9511a840c00a88c2e2e2923c7e090f427dc20be78f43c99ba6013612
+
+  - id: post-review-fix-hardware-confirmation
+    note: >-
+      The NBF-01 fail-closed hardening and the CVF_HW_STRESS>=1000 anti-misleading guard were
+      re-verified on the station before the external camera was removed. See
+      cvf107-hw-verifyB-stress-shortcycle-guard.txt (short stress run refuses to report) and
+      cvf107-hw-verifyC-symmetric-control-failclosed.txt (H7 still fails with the symmetric control
+      set and no asymmetric target), plus cvf107-hw-verifyA-baseline-10cycles.txt for the clean case.
+
+final_source_confirmation_runs:
+  note: >-
+    Recorded after the batch-4 release review's segment A findings B4A-01..03 were fixed in the hardware
+    suite. These runs were produced by the binary built from the final CVF-107 source
+    (tests/hardware/uvc_smoke.cpp sha256 f72263aa0eaba72004aeabc610a0bd2b9f869c4aa9dbc44b515906af3d941f30),
+    which closes the earlier provenance gap where the archived 1000-cycle log came from the pre-fix binary.
+    The external YLX-4K-S858 had been removed from the station by then, so these runs use the integrated
+    laptop sensor, which is a different and independently useful device.
+  device:
+    friendly_name: "ACER QHD User Facing"
+    driver: "Realtek, driver version 10.0.22000.20364, driver date 2025-02-17"
+    note: >-
+      This fills the camera_driver field that earlier runs recorded as unknown. The removed external device
+      (YLX-4K-S858) remains recorded as driver unknown because it was no longer attached when driver
+      enumeration was captured.
+  - id: final-1000-cycles
+    command: "$env:CVF_HW_UVC_NAME='ACER QHD User Facing'; $env:CVF_HW_CYCLES='1000'; & cvf_hw_uvc_smoke.exe"
+    exit_code: 1
+    result: FAIL_MANDATORY_CHECKS_ABSENT
+    passed: 35
+    failed: 2
+    skipped: 1
+    repeated_captures: "valid=1000 invalid=0 of 1000; dimension_violations=0 type_violations=0 continuity_violations=0 sequence_violations=0"
+    interpretation: >-
+      The 1000-consecutive-capture requirement is met at the final source. The run still exits non-zero
+      because the suite treats a 1000-cycle release-evidence run as requiring the orientation and colour
+      checks, and this station has no CVF-ORIENT-1 or CVF-COLOR-1 target. This is the correct fail-closed
+      behaviour, and it means the recorded release evidence cannot yet be a full NFR-019 PASS.
+    evidence: .ai/validation/cvf107-hardware-evidence/cvf107-hw-final-A-1000cycles.txt
+    evidence_sha256: 6b3f1fa80c7a18820b353be7cd46423eeb8cce00c6bde857eda16c372748a4b3
+
+  - id: final-color-bypass-closed
+    purpose: >-
+      Proves finding B4A-01 is fixed: a mandatory colour check must not be satisfiable by the neutral
+      control without the saturated target.
+    command: "$env:CVF_HW_REQUIRE_COLOR='1'; $env:CVF_HW_COLOR_EXPECT='neutral'; (CVF_HW_COLOR_TEST unset) & cvf_hw_uvc_smoke.exe"
+    exit_code: 1
+    result: FAIL_AS_DESIGNED
+    observation: >-
+      H8 fails with "the neutral spread control is not a substitute". Before the fix this configuration
+      could satisfy the mandatory colour requirement; it no longer can.
+    evidence: .ai/validation/cvf107-hardware-evidence/cvf107-hw-final-B-color-neutral-bypass.txt
+    evidence_sha256: 2cff06f3bbe34803ab541abadeddb57dd87bcbedbad7406d538a7eafebad443f
+
+  - id: final-orientation-control-closed
+    purpose: >-
+      Proves findings B4A-02/B4A-03 are fixed: the symmetric control cannot satisfy the mandatory
+      orientation requirement, and the archived log now records the control flag so it is self-evidencing.
+    command: "$env:CVF_HW_REQUIRE_ORIENTATION='1'; $env:CVF_HW_ORIENTATION_SYMMETRIC_CONTROL='1'; (CVF_HW_ORIENTATION_TEST unset) & cvf_hw_uvc_smoke.exe"
+    exit_code: 1
+    result: FAIL_AS_DESIGNED
+    observation: >-
+      H7 still fails when required. The release-evidence block now records
+      orientation_symmetric_control=yes and every other requirement and threshold flag, so this log alone
+      shows the control was set. The earlier archived log could not show this, which is exactly what B4A-03
+      reported.
+    evidence: .ai/validation/cvf107-hardware-evidence/cvf107-hw-final-C-orient-symctrl.txt
+    evidence_sha256: cd3a9e4ffcc7e71218ab619b71736b9d992b2551aa5c5108c3a62246bbfd63d1
+
+  - id: final-baseline-no-regression
+    command: "$env:CVF_HW_CYCLES='10'; & cvf_hw_uvc_smoke.exe"
+    exit_code: 0
+    result: PASS
+    passed: 34
+    failed: 0
+    skipped: 3
+    evidence: .ai/validation/cvf107-hardware-evidence/cvf107-hw-final-D-baseline.txt
+    evidence_sha256: c97390f5ea536e6e7b441afd9fed24159a18f83cbc9344a66ec47c0293258f10
+
+release_evidence_contract_mapping:
+  "NFR-019 at least 1000 consecutive captures": SATISFIED
+  "NFR-019 timeout check": SATISFIED
+  "NFR-019 reconnect check": SATISFIED
+  "NFR-019 orientation check": UNVERIFIED (no physical target)
+  "NFR-019 color check": UNVERIFIED (no physical target)
+
+findings_raised_during_execution:
+  - id: CVF107-HW-01
+    severity: blocking
+    summary: "The hardware target did not compile on MSVC: tests/hardware/uvc_smoke.cpp used std::getenv, and C4996 is promoted to an error by the project's warnings-as-errors policy."
+    resolution: "CMakeLists.txt now applies target_compile_definitions(cvf_hw_uvc_smoke PRIVATE _CRT_SECURE_NO_WARNINGS) under if(MSVC), matching the existing cvf006_lifecycle precedent. The hash-pinned test source was NOT modified (sha256 unchanged 7a62b1c8...)."
+    evidence: .ai/reports/CVF-107-build-fix.yaml
+
+  - id: CVF107-HW-02
+    severity: blocking
+    summary: "Hardware check H3 asserted that the same backend instance can be reopened after close(); production documents one worker per backend lifetime and close() permanently joins that worker, so the assertion contradicted the frozen design. No contract, change file, or test brief requires instance reuse."
+    resolution: "Test-owner amendment: H3 now opens the same descriptor with a fresh backend instance and captures from it. Applied by test-engineer; coverage preserved and no check removed or weakened."
+    evidence: .ai/reports/CVF-107-test-amendment.yaml
+    new_test_sha256: d2df883641ceb6d9738a189226bd9373345b3f6718f090a07279355c0a3d2867
+
+  - id: CVF107-HW-03
+    severity: non-blocking
+    summary: "The documented VID/PID selector cannot select a device: enumerate() returns descriptors with empty vendor_id and product_id (only friendly_name is populated), so CVF_HW_UVC_VID/CVF_HW_UVC_PID never match."
+    impact: "Operators must use CVF_HW_UVC_NAME or CVF_HW_UVC_DEVICE_PATH. The suite correctly refuses a first-device fallback, so this fails closed."
+    routed_to: "release-reviewer for classification (documentation vs production identity gap)"
+
+honesty_statement: >-
+  Only the runs listed above were executed. This station has no CVF-ORIENT-1 or CVF-COLOR-1
+  physical target, so the orientation and colour checks are recorded as UNVERIFIED and are not
+  counted as passing. No environment value was changed to convert a mandatory check into a skip,
+  and no evidence file was edited after capture.

@@ -1,0 +1,80 @@
+schema_version: 1
+change_id: CVF-107
+program: cvforwin-hardening-1.1.0
+title: "UVC hardware stress suite: 1000 cycles, orientation, color, timeout, reconnect"
+risk: R2
+risk_justification: >-
+  Extends the existing opt-in Windows-only hardware executable and its documentation. No
+  production contract change; evidence is deferred to a designated station by contract.
+intent: >-
+  Provide the real-hardware release evidence the contract requires: a long-run capture stress
+  test plus orientation, color, timeout, and reconnect checks against an explicitly selected
+  device, with a recorded console log for release review.
+scope:
+  allowed_files:
+    hardware_tests:
+      - tests/hardware/**
+    developer_tests:
+      - tests/unit/test_cvf107_hardware_wiring_developer.cpp
+    docs:
+      - docs/**
+    build:
+      - CMakeLists.txt
+      - CMakePresets.json
+    evidence_harness:
+      - .ai/validation/**
+  scope_amendment:
+    at: 2026-09-19
+    by: build-controller
+    reason: >-
+      The station build surfaced an MSVC C4996 build break in the hardware suite, fixed by a
+      target-scoped _CRT_SECURE_NO_WARNINGS definition in CMakeLists.txt. That is a real change to
+      the production build wiring (the same class of defect that produced CVF-103's blocking
+      finding, where a target was registered inside the wrong feature gate), and it currently has no
+      developer-owned regression test. tests/unit/** was therefore added to allowed_files so the
+      developer can pin the wiring invariants: the hardware target is WIN32 + opt-in only, is never
+      registered with CTest, and carries its MSVC definition scoped to itself.
+    not_changed: >-
+      No production module, header, public ABI, contract invariant, or dependency family is added or
+      changed by this amendment; risk stays R2.
+  out_of_scope:
+    - src/**
+    - include/**
+    - .github/**
+    - .ai/project-contract.yaml
+interface_v1:
+  authority_note: >-
+    The suite drives the existing camera::ICameraBackend / UvcCameraBackend contract; it does
+    not change production interfaces.
+  behavior:
+    - "Default or documented cycle count supports at least 1000 consecutive captures; each capture validates dimensions, BGR8 type, continuity, and monotonic sequence."
+    - "Orientation check: an asymmetric TOP/BOTTOM target must be detected in the correct visual orientation; a vertically symmetric image must not be accepted as orientation evidence."
+    - "Color check: a documented color target must pass within documented tolerances."
+    - "Timeout check: a forced timeout path is exercised and reported as pass/fail (not skipped) in stress mode."
+    - "Reconnect check: bounded reconnect/recapture is exercised; the interactive unplug/replug step remains environment-gated and documented."
+    - "Requires an explicit exact selector (device_path or VID/PID); never falls back to the first device."
+    - "Records device identity, cycle count, Windows version, camera firmware/driver, and exit code for release evidence."
+    - "Never registered with CTest and never added to a hosted no-camera CI job."
+invariants:
+  - "No production module changes."
+  - "No silent skip counted as pass for orientation/color/timeout in stress mode."
+  - "Hardware evidence is separate from portable and Windows-CI evidence."
+verification:
+  portable_wsl:
+    - "cmake --preset wsl-gcc-debug && cmake --build --preset wsl-gcc-debug --parallel && ctest --preset wsl-gcc-debug --output-on-failure (suite excluded)"
+    - "cmake --build --preset wsl-gcc-debug --target format-check"
+  windows_hardware:
+    - "cmake --preset windows-msvc-tests -DCVFORWIN_BUILD_HARDWARE_TESTS=ON"
+    - "cmake --build --preset windows-msvc-tests --config Release --target cvf_hw_uvc_smoke --parallel"
+    - "$env:CVF_HW_CYCLES='1000'; $env:CVF_HW_UNPLUG_TEST='1'; $env:CVF_HW_REQUIRE_ORIENTATION='1'; $env:CVF_HW_REQUIRE_COLOR='1'; .\\build\\windows-msvc-tests\\Release\\cvf_hw_uvc_smoke.exe"
+acceptance_reference: >-
+  Contract FR-019/FR-020/FR-021, NFR-019, hardware_uvc suite policy, and the hardware
+  acceptance check (1000+ cycles, non-skipped timeout/reconnect/orientation/color).
+rollback: "Revert tests/hardware/uvc_smoke.cpp and docs/hardware-uvc.md."
+reporting:
+  test_red_report: .ai/reports/CVF-107-test-red.yaml
+  test_verify_report: .ai/reports/CVF-107-test-verify.yaml
+  review_report: .ai/reviews/CVF-107.yaml
+  quality_report: .ai/reports/CVF-107-quality.yaml
+notes:
+  - "No Windows station or camera exists in this workspace; execution evidence must be recorded as BLOCKED/UNVERIFIED until a designated station runs it."

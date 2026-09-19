@@ -1,0 +1,132 @@
+change_id: CVF-108
+phase: REVIEW-FIX HARDENING
+title: "Harden the historical-context heuristic in the CVF-108 release-metadata test"
+author: test-engineer
+recorded_at: 2026-09-19
+finding: CVF108-NBF-05
+brief: .ai/test-briefs/CVF-108.yaml
+contract: .ai/project-contract.yaml (contract_version 1.1.0, APPROVED)
+host: "WSL native Linux, GCC 13.3.0, Ninja, portable wsl-gcc-debug preset"
+scope: >-
+  Test-owner work only. Edited tests/unit/cvf108_release_metadata_test.cpp and
+  the CVF-108 entry in .ai/test-ownership.yaml. No production file
+  (src/**, include/**, .github/**, CMakeLists.txt, docs/**, vcpkg.json,
+  .ai/project-contract.yaml) and no other test file was touched.
+
+problem: >-
+  is_historical_context(lines, line) exempted any earlier-version reference that
+  sat within a fixed +/-3-line window of a historical marker or version heading.
+  A stale current-release mention that merely sat next to a genuine historical
+  mention was therefore wrongly exempted even though it presented the old
+  version as the current product version. The exact-token version matching and
+  the missing-file handling were sound and were not changed.
+
+resolution: >-
+  The exemption now depends on the version reference's own logical unit rather
+  than a fixed line distance. find_cvforwin_versions() records the match
+  position; is_historical_context(text, position) resolves the containing unit
+  and requires the historical marker to be in that same unit:
+    * a table row is its own unit (the whole row);
+    * a heading is its own unit;
+    * a list item is its own unit plus its indented continuation lines;
+    * any other line is scoped to the containing sentence (split on sentence
+      terminators, with decimal/version dots excluded);
+    * a list item or sentence that is the direct body of a version heading owns
+      that heading as its changelog-entry unit (only blank lines may intervene),
+      which keeps genuine changelog entries exempt.
+  A marker-word match or a version heading must occur inside that unit; a marker
+  one or two lines away in a different unit no longer exempts the reference.
+  No existing assertion was removed, disabled, skipped, or weakened.
+
+artifacts:
+  test_file:
+    path: tests/unit/cvf108_release_metadata_test.cpp
+    sha256_before: ad62725ca40a294d987b964676867a9278a782ef1fea11ebef7ee37e1dde2dca
+    sha256_after: ea5f286d6b92e242ac5629b0b35611d2ac03558c9f530a3420d904032670e173
+  ownership_manifest:
+    path: .ai/test-ownership.yaml
+    sha256_before: e89f41b69c6480845300e44b19cf0cdcccf5fab3c0d0773facd143112e8f723c
+    sha256_after: ef2b774ff719e96deb804e085848b2f216c8e0cdf88954eaf9f4f18ec968c206
+    cvf108_recorded_sha256: ea5f286d6b92e242ac5629b0b35611d2ac03558c9f530a3420d904032670e173
+
+commands:
+  - command: "bash .ai/validation/cvf108-test-engineer-verify.sh format"
+    exit_code: 0
+    summary: "clang_format_i_exit=0; clang_format_check_exit=0"
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    summary: "GNU 13.3.0, Debug, configure done (21.5s)"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    summary: "rebuilt cvf108_release_metadata_tests; no warnings-as-errors failures"
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "100% tests passed, 0 tests failed out of 484 (was 483 before this add)"
+    summary: "full portable suite green; +1 ctest entry for the new detection-control TEST_CASE"
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    summary: "format-check passed: 127 file(s) conform to .clang-format"
+  - command: "cmake --build --preset wsl-gcc-debug --target abi-check"
+    exit_code: 0
+    summary: "abi-check passed: exactly 5 export(s)"
+  - command: "build/wsl-gcc-debug/cvf108_release_metadata_tests -r compact"
+    exit_code: 0
+    counts: "All tests passed (121 assertions in 21 test cases)"
+    summary: "was 116 assertions in 20 test cases; +5 assertions, +1 case"
+  - command: "ctest --preset wsl-gcc-debug -R 'cvf108|CVF-108' --output-on-failure"
+    exit_code: 0
+    counts: "26/26 passed (21 independent + 5 developer)"
+
+new_detection_controls:
+  file: tests/unit/cvf108_release_metadata_test.cpp
+  test_case: "CVF-108 boundary: historical context is scoped to the same logical unit"
+  observed: >-
+    ctest test #471 "CVF-108 boundary: historical context is scoped to the same
+    logical unit" Passed; direct binary reports all 121 assertions passed
+    (exit 0); 0 skipped.
+  control_a_reported:
+    requirement: >-
+      A stale current-release mention adjacent to, but in a different logical
+      unit from, a genuine historical mention must be REPORTED.
+    input: >-
+      "# Release history\n\n## 1.0.0 - 2025-01-01\n
+      - prior release; archived build/cvforwin-1.0.0.zip\n
+      Download cvforwin-1.0.0.zip as the current release.\n"
+    expectation: 'scan_current_version_mismatches == {"1.0.0"}'
+    observed: 'PASS: the prior-release list item under its 1.0.0 heading is exempt; the next line, a different logical unit that presents 1.0.0 as current, is reported.'
+  control_b_not_reported:
+    requirement: >-
+      A genuine historical mention must NOT be reported.
+    input: >-
+      (i) "# Release history\n\n## 1.0.0 - 2025-01-01\n
+      - prior release; archived build/cvforwin-1.0.0.zip\n";
+      (ii) "Download cvforwin-1.0.0.zip from the previous release archive.\n"
+    expectation: "scan_current_version_mismatches is empty for both inputs"
+    observed: "PASS: both inputs report no mismatch."
+  extra_controls:
+    - name: same-line-different-sentence
+      input: '"The 1.0.0 build was historical. Download cvforwin-1.0.0.zip as the current release.\n"'
+      expectation: '== {"1.0.0"}'
+      observed: "PASS: the historical marker is in the first sentence; the second sentence is reported."
+    - name: table-row-unit
+      input: >-
+        "# Changelog\n\n| Version | Status | Artifact |\n| --- | --- | --- |\n
+        | 1.0.0 | prior release | cvforwin-1.0.0.zip |\n
+        | 1.0.0 | current download | cvforwin-1.0.0.zip |\n"
+      expectation: '== {"1.0.0"}'
+      observed: "PASS: the prior-release row is exempt; the current row is reported."
+
+integrity_check:
+  method: >-
+    sha256 of the independent test file compared with the CVF-108 manifest entry;
+    the change reviewed case-by-case against the previous content.
+  existing_assertions_removed_or_weakened: NONE
+  existing_assertions_disabled_or_skipped: NONE
+  changes:
+    - "is_historical_context: fixed +/-3-line window replaced with same-logical-unit scoping (strictly stronger)."
+    - "find_cvforwin_versions: ProductName now records the match position; four-part superset capture unchanged."
+    - "docs OB-6 call site updated to the position-based signature; no assertion changed."
+    - "one new detection-control TEST_CASE added; no existing case edited."
+  independence_incidents: NONE
+
+blockers: []

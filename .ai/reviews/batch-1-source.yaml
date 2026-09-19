@@ -1,0 +1,37 @@
+segment: A
+change_id: CVF-103
+batch: batch-1-uvc-correctness
+candidate_sha: a37673551bbb962d6dec4a2ca567325e6109c84a
+verdict: PASS_WITH_FINDINGS
+judgment:
+  compose: PASS
+  fresh_callback: PASS
+  gated: PASS
+  stale_no_mutation: PASS
+  teardown_race: PASS
+findings:
+- severity: non_blocking
+  file: src/camera/uvc_windows/uvc_backend.cpp
+  line: 721
+  issue: >-
+    TOCTOU between the generation gate check (OnReadSample 721 / OnFlush 739, evaluated outside
+    the callback mutex) and teardown_stream() retiring the generation (1123): a completion that
+    passes the check just before retire can still write read_status_/read_flags_/read_sample_/
+    read_completed_ (727-730) or flush_completed_ (745) and is not counted in
+    stale_events_discarded. Unobservable in practice: worker commands are serialized so no waiter
+    exists for the retired generation, the replacement stream constructs a fresh callback (1262),
+    and waiter predicates re-check the gate under the mutex (1481, 1564).
+- severity: non_blocking
+  file: src/camera/uvc_windows/uvc_backend.cpp
+  line: 1567
+  issue: >-
+    Same-generation stale-write clearing relies on MF dispatching IMFSourceReaderCallback methods
+    serially per reader. Concurrent OnReadSample/OnFlush dispatch could land a pre-mutex-stalled
+    write between begin_read() (1469) and its wait (1480-1482). Documented MF serialization and
+    one-pending-read contracts make this unreachable; noted as the residual window behind the
+    "late completion is cleared" comment (1566).
+notes: >-
+  Source-only review of uvc_stream_generation.h, uvc_backend.h, uvc_backend.cpp, .ai/changes/CVF-103.yaml,
+  .ai/changes/batch-1-uvc-correctness.yaml. Both findings are non_blocking: no stale callback can produce a
+  frame, a false completion, or a false flush success, and generation ordering is monotonic with
+  equality-checked acceptance.

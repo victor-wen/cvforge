@@ -1,0 +1,93 @@
+schema_version: 1
+change_id: CVF-107
+phase: IMPLEMENTATION
+author: developer
+recorded_at: 2026-09-19
+host: "Linux (WSL) GCC 13.3.0; Windows MSVC not executable here"
+status: COMPLETE
+title: "MSVC C4996 / C2220 build fix for cvf_hw_uvc_smoke"
+
+summary: >-
+  The opt-in Windows-only hardware target cvf_hw_uvc_smoke (tests/hardware/uvc_smoke.cpp)
+  failed to compile under MSVC because the test calls getenv, which MSVC flags with
+  C4996 ("This function or variable may be unsafe"), promoted to C2220 by warning-as-error.
+  Added the MSVC-only compile definition _CRT_SECURE_NO_WARNINGS to the target, mirroring the
+  existing cvf006_lifecycle precedent. No production code, no other target, and no pinned
+  test file was touched. The WSL/Linux build stays green.
+
+root_cause: >-
+  tests/hardware/uvc_smoke.cpp line 263 calls getenv. MSVC's CRT deprecation warning C4996 is
+  emitted for getenv and the target's compile options promote warnings to errors (/WX -> C2220).
+  The target had no CRT secure-warnings opt-out, unlike cvf006_lifecycle (CMakeLists.txt ~774).
+
+deliverables:
+  - requirement: "Add MSVC-only _CRT_SECURE_NO_WARNINGS to the cvf_hw_uvc_smoke target."
+    status: done
+    note: >-
+      Added an if(MSVC) block inside the existing if(CVFORWIN_BUILD_HARDWARE_TESTS)/if(WIN32)
+      block, immediately after target_link_libraries and before set_target_properties:
+      target_compile_definitions(cvf_hw_uvc_smoke PRIVATE _CRT_SECURE_NO_WARNINGS).
+      Same form as the cvf006_lifecycle precedent. The MSVC guard also makes it a no-op on
+      non-MSVC Windows toolchains.
+
+files_changed:
+  - path: CMakeLists.txt
+    before_sha256: 0d8fde91c2e087b6e847cf30a9059f766d900f590d637300dbca0980aa850115
+    after_sha256: bbd9e1d5d7091206a3b6ad4154477c0e4b8c799401c9bb74ccdcf9d8199fd124
+    lines_added: 6
+    lines_removed: 0
+    diff: |
+      @@ -1708,6 +1708,12 @@ if(CVFORWIN_BUILD_HARDWARE_TESTS)
+                   cvforwin_uvc_windows
+                   opencv_core
+               )
+      +        if(MSVC)
+      +            # The smoke test intentionally uses the portable getenv API; MSVC
+      +            # flags it with C4996 and /WX promotes that to C2220. The opt-out
+      +            # is scoped to this hardware test target only.
+      +            target_compile_definitions(cvf_hw_uvc_smoke PRIVATE _CRT_SECURE_NO_WARNINGS)
+      +        endif()
+               set_target_properties(cvf_hw_uvc_smoke PROPERTIES
+                   CXX_STANDARD 20
+                   CXX_STANDARD_REQUIRED ON
+
+unchanged_pinned_test:
+  path: tests/hardware/uvc_smoke.cpp
+  pinned_sha256: 7a62b1c8a45f7db1782f303c1be4c79b3ffa87593137c1d15e6c3ce83f8a689c
+  actual_sha256: 7a62b1c8a45f7db1782f303c1be4c79b3ffa87593137c1d15e6c3ce83f8a689c
+  matches_pin: true
+  note: "tests/hardware/uvc_smoke.cpp is UNCHANGED in this session; bytes match the test-owner pin."
+
+out_of_scope_respected:
+  - "tests/hardware/uvc_smoke.cpp not modified (byte-identical to pin)."
+  - "src/**, include/**, .github/**, .ai/project-contract.yaml untouched."
+  - "No other target's flags changed."
+
+verification:
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    summary: "Configure OK; compiler GNU 13.3.0; hardware target excluded on non-Windows."
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    summary: "ninja: no work to do (hardware target Windows-only; CMake reconfigure only)."
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    summary: "100% tests passed, 0 tests failed out of 454. Total Test time (real) = 12.20 sec."
+  - command: "sha256sum tests/hardware/uvc_smoke.cpp"
+    exit_code: 0
+    summary: "7a62b1c8a45f7db1782f303c1be4c79b3ffa87593137c1d15e6c3ce83f8a689c (matches pin)."
+
+ctest:
+  passed: 454
+  failed: 0
+  total: 454
+  summary_line: "100% tests passed, 0 tests failed out of 454"
+
+windows_msvc_note: >-
+  The fix targets MSVC and cannot be compiled/executed in this WSL workspace (no Windows
+  station, no camera). The CMake change is syntax-validated by the successful WSL configure;
+  the MSVC compile itself must be confirmed on the designated Windows station per the
+  CVF-107 verification matrix.
+
+notes:
+  - "Backward compatible: if(MSVC) guard leaves non-MSVC Windows toolchains unaffected."

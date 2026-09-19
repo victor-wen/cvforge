@@ -1,0 +1,299 @@
+change_id: CVF-108
+phase: VERIFY
+title: "Release 1.1.0 version, package, CI artifact, and documentation synchronization"
+author: test-engineer
+recorded_at: 2026-09-19
+brief: .ai/test-briefs/CVF-108.yaml
+contract: .ai/project-contract.yaml (contract_version 1.1.0, APPROVED)
+host: "WSL native Linux, GCC 13.3.0, Ninja, portable wsl-gcc-debug preset"
+independence: >-
+  This verify session used only the behavior brief, the approved contract, the
+  existing hash-pinned tests, and the test owner's own file. It read no developer
+  report (the read policy does not expose CVF-108-implementation.yaml), no
+  production implementation .cpp, and no diff. The release metadata was read as
+  data through the allowed .ai/validation/** execution channel: the verify
+  harness (.ai/validation/cvf108-test-engineer-verify.sh, test-owner-only)
+  regenerated .ai/validation/cvf108-verify-metadata-inventory.txt from the
+  top-level build definition, the preset definitions, the packaging modules, the
+  dependency manifest, the CI workflow, the documentation set, LICENSES/**,
+  the public header, and the export allowlist. No expectation was derived from
+  the implementation change. No production file was edited.
+
+artifacts:
+  test_file:
+    path: tests/unit/cvf108_release_metadata_test.cpp
+    sha256_before: 03f07e571c43d59346d200cf4662c5f19de2ee4dabd70a968ebb32730286d782
+    sha256_after: ad62725ca40a294d987b964676867a9278a782ef1fea11ebef7ee37e1dde2dca
+    recorded_sha256_before: 03f07e571c43d59346d200cf4662c5f19de2ee4dabd70a968ebb32730286d782
+    developer_untouched: true
+    note: >-
+      The developer did not modify this file: the sha256 observed at the start
+      of this verify session equals the value recorded in .ai/test-ownership.yaml
+      and the value the developer reported. The verify-phase hash change is the
+      test owner's own requirement-derived addition (see added_edge_cases).
+  ownership_manifest:
+    path: .ai/test-ownership.yaml
+    sha256_before: d7bdb5fdbf76c5c0df566f8d254dbbc15761731ebb00217ee562e80c657c9df7
+    sha256_after: e89f41b69c6480845300e44b19cf0cdcccf5fab3c0d0773facd143112e8f723c
+    change_entry: CVF-108
+    recorded_sha256_after: ad62725ca40a294d987b964676867a9278a782ef1fea11ebef7ee37e1dde2dca
+  verify_harness:
+    path: .ai/validation/cvf108-test-engineer-verify.sh
+    note: >-
+      Test-owner-only canonical-command + metadata-inventory harness, executed
+      through the approved .ai/validation/* channel. It does not edit
+      CMakeLists.txt and does not touch any production file.
+
+commands:
+  - command: "bash .ai/validation/cvf108-test-engineer-verify.sh format"
+    exit_code: 0
+    summary: "clang-format -i exit 0; clang-format --dry-run --Werror exit 0"
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    summary: "GNU 13.3.0, Debug, configure done"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    summary: "rebuilt cvf108_release_metadata_tests; no warnings-as-errors failures"
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "100% tests passed, 0 tests failed out of 483 before the owner additions it was 479/479"
+    summary: "full portable suite green"
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    summary: "format-check passed: 127 file(s) conform to .clang-format"
+  - command: "cmake --build --preset wsl-gcc-debug --target abi-check"
+    exit_code: 0
+    summary: >-
+      abi-check passed: exactly 5 export(s):
+      cvf_get_abi_version;cvf_initialize;cvf_inspect;cvf_reload_recipes;cvf_shutdown
+  - command: "build/wsl-gcc-debug/cvf108_release_metadata_tests -r compact"
+    exit_code: 0
+    counts: "All tests passed (116 assertions in 20 test cases)"
+  - command: "ctest --preset wsl-gcc-debug -R 'cvf108|CVF-108' --output-on-failure"
+    exit_code: 0
+    counts: "25/25 passed (20 independent + 5 developer)"
+
+independent_suite_history:
+  authoring_and_pre_verify:
+    cases: 16
+    assertions: 94
+    verdict: GREEN
+    note: >-
+      Confirmed indirectly: the unmodified file added exactly 4 cases and 22
+      assertions in this verify session, and the current counts are 20/116. The
+      pre-edit 16/94 therefore matches the developer's reported count. The
+      author-phase RED evidence (8 failed assertions in 6 of 16 cases, exit 42)
+      is recorded in .ai/reports/CVF-108-test-red.yaml.
+  after_owner_edge_cases:
+    cases: 20
+    assertions: 116
+    verdict: GREEN
+    skips: 0
+    disabled: 0
+
+integrity_check:
+  method: >-
+    sha256 of tests/unit/cvf108_release_metadata_test.cpp compared against the
+    .ai/test-ownership.yaml CVF-108 entry and the developer's reported value;
+    diff of the file before/after the owner edit reviewed case-by-case.
+  developer_modification: NONE
+  existing_assertions_changed: NONE
+  assertions_weakened_or_deleted: NONE
+  regex_strengthened_only:
+    - symbol: find_cvforwin_versions
+      change: 'pattern cvforwin-(\\d+\\.\\d+\\.\\d+) -> cvforwin-(\\d+\\.\\d+\\.\\d+(?:\\.\\d+)*)'
+      effect: >-
+        A four-part superset name such as cvforwin-1.1.0.0 is now captured in
+        full and is no longer silently accepted as the current 1.1.0; strictly
+        stronger, no existing product-state assertion weakened.
+  independence_incidents: NONE
+
+observable_behaviors:
+  - id: OB-1
+    statement: >-
+      Build metadata declares product version 1.1.0, and that single declared
+      version is the only source of the product version string used by packaging.
+    verdict: VERIFIED
+    evidence:
+      - ".ai/validation/cvf108-verify-metadata-inventory.txt: CMakeLists.txt project(cvforwin VERSION 1.1.0 ...)"
+      - ".ai/validation/cvf108-verify-metadata-inventory.txt: vcpkg.json \"version-string\": \"1.1.0\""
+      - ".ai/validation/cvf108-verify-metadata-inventory.txt: cmake/CvfPackage.cmake.in sets cvf_package_name cvforwin-@PROJECT_VERSION@ and cmake/CvfPackage.cmake builds the symbols archive as cvforwin-${PROJECT_VERSION}-symbols.zip"
+      - "CMakePresets.json has no three-part product-version token and no whole-token 1.0.0 (test case OB-1 preset metadata passed)"
+      - "test case 'OB-1: the top-level build definition declares product version 1.1.0' passed, including CHECK_FALSE(contains_exact_version(text, 1.0.0))"
+    note: >-
+      The single-source rule is structural: the package directory, package ZIP,
+      and symbols ZIP are derived from @PROJECT_VERSION@ / ${PROJECT_VERSION},
+      not from hardcoded literals. The independent test asserts no stale version
+      literal remains in any packaging module.
+
+  - id: OB-2
+    statement: >-
+      Staged package directory, package archive, symbols archive, and the CI
+      artifacts that publish them all carry the 1.1.0 product version.
+    verdict: PARTIALLY_VERIFIED_PORTABLE / DEFERRED_WINDOWS
+    evidence:
+      - ".ai/validation/cvf108-verify-metadata-inventory.txt: .github/workflows/windows.yml artifact 'cvforwin-1.1.0-package' path build/windows-msvc-release/package/cvforwin-1.1.0.zip"
+      - ".ai/validation/cvf108-verify-metadata-inventory.txt: .github/workflows/windows.yml artifact 'cvforwin-1.1.0-symbols' path build/windows-msvc-release/symbols/cvforwin-1.1.0-symbols.zip"
+      - ".ai/validation/cvf108-verify-metadata-inventory.txt: clean-consumer argument -DCVF_PACKAGE_ROOT=.../build/windows-msvc-tests/package/cvforwin-1.1.0"
+      - "cmake/CvfPackage.cmake.in and cmake/CvfPackageVerify.cmake.in name the staged dir/archive from @PROJECT_VERSION@"
+      - "test case 'OB-2: CI artifact and package-path names carry product version 1.1.0' passed: 5 cvforwin-<version> names, all 1.1.0 (previously 5 stale names, all 1.0.0)"
+    note: >-
+      All five observable cvforwin-<version> CI names are 1.1.0. The concrete
+      staged directory, package ZIP, and symbols ZIP are produced only by the
+      Windows package targets, which are refusal targets on this portable host;
+      the literal artifact bytes are deferred to a Windows package build.
+
+  - id: OB-3
+    statement: >-
+      The installed package reports its own version as 1.1.0 to a consumer that
+      reads the package metadata.
+    verdict: DEFERRED_WINDOWS_NOT_VERIFIED
+    evidence:
+      - "No installed Windows package exists on this portable host; the package/package-verify targets are Windows-only refusal targets on non-WIN32."
+    note: >-
+      Source-side single-source derivation (OB-1) is verified, but the
+      installed-package-reported version and the clean consumer are NOT claimed
+      verified here. Deferred to a Windows package build.
+
+  - id: OB-4
+    statement: >-
+      Public C ABI version is still 1, and a caller supplying an ABI version
+      other than 1 is still rejected as an ABI mismatch.
+    verdict: VERIFIED
+    evidence:
+      - ".ai/validation/cvf108-verify-metadata-inventory.txt: include/cvforwin/cvf_api.h defines CVF_ABI_VERSION_V1 1u and declares all five entry points"
+      - "test case 'OB-4: the public header keeps ABI version 1 and the five v1 entry points' passed (every ABI version macro == 1; CVF_ABI_VERSION_V1 == 1; all five names present)"
+      - "cmake --build --preset wsl-gcc-debug --target abi-check exit 0, exactly 5 exports on the built shared library"
+      - "existing hash-pinned ABI runtime suite ctest case 'cvf.abi.runtime' passed in the canonical run; per the CVF-001 ownership record it validates abi_version (including abi_version = 0) as an ABI mismatch"
+    note: >-
+      The independent metadata test pins the compile-time constant; runtime
+      rejection of a non-1 value is exercised by the existing hash-pinned ABI
+      suite that passed in the same canonical run. The independent suite does
+      not itself drive cvf_get_abi_version/abi_version mismatch end-to-end.
+
+  - id: OB-5
+    statement: "The library still exports exactly the five approved public symbols and nothing more."
+    verdict: VERIFIED
+    evidence:
+      - ".ai/validation/cvf108-verify-metadata-inventory.txt: src/c_api/cvforwin.def EXPORTS lists exactly cvf_get_abi_version, cvf_initialize, cvf_reload_recipes, cvf_inspect, cvf_shutdown"
+      - "cmake --build --preset wsl-gcc-debug --target abi-check exit 0: 'exactly 5 export(s)'"
+      - "test case 'OB-5: the export allowlist is exactly the five approved v1 symbols' passed (sorted set equality with the approved five)"
+      - "new edge case 'export set with one symbol added, removed, or replaced is rejected' passed for 4/5-but-wrong/6 forms"
+
+  - id: OB-6
+    statement: >-
+      Documentation describes the 1.1.0 names and paths, mentions the shipped
+      template.match example with its asset and recipe, and describes the
+      background artifact retention behaviour.
+    verdict: VERIFIED
+    evidence:
+      - "docs/development.md section 11: package stages build/<preset>/package/cvforwin-1.1.0/ and creates cvforwin-1.1.0.zip; package-symbols is cvforwin-1.1.0-symbols.zip; CI artifacts cvforwin-1.1.0-package and cvforwin-1.1.0-symbols"
+      - "docs/development.md section 6: shipped reference template.match with config/examples/recipes/template.match.json and config/examples/assets/tmpl.asymmetric.png"
+      - "docs/development.md section 10: retention 'runs asynchronously on a dedicated background maintenance worker, coalesced by a time trigger and a committed-capture trigger, so retention never blocks the inspection caller'"
+      - "test cases 'OB-6: documentation quotes current 1.1.0 package/artifact names' (saw_current true, no non-historical stale names) and 'OB-6: documentation describes the template.match example...' and '...background artifact retention' all passed"
+    note: >-
+      Historical .ai/archive material is not part of docs/** and is not flagged.
+      The historical-mention boundary is additionally proven by the boundary case.
+
+  - id: OB-7
+    statement: >-
+      License and notice material covers every statically linked component the
+      product uses, including the image-codec component newly used by the
+      algorithm path.
+    verdict: VERIFIED
+    evidence:
+      - ".ai/validation/cvf108-verify-metadata-inventory.txt: LICENSES/README.md opens 'auditable notice set for the cvforwin 1.1.0 release' and maps OpenCV core/imgproc/imgcodecs, libjpeg-turbo, libpng, and zlib as statically linked, with OpenCV-LICENSE.txt, libjpeg-turbo-LICENSE.txt, libpng-LICENSE.txt, zlib-LICENSE.txt present"
+      - "LICENSES listing: OpenCV-LICENSE.txt, libjpeg-turbo-LICENSE.txt, libpng-LICENSE.txt, zlib-LICENSE.txt, fmt-LICENSE.txt, spdlog-LICENSE.txt, nlohmann-json-LICENSE.txt, Catch2-LICENSE.txt"
+      - "test case 'OB-7: notices cover the image codec and name the current release' passed (opencv/imgcodecs/libpng/libjpeg-turbo present; every 'cvforwin <version>' claim == 1.1.0)"
+    note: >-
+      Coverage includes the image codec (imgcodecs) plus its statically linked
+      libjpeg-turbo/libpng/zlib dependencies and the template.match path's
+      in-project asset (dedicated to the project, not third-party).
+
+added_edge_cases:
+  - name: "a required-file set reports the absent entry as a failure, never a skip"
+    requirement: "brief boundary: absence of a required file is a failure, never a skip"
+    status: GREEN
+    kind: detection-control
+    detail: "missing_required_files() over {CMakeLists.txt, vcpkg.json, absent} returns exactly the absent path; the present-only subset returns none."
+  - name: "a cvforwin name with a four-part superset version is not accepted as current"
+    requirement: "brief boundary: 1.1.0.0 is a failure; exact 1.1.0 must not be satisfied by a superset"
+    status: GREEN
+    kind: detection-control plus strengthened scanner
+    detail: "cvforwin-1.1.0.0 is captured whole and rejected as current; cvforwin-1.1.0-package is still accepted."
+  - name: "a partially applied bump is detected in exactly the unsynchronized file"
+    requirement: "brief objective: a partially applied release bump must be detectable"
+    status: GREEN
+    kind: detection-control
+    detail: "Synthetic metadata set: fully synchronized reports nothing; a stale CMakeLists.txt, vcpkg.json, CI workflow, or doc is reported as exactly that one offender; a superset 1.1.0-beta / 1.1.0.0 is also reported."
+  - name: "an export set with one symbol added, removed, or replaced is rejected"
+    requirement: "brief boundary: the export set must remain exactly five; four or six is a failure"
+    status: GREEN
+    kind: detection-control
+    detail: "Five-name set with one impostor replacing an approved symbol is rejected even though the count is five; four- and six-name sets are rejected."
+  - name: "a missing required file is detected as missing, never skipped (pre-existing)"
+    requirement: "brief boundary: absence of a required file is a failure"
+    status: GREEN
+    kind: detection-control
+    detail: "Already present before this verify session; retained unchanged."
+  - name: "historical mentions are not reported as current inconsistencies (pre-existing)"
+    requirement: "brief boundary: historical mentions must not be flagged"
+    status: GREEN
+    kind: detection-control
+    detail: "Already present; retained unchanged."
+  - name: "exact 1.1.0 matching rejects supersets and other versions (pre-existing)"
+    requirement: "brief boundary: 1.1, 1.1.0.0, 1.10.0, 2.0.0, and 1.1.0-something-else fail exact matching"
+    status: GREEN
+    kind: detection-control
+    detail: "Already present; retained unchanged."
+
+developer_claims_check:
+  portable_suite_479_green:
+    claimed: "479/479"
+    observed: "479/479 before owner additions; 483/483 after owner additions (exit 0)"
+    agreement: CONFIRMED
+  abi_check_five_exports:
+    claimed: "exactly 5 exports"
+    observed: "abi-check passed: exactly 5 export(s): cvf_get_abi_version;cvf_initialize;cvf_inspect;cvf_reload_recipes;cvf_shutdown"
+    agreement: CONFIRMED
+  independent_test_green_16_94:
+    claimed: "16 cases / 94 assertions"
+    observed: "16/94 before owner additions (inferred exactly: owner added 4 cases / 22 assertions, current 20/116); current run 20/116 all passed"
+    agreement: CONFIRMED
+  developer_test_green:
+    claimed: "developer test GREEN"
+    observed: "ctest CVF-108 developer cases 5/5 passed (tests 474-478 in the canonical run)"
+    agreement: CONFIRMED
+  red_green_temporary_hardcode:
+    claimed: "red-green proven by temporarily hardcoding a 1.0.0 name into the packaging module"
+    observed: >-
+      NOT independently reproduced. Reproducing it would require temporarily
+      editing a production packaging module, which is outside the test owner's
+      permissions. The permanent RED evidence (author phase, 8 failed assertions
+      in 6 of 16 cases) and the now-GREEN state are independently confirmed.
+    agreement: NOT_REPRODUCED_BY_TEST_OWNER
+
+deferred_platform:
+  - id: OB-3
+    detail: >-
+      "The installed package reports its own version as 1.1.0 to a consumer that
+      reads the package metadata" requires an installed Windows package and a
+      clean consumer. No Windows package build exists on this portable host. NOT
+      claimed verified.
+  - id: OB-2
+    detail: >-
+      The concrete staged package directory, package ZIP, and symbols ZIP exist
+      only after the Windows package targets run. The CI names and the
+      PROJECT_VERSION derivation are verified here; the produced archive bytes
+      are deferred. NOT claimed verified.
+  - id: OB-4
+    detail: >-
+      Native MSVC/dumpbin export evidence and the Windows abi-check are deferred;
+      the portable ELF abi-check (nm) passed with exactly five exports, and the
+      hash-pinned runtime ABI suite passed portably.
+
+skips_or_disabled_tests:
+  independent: 0
+  note: "No test in the independent suite is skipped, disabled, or conditioned away; every case runs on the portable host."
+
+blockers: []

@@ -1,0 +1,203 @@
+change_id: CVF-108
+phase: AUTHOR
+title: "Release 1.1.0 version, package, CI artifact, and documentation synchronization"
+author: test-engineer
+recorded_at: 2026-09-19
+brief: .ai/test-briefs/CVF-108.yaml
+independence: >-
+  Expectations are derived only from the CVF-108 behavior brief and the approved
+  project contract. The test reads delivery metadata strictly as data and reads
+  no production implementation source and no diff. No expectation was taken from
+  any implementation change.
+
+artifacts:
+  test_file:
+    path: tests/unit/cvf108_release_metadata_test.cpp
+    sha256: 03f07e571c43d59346d200cf4662c5f19de2ee4dabd70a968ebb32730286d782
+    kind: "Catch2 v3 / C++20, portable, deterministic, hardware-free"
+  ownership_manifest:
+    path: .ai/test-ownership.yaml
+    sha256: d7bdb5fdbf76c5c0df566f8d254dbbc15761731ebb00217ee562e80c657c9df7
+    change_entry: CVF-108
+  author_harness:
+    path: .ai/validation/cvf108-test-engineer-author.sh
+    sha256: c1549374a49d9e5e6b06f5f2807bda486e0628058dc289e7f6a5ab6538d6f39c
+    note: >-
+      Test-owner-only build/run harness under the approved .ai/validation
+      execution channel. It builds and runs the single test file standalone; it
+      does not edit CMakeLists.txt and does not touch any production file. The
+      inventory output it produced for authoring-time data reading is
+      .ai/validation/cvf108-metadata-inventory.txt.
+
+commands:
+  - command: "bash .ai/validation/cvf108-test-engineer-author.sh run"
+    exit_code: 42
+    summary: >-
+      top-level harness exit equals the standalone binary exit; intermediate
+      steps: clang-format -i exit 0, g++ -std=c++20 -Wall -Wextra -Werror -pthread
+      standalone build exit 0, binary run exit 42.
+  - command: "g++ -std=c++20 -Wall -Wextra -Werror -pthread -DCVF108_REPO_ROOT=/home/administrator/c_cpp_project/cvforwin -I<vcpkg-x64-linux>/include tests/unit/cvf108_release_metadata_test.cpp -L<vcpkg-x64-linux>/lib -L<vcpkg-x64-linux>/lib/manual-link -lCatch2Main -lCatch2 -o .ai/validation/cvf108-build/cvf108_release_metadata_tests"
+    exit_code: 0
+    summary: "standalone compile of the independent test; Catch2 v3.16.0"
+  - command: ".ai/validation/cvf108-build/cvf108_release_metadata_tests"
+    exit_code: 42
+    summary: "test cases: 16 | 10 passed | 6 failed; assertions: 94 | 86 passed | 8 failed"
+notes:
+  - "Catch2 exits 42 when cases fail (observed); the meaningful gate is the nonzero exit plus the failed-assertion set below."
+  - "No CTest registration exists yet; see requested_registration. The canonical ctest command was therefore not run for this file."
+
+red_assertions:
+  - id: OB-1
+    test_case: "CVF-108 OB-1: the top-level build definition declares product version 1.1.0"
+    assertion: "CHECK(observed == kProductVersion)"
+    expected: "CMakeLists.txt project VERSION == 1.1.0"
+    observed: "1.0.0"
+  - id: OB-1
+    test_case: "CVF-108 OB-1: the top-level build definition declares product version 1.1.0"
+    assertion: "CHECK_FALSE(contains_exact_version(file.text, kLegacyVersion))"
+    expected: "no whole-token 1.0.0 product version in CMakeLists.txt"
+    observed: "1.0.0 present (VERSION 1.0.0)"
+  - id: OB-1
+    test_case: "CVF-108 OB-1: the dependency manifest version field matches the product version"
+    assertion: "CHECK(version == kProductVersion)"
+    expected: "vcpkg.json version field == 1.1.0"
+    observed: "version-string = 1.0.0"
+  - id: OB-2
+    test_case: "CVF-108 OB-2: CI artifact and package-path names carry product version 1.1.0"
+    assertion: "CHECK(stale.empty())"
+    expected: "all cvforwin-<version> CI names == 1.1.0"
+    observed: "5 names all windows.yml:1.0.0 (artifact 'cvforwin-1.0.0-package', path '.../package/cvforwin-1.0.0.zip', artifact 'cvforwin-1.0.0-symbols', path '.../symbols/cvforwin-1.0.0-symbols.zip', consumer root '.../package/cvforwin-1.0.0')"
+  - id: OB-6
+    test_case: "CVF-108 OB-6: documentation quotes current 1.1.0 package/artifact names"
+    assertion: "CHECK(saw_current)"
+    expected: "at least one current cvforwin-1.1.0 name/path in docs/**"
+    observed: "false (no 1.1.0 documentation name)"
+  - id: OB-6
+    test_case: "CVF-108 OB-6: documentation quotes current 1.1.0 package/artifact names"
+    assertion: "CHECK(stale.empty())"
+    expected: "no non-historical stale cvforwin-1.0.0 name/path in docs/**"
+    observed: "14 non-historical names: docs/development.md x9 and docs/packaging.md x5, all 1.0.0"
+  - id: OB-6
+    test_case: "CVF-108 OB-6: documentation describes background artifact retention"
+    assertion: "CHECK_FALSE(evidence.empty())"
+    expected: "some doc describes background retention"
+    observed: "no doc/retention line with a background/asynchronous/off-the-inspection-path marker"
+  - id: OB-7
+    test_case: "CVF-108 OB-7: notices cover the image codec and name the current release"
+    assertion: "CHECK(version == kProductVersion)"
+    expected: "LICENSES/README.md current-release claim == 1.1.0"
+    observed: "1.0.0 ('the cvforwin 1.0.0 release')"
+
+green_assertions:
+  - id: OB-1
+    detail: >-
+      packaging_modules(test) finds cmake/CvfPackage.cmake, CvfPackage.cmake.in,
+      and CvfPackageVerify.cmake.in; every staged/archive name is built from
+      PROJECT_VERSION (@PROJECT_VERSION@ / ${PROJECT_VERSION}); no stale version
+      literal is present. The single-source rule holds structurally; after the
+      CMakeLists project bump the package directory, ZIP, and symbols ZIP follow
+      automatically. Gated by CMakeLists project VERSION, which is RED above.
+  - id: OB-1
+    detail: "CMakePresets.json has no three-part product-version token and no whole-token 1.0.0."
+  - id: OB-4
+    detail: >-
+      include/cvforwin/cvf_api.h defines CVF_ABI_VERSION_V1 1u; every
+      ABI_VERSION macro is 1; the header declares all five approved entry points.
+      ABI stays at version 1. Runtime rejection of a non-1 ABI value remains
+      covered by the existing CVF-001/CVF-006 ABI suites; this test pins the
+      compile-time constant and the public surface.
+  - id: OB-5
+    detail: >-
+      src/c_api/cvforwin.def parses to exactly five exports and the set equals
+      {cvf_get_abi_version, cvf_initialize, cvf_reload_recipes, cvf_inspect,
+      cvf_shutdown}. Four or six is rejected by the parser boundary case.
+  - id: OB-6
+    detail: >-
+      docs/** mentions template.match together with a recipe and an asset/.png
+      (docs/development.md documents config/examples/recipes/template.match.json
+      and config/examples/assets/tmpl.asymmetric.png).
+  - id: OB-7
+    detail: >-
+      LICENSES/** contains OpenCV-LICENSE.txt and LICENSES/README.md maps OpenCV
+      core/imgproc/imgcodecs and the image-codec components libpng and
+      libjpeg-turbo to notice files. Coverage is already complete.
+  - id: boundary
+    detail: >-
+      Synthetic demonstrations (intentionally GREEN at author time; they prove
+      the check logic, not the product): exact "1.1.0" matching rejects
+      "1.1.0-something-else", "1.1.0.0", "1.10.0", "2.0.0", "1.1", "11.1.0",
+      "01.1.0", and "1.0.0"; a changelog/version-heading mention of
+      cvforwin-1.0.0 is classified historical and not reported, while a current
+      usage line is reported; the .def parser counts 5 and rejects 4/6, tolerates
+      comments/ordinals; the ABI parser reads 1 and 2; a missing required file
+      yields exists=false rather than a skip.
+
+boundary_checks_demonstrated:
+  - 'exact "1.1.0" match: supersets such as "1.1.0-something-else" and
+    "1.1.0.0" are rejected, as are "1.1", "1.10.0", "2.0.0", "11.1.0" and "01.1.0".'
+  - 'ABI stays exactly 1: header macro CVF_ABI_VERSION_V1 == 1; a synthetic
+    value of 2 is parsed as a mismatch input.'
+  - "exactly five exports: real .def is the five-symbol set; synthetic four- and six-symbol lists are counted as non-five."
+  - "historical mentions are not reported: a changelog entry and a version heading exempt a cvforwin-1.0.0 reference, while a current usage reference fails."
+  - "required-file absence is a failure: every real-file case REQUIREs file.exists first; a dedicated case asserts the missing-file detector returns exists=false (no silent skip)."
+
+requested_registration:
+  owner: developer (root CMakeLists.txt is outside the test-owner edit policy)
+  where: "root CMakeLists.txt, inside the existing if(CVFORWIN_BUILD_TESTS) block, alongside the other test-owner CVF-* targets"
+  target: cvf108_release_metadata_tests
+  sources:
+    - tests/unit/cvf108_release_metadata_test.cpp
+  include_directories:
+    - "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
+  compile_definitions:
+    - 'CVF108_REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}"'
+  link_libraries:
+    - Catch2::Catch2WithMain
+  properties: "CXX_STANDARD 20, CXX_STANDARD_REQUIRED ON, CXX_EXTENSIONS OFF"
+  helpers:
+    - cvforwin_apply_test_compile_options(cvf108_release_metadata_tests)
+    - cvforwin_apply_sanitizers(cvf108_release_metadata_tests)
+  ctest: "catch_discover_tests(cvf108_release_metadata_tests)"
+  gating: >-
+    Register it unconditionally within CVFORWIN_BUILD_TESTS (no WIN32 or
+    hardware gate, no test-backend dependency). It links only Catch2 and reads
+    repository files, so it runs in wsl-gcc-debug, wsl-gcc-asan, wsl-clang-analysis,
+    windows-msvc-release, and windows-msvc-tests. The CVF108_REPO_ROOT definition
+    is recommended; without it the test derives the root from __FILE__.
+  note: >-
+    No production library link is needed. format-check will include the file
+    because it globs tests/unit/*.cpp; the file is clang-format clean.
+
+deferred_platform:
+  - id: OB-3
+    detail: >-
+      "the installed package reports its own version as 1.1.0 to a consumer" can
+      only be fully exercised against an installed Windows package; no Windows
+      package build exists in this WSL author environment. The source-side
+      single-source derivation is checked here, and the installed-package
+      consumer remains deferred to a Windows package build. Not claimed as
+      verified.
+  - id: OB-2
+    detail: >-
+      The staged package directory, package ZIP, and symbols ZIP names are
+      generated from PROJECT_VERSION at configure/build time; their literal
+      values are only observable in a Windows package run, which is deferred.
+
+production_files_modified: NONE
+no_production_edit_statement: >-
+  No production file was modified. This session created only
+  tests/unit/cvf108_release_metadata_test.cpp, appended the CVF-108 entry to
+  .ai/test-ownership.yaml, created the test-owner harness/outputs under
+  .ai/validation/, and wrote this report. It did not modify src/**, include/**,
+  .github/**, CMakeLists.txt, docs/**, cmake/**, vcpkg.json, or
+  .ai/project-contract.yaml. git status confirms no tracked production path is
+  modified by this session (the pre-existing .ai/project-contract.yaml,
+  .ai/workflow-state.yaml, and earlier .ai/test-ownership.yaml modifications
+  predate this task and are not this session's work).
+
+ownership:
+  manifest: .ai/test-ownership.yaml
+  manifest_sha256: d7bdb5fdbf76c5c0df566f8d254dbbc15761731ebb00217ee562e80c657c9df7
+  files_checked: 1
+  mismatches: []
+blockers: []

@@ -1,0 +1,217 @@
+change_id: CVF-104
+verdict: PASS_WITH_FINDINGS
+verdict_classification: APPROVE
+review_scope: >-
+  Re-review of blocking finding B-1 from the previous .ai/reviews/CVF-104.yaml after the
+  developer's post-review fix. The earlier judgments for requirements 1-3 and 5-8 were not
+  re-derived; only the SaveWorker fix, its regression test, the bounded runtime caller path
+  (src/runtime/context.cpp save/finalize block), and the independent-suite integrity were
+  re-checked.
+reviewed_artifacts:
+  - .ai/changes/CVF-104.yaml
+  - .ai/reports/CVF-104-implementation.yaml (post_review_fix section)
+  - .ai/reports/CVF-104-test-red.yaml
+  - .ai/reports/CVF-104-test-verify.yaml
+  - .ai/test-ownership.yaml
+  - .ai/workflow-state.yaml
+  - src/artifacts/save_worker.h
+  - src/artifacts/save_worker.cpp
+  - src/runtime/context.cpp (finalize_post_frame save block)
+  - tests/unit/test_artifact_save_worker.cpp
+  - tests/unit/cvf104_save_worker_test.cpp
+  - tests/unit/cvf104_test_support.h (TestSink)
+  - CMakeLists.txt (registration spot-check)
+review_note: >-
+  Read-only source review; this reviewer has no shell and did not recompute any sha256. The
+  hash values quoted below are the values recorded by the owning roles. Recomputing the
+  on-disk digests for src/**, tests/unit/cvf104_*, .ai/test-ownership.yaml, and
+  CMakeLists.txt remains the deterministic quality gate's job, exactly as in the previous
+  review.
+
+summary: >-
+  B-1 is RESOLVED. SaveWorker::wait_until now propagates a deadline expiry to the target job:
+  an executing target is inserted into a private cancelled_ids_ set and execute() rechecks it
+  under mutex_ after write_temp and before commit, discarding the temporary and returning
+  SaveState::cancelled; a queued target is simply dropped and never executes
+  (save_worker.cpp:76-105, :154-167). The wait timeout path returns a cancelled outcome with an
+  empty path (:82-84), the runtime only sets save_committed/saved_path on completed
+  (context.cpp:491-501) and publishes image_path only from that path (:537-539), and a later
+  wait can never surface the cancelled job's entry (take() returns only the exact target,
+  :52-58), so no final path is ever reported for a cancelled job. The one-executing/one-queued
+  bound and the deadlock-free drain are unchanged. The developer regression test
+  (tests/unit/test_artifact_save_worker.cpp:344-374) blocks a sink past a 100 ms wait, releases
+  it, drains, and asserts commit_calls()==0, discard_calls()>=1, no published file, no
+  temporary file; without the fix execute() committed unconditionally, so the test fails
+  deterministically (commit/publish/discard assertions). The five independent CVF-104 files
+  remain as recorded in .ai/test-ownership.yaml, contain no SKIP/MAYFAIL/DISABLED, and are
+  compatible with the new cancellation semantics (the pinned timeout tests at
+  cvf104_save_worker_test.cpp:131-154 and :225-248 only require state != completed + empty
+  path + outstanding()==0, which discard satisfies; the cancel_pending test at :160-182 keeps
+  the executing job publishing, because cancel_pending still cancels only the queued job,
+  exactly as frozen). One inherent rename-boundary race remains and was explicitly accepted in
+  the B-1 required_fix: if cancel_target arrives after execute() has already passed the
+  pre-commit check but commit() is in flight, the file may still be published; the caller has
+  already received a cancelled outcome with an empty path, so no path is ever reported, and the
+  final file is a normal committed artifact. Remaining findings are informational/low and do
+  not block. No Windows or hardware claim is made.
+
+blocking_findings: []
+
+resolved_findings:
+  - id: B-1
+    status: RESOLVED
+    severity_was: high
+    file: src/artifacts/save_worker.cpp
+    proof:
+      - "wait_until timeout: :76-85, cancel_target(target) at :81 before returning a cancelled outcome with the default (empty) path :82-84."
+      - "cancel_target: :89-102 marks an executing target in cancelled_ids_ :94-96 and drops a queued target :97-101 so it never executes."
+      - "execute(): write_temp :147, cancellation recheck under mutex_ :154-158, discard(temp)+SaveState::cancelled :159-165, sink_.commit() only at :167 after passing the check."
+      - "worker_loop clears the per-id flag and records the outcome :204-207; take() prunes older entries :59-61."
+      - "runtime: only completed sets save_committed/saved_path (context.cpp:493-495); any other state sets save_failed and cancel_pending (context.cpp:496-501); image_path is published only from the decision plus saved_path (context.cpp:537-539)."
+      - "regression test: tests/unit/test_artifact_save_worker.cpp:344-374 (BlockingWriteSink :116-221); commit_calls()==0 :366, discard_calls()>=1 :367, no published.png :369, no temporary :370-371. Without the fix execute() committed, so the assertions fail deterministically after drain() has joined the executing job."
+    accepted_residual: >-
+      The pre-commit check is the strongest guarantee the frozen ArtifactSink interface allows:
+      a commit already in flight when the timeout lands may still finish. That boundary race is
+      the same class as the pinned committed-at-expiry case
+      (cvf104_finalization_test.cpp:477-498), the caller never receives a path for it, and no
+      final path is ever reported for a cancelled job.
+
+non_blocking_findings:
+  - id: NB-1
+    severity: low
+    status: largely resolved
+    file: src/artifacts/save_worker.cpp
+    location: "take() prune at :59-61; timeout return :76-85; completed_ insert :207"
+    issue: >-
+      Previously the outcome of a timed-out job was never reclaimed. take() now erases every
+      completed_ entry older than the consumed monotonic target (:61), so the next successful
+      wait reclaims all stale entries. Residual: entries still accumulate across a run of
+      consecutive deadline-exceeded waits with no intervening successful wait (each such wait
+      returns by the timeout path, which never takes/prunes). Small, path-string-sized,
+      reclaimed as soon as any later wait completes. Non-blocking.
+    required_action: >-
+      Optional at next touch: prune completed_ keys below the target in the timeout path as
+      well, or document that reclamation happens on the next successful wait.
+  - id: NB-2
+    severity: low
+    status: open (controller/architect)
+    file: CMakeLists.txt
+    location: "target/source registrations at :283-308, :1240-1267"
+    issue: >-
+      Unchanged from the previous review: CMakeLists.txt carries the CVF-104 build wiring but
+      is not listed in the change contract's scope.allowed_files (:14-23). The post-fix change
+      set did not touch CMakeLists.txt (the new regression case lives in an already-registered
+      target), so this remains a scope-recording gap only.
+    required_action: >-
+      Controller/architect: record build-file authorization for CMakeLists.txt for the
+      CVF-104/105 batch, or confirm the batch descriptor covers it. No production code change.
+  - id: NB-3
+    severity: low
+    status: open (developer discretion)
+    file: src/runtime/context.cpp
+    location: "serialization block :409-428 with the single deadline created at :327"
+    issue: >-
+      Unchanged from the previous review: no explicit deadline.expired() check before the
+      serialization block starts. dump() is bounded by the 65535-byte check and the finalization
+      decision still uses deadline.expired() at :514. No change was required for acceptance.
+    required_action: >-
+      Optional: add the explicit expiry check (or document the intentional exclusion) at the
+      next touch of the module.
+  - id: NB-4
+    severity: low
+    status: partially addressed
+    file: tests/unit/cvf104_test_support.h
+    location: "TestSink write_temp/commit :345-396; independent end-to-end cases"
+    issue: >-
+      The in-flight deadline no-final-file property is now covered (developer suite,
+      test_artifact_save_worker.cpp:344-374), which the B-1 required_fix explicitly allowed.
+      Remaining limitation: the independent suite still cannot observe the production
+      CaptureStoreSink temp->rename path (TestSink::write_temp writes through CaptureStore and
+      TestSink::commit does not rename) and has no case for a save that outlives its deadline.
+    required_action: >-
+      Optional for the test owner at the next CVF-104 touch: add an independent blocking-sink
+      case asserting no final and no temporary file after release+drain, and/or an end-to-end
+      technical-failure save through the runtime. No assertion was weakened.
+  - id: NB-5
+    severity: low
+    status: new (documentation only)
+    file: src/artifacts/save_worker.cpp
+    location: ":59-60 comment; save_worker.h:88 wait_until comment; context.cpp:498-499 comment"
+    issue: >-
+      The fix left three comments stale: save_worker.cpp:59-60 says outcomes older than the
+      target "can no longer be reclaimed" while the next line reclaims them; save_worker.h:88
+      does not mention that deadline expiry now cancels the target's publication; and
+      context.cpp:498-499 states the executing job "cannot be interrupted", which is no longer
+      true for the wait-timeout path (it remains true for cancel_pending itself).
+    required_action: >-
+      Optional: update the three comments at the next touch. No behavior change required.
+
+independent_suite_state:
+  manifest: .ai/test-ownership.yaml
+  manifest_sha256_recorded: d370acb89d2b120f36bc0493036d67d789be0a0c8fa3de790d514a57516f10f1
+  manifest_sha256_context: >-
+    Recorded as the post-verify-phase manifest hash in .ai/reports/CVF-104-test-verify.yaml:145
+    and re-confirmed by the developer's post-fix check in
+    .ai/reports/CVF-104-implementation.yaml:411. The author-phase manifest hash was
+    3a808f68516a0bef66207a60c9c4ad74d2cdf95441ef09fa82eb998ff0b1be42
+    (.ai/reports/CVF-104-test-red.yaml:276, .ai/workflow-state.yaml:80).
+  cvf104_recorded_file_hashes:
+    - path: tests/unit/cvf104_test_support.h
+      sha256: 517759e9db6c6eeb729a2866f8fbcb2f786d3000837619171ce90ec6f72a5775
+    - path: tests/unit/cvf104_finalization_test.cpp
+      sha256: 9e92d7e6446af3daa315568f0ef8784704e52edb5af869baff6d4882a648da67
+    - path: tests/unit/cvf104_save_worker_test.cpp
+      sha256: 11ce2d4363fb2ccecf41e200057d865334b08bd836ee39733dfbb6d5af885aef
+    - path: tests/unit/cvf104_retention_scheduler_test.cpp
+      sha256: 92c47273564683e1184121ad05b1899fece3cf9f0428da3fbef4c63718ade784
+    - path: tests/unit/cvf104_end_to_end_test.cpp
+      sha256: 74f4b4f64351ddc83d3a0f5db3b8177652a8dda0d0856f73d7cc5f4b8c39f999
+  corroboration: >-
+    Reviewer cannot recompute sha256 (no shell); byte-level verification is delegated to the
+    deterministic quality gate. Content-level checks pass: the files contain 15/9/10/5 TEST_CASEs
+    matching the verify report's case counts, no SKIP/MAYFAIL/DISABLED/hidden token exists in any
+    cvf104 file, the post-fix changed-file list contains no cvf104_* file, and the recorded
+    hashes equal the verify report's final_sha256 (CVF-104-test-verify.yaml:139-145) and the
+    developer's post-fix independent_files_hash_check (CVF-104-implementation.yaml:409-427).
+
+independence_notes: >-
+  No independence violation. The post-review fix touched only src/artifacts/save_worker.h,
+  src/artifacts/save_worker.cpp, and the developer-owned tests/unit/test_artifact_save_worker.cpp
+  (in-scope, not hash-pinned); none of the five test-engineer-owned cvf104 files were modified,
+  and no assertion was removed, skipped, disabled, or weakened. The independent timeout cases
+  remain compatible with the new semantics because sink_.discard() removes the tracked
+  temporary (cvf104_test_support.h:398-410, outstanding() :468-472) and the pinned cancel_pending
+  behavior of the executing job is preserved. No production implementation detail appears in the
+  independent tests; the developer regression uses only the frozen ArtifactSink/SaveWorker
+  surface. I did not write any part of this change package.
+
+out_of_scope_check: >-
+  The fix report's changed_files list (CVF-104-implementation.yaml:359-368) names only
+  save_worker.h, save_worker.cpp, and tests/unit/test_artifact_save_worker.cpp, all inside the
+  contract's allowed src/artifacts/** and developer tests/unit/** sets. I re-read the
+  context.cpp save/finalize block (:455-546) and the CMake registration (:1240-1267); both match
+  the pre-fix state described in the earlier review, and the regression case needed no CMake
+  change. Byte-level scope verification of the dirty tree remains with the deterministic quality
+  gate (no shell available to this reviewer).
+
+judgments:
+  1_single_absolute_deadline: unchanged PASS (previous review evidence; no fix interaction)
+  2_single_finalization_path: unchanged PASS (previous review evidence; save block re-read :455-546 matches)
+  3_finalize_precedence: unchanged PASS (previous review evidence)
+  4_save_worker: >-
+    PASS. Bounds (save_worker.cpp:20-42), off-thread encode/write, cancellation propagated from
+    wait_until (:76-105), pre-commit recheck/discard (:154-167), and deadlock-free drain
+    (:116-129) all hold; the regression test pins the no-late-publication property.
+  5_retention_background: unchanged PASS (previous review evidence)
+  6_diagnostics_callbacks: unchanged PASS (no diagnostics change; fix adds no lock held across a sink call)
+  7_scope_abi: unchanged PASS with NB-2 (frozen public declarations of save_worker.h unchanged; private cancel state only)
+  8_test_adequacy: PASS_WITH_LIMITATIONS (NB-4) — the B-1 property is now regression-tested in the developer suite; the independent production temp->rename gap remains
+
+controller_notes:
+  - >-
+    .ai/workflow-state.yaml still records stage IMPLEMENTATION with a stale next_action and has
+    no CVF-104 verify/review entries; refresh it before the next gate. Outside this reviewer's
+    writable scope and not a code finding.
+  - >-
+    No Windows MSVC or hardware evidence is claimed by this review; CVF-104 is portable WSL
+    scope only.

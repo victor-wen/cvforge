@@ -1,0 +1,116 @@
+schema_version: 1
+change_id: CVF-108
+task: "Fix the three documentation findings from .ai/reviews/CVF-108.yaml"
+review_source: .ai/reviews/CVF-108.yaml
+review_sha256: 56cff636ddb1dcc941b5c0cc3c663ddf004d985439261ea9fc314d735617e5a2
+owner: developer
+scope: docs only
+status: COMPLETE
+
+files_touched:
+  - path: docs/usage.md
+    sha256_before: bcf3f5b520e6ba464cc454440528cf382088875801ad0b42197dfcafb9013d4d
+    sha256_after: 069fe740d878799162cffa7522aa15b68a2815269553bc3e075d2a9132184b8c
+  - path: docs/development.md
+    sha256_before: 5ac23af770be74eb1e879abba83804576dea0b3d296d539c5d580f820ac141d5
+    sha256_after: c474eb57a3d6550d0db383024495c5fcd9e2ad63e5489ea94fc7ca452c2a47b3
+  - path: docs/packaging.md
+    sha256_before: 247e7f444f9e7d796f77652fdb4fb85e269b1fbe1ab8ff77f6fdb5f898ba9aeb
+    sha256_after: cad6a79ee91dbf7f0b2eb6b04dfdb3090be7ef31c8630a452f6b5edeac378ead
+
+findings:
+  - id: CVF108-NBF-01
+    title: docs/usage.md had no coverage of the recipe assets mechanism
+    status: fixed
+    files:
+      - docs/usage.md
+    exact_lines_changed:
+      - "docs/usage.md:69 — added the `assets` row to the recipe schema table"
+      - "docs/usage.md:80-118 — new `### Recipe assets` section (definition, bounds table, reference rejection rules, shipped template.match example)"
+    verified_values:
+      - value: "assets per recipe: at most 16"
+        evidence: "src/recipes/recipe.cpp:24 constexpr std::size_t k_max_asset_count = 16; enforced at :258 object.size() > k_max_asset_count"
+      - value: "asset key pattern: [a-z0-9._-]{1,64}"
+        evidence: "src/recipes/recipe.cpp:26 k_max_asset_key_bytes = 64; :215-218 is_asset_key -> matches_byte_pattern(key, 64, is_algorithm_key_char); :114-118 is_algorithm_key_char allows a-z, 0-9, '.', '_', '-'; error text at :265"
+      - value: "asset reference length limit: 512 bytes"
+        evidence: "src/recipes/recipe.cpp:25 constexpr std::size_t k_max_asset_reference_bytes = 512; enforced at :228"
+      - value: "bytes per asset: 16777216 (16 MiB)"
+        evidence: "src/recipes/recipe_catalog.cpp:25 constexpr std::size_t k_max_asset_bytes = 16777216u; enforced at :87 size > k_max_asset_bytes"
+      - value: "total bytes per recipe: 67108864 (64 MiB)"
+        evidence: "src/recipes/recipe_catalog.cpp:26 constexpr std::size_t k_max_total_asset_bytes = 67108864u; enforced at :91 running_total + size > k_max_total_asset_bytes"
+      - value: "absolute paths, backslash separators, ':' drive/URI/ADS forms, '//', and empty/. /.. components rejected"
+        evidence: "src/recipes/recipe.cpp:226-251 is_safe_asset_reference: front '/' rejected, find('\\\\') rejected (:231), find(':') rejected, find(\"//\") rejected, empty/'.'/'..' component rejected"
+      - value: "symlink, non-regular file, and link/reparse escapes rejected"
+        evidence: "src/recipes/recipe_catalog.cpp:52 symlink_status; :56-61 is_symlink/is_regular_file rejected; :63-81 weakly_canonical root/file and leading '..' component rejected"
+      - value: "assets resolved under <config_root>/assets/ (recipes dir is <config_root>/recipes)"
+        evidence: "src/recipes/recipe_catalog.cpp:154 assets_root = recipes_dir.parent_path() / \"assets\""
+      - value: "a rejected asset rejects the whole catalog candidate; the previous snapshot stays active"
+        evidence: "src/recipes/recipe_catalog.cpp:156-197 load() returns the failure before returning a RecipeCatalog; atomic swap documented in docs/usage.md:119-120"
+      - value: "shipped example: recipe config/examples/recipes/template.match.json, asset key 'tmpl' -> reference 'tmpl.asymmetric.png', file config/examples/assets/tmpl.asymmetric.png"
+        evidence: "config/examples/recipes/template.match.json:4-13; file present at config/examples/assets/tmpl.asymmetric.png (172 bytes)"
+    discrepancy: none
+
+  - id: CVF108-NBF-02
+    title: docs/development.md still described the previous pinned set (sections CVF-001..CVF-008 and glob tests/unit/cvf00*_*.{cpp,h})
+    status: fixed
+    files:
+      - docs/development.md
+    exact_lines_changed:
+      - "docs/development.md:82 — repository layout comment: config/examples now lists recipes/*.json and assets/* (same factual omission as NBF-03, applied for internal consistency; see note)"
+      - "docs/development.md:262 — unit-suite table now points at the test-owner unit suites listed in .ai/test-ownership.yaml instead of a fixed CVF-003/004/005/006 list"
+      - "docs/development.md:273-284 — independence rules now reference 'one section per change in acceptance order' and 'every path listed in the manifest', replacing 'sections CVF-001 through CVF-008' and the stale glob tests/unit/cvf00*_*.{cpp,h}"
+    verified_values:
+      - value: "rule preserved: never edit a hash-pinned file; a hash mismatch at verification time is an independence violation"
+        evidence: "docs/development.md:277-278 (text retained verbatim)"
+      - value: "no fixed range or stale glob remains in docs/**"
+        evidence: "grep -rn 'cvf00\\*\\|CVF-001 through CVF-008\\|cvforwin.json + recipes' docs/ returned no matches after the edit"
+      - value: "every named path category is pinned in .ai/test-ownership.yaml today"
+        evidence: "manifest entries: tests/abi/** (lines 10-20), tests/camera/** (43-57), tests/unit/cvf003..006 (73-279), tests/unit/cvf103/104/105/106/108 (670-1069), tests/fixtures/runtime/** (281-283), tests/package/** (475-483), tests/hardware/** (356,400), tests/windows/uvc/** (529,617,672)"
+    discrepancy: none
+
+  - id: CVF108-NBF-03
+    title: docs/packaging.md package-layout comment omitted the example asset subtree
+    status: fixed
+    files:
+      - docs/packaging.md
+    exact_lines_changed:
+      - "docs/packaging.md:15 — config/examples/ comment now reads 'cvforwin.json, recipes/*.json, assets/*'"
+    verified_values:
+      - value: "the packaging step stages the whole config/examples subtree, including assets/"
+        evidence: "cmake/CvfPackage.cmake.in:50 requires config/examples/recipes and config/examples/cvforwin.json; :71 file(COPY ${CVF_SOURCE_DIR}/config/examples/ DESTINATION ${package_root}/config/examples) copies the directory contents recursively, which includes config/examples/assets/tmpl.asymmetric.png"
+      - value: "staged subdirectories are config/examples (cvforwin.json, recipes/, assets/), docs/, LICENSES/, bin/, lib/, include/cvforwin"
+        evidence: "cmake/CvfPackage.cmake.in:57-73; example tree listing: config/examples/cvforwin.json, config/examples/recipes/{example.pass,example.strict,template.match}.json, config/examples/assets/tmpl.asymmetric.png"
+    discrepancy: none
+    note: >-
+      docs/development.md:82 carried the identical omission in the repository-layout listing
+      (config/examples/ was described as only cvforwin.json + recipes/*.json). It was corrected
+      in the same edit so the two layout descriptions in docs/ agree. This is docs-only and
+      within the CVF-108 allowed scope (docs/**).
+
+commands:
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    summary: "configure succeeded (GNU 13.3.0, Debug; wsl-gcc-debug)"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    summary: "ninja: no work to do (tree already built; docs changes need no compilation)"
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    summary: "100% tests passed, 0 failed out of 483 (includes the CVF-108 OB-6 documentation tests)"
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    summary: "format-check passed: 127 file(s) conform to .clang-format"
+
+ctest:
+  before_change: 483/483 (per task statement)
+  after_change: 483/483
+  failed: 0
+
+code_changes_required: none
+
+constraints_honored:
+  - "Only docs/usage.md, docs/development.md, docs/packaging.md were edited (plus this report). No tests/**, src/**, include/**, .github/**, cmake/**, CMakeLists.txt, vcpkg.json, or .ai/project-contract.yaml was touched."
+  - "No bound, behaviour, or value in code was changed. Every documented number was derived from the implementation at the cited lines."
+  - "CVF108-NBF-04 and CVF108-NBF-05 were not worked on."
+
+reported_discrepancies: []

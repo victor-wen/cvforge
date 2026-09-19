@@ -1,0 +1,307 @@
+schema_version: 1
+change_id: CVF-105
+phase: AUTHOR
+status: RED
+owner: test-engineer
+generated_at: 2026-09-19
+program: cvforwin-hardening-1.1.0
+target: "VID/PID canonicalization, C ABI pointer-length pairs, atomic warnings, single final JSON bound"
+requirements:
+  - FR-024
+  - FR-025
+  - FR-026
+  - FR-027
+brief: .ai/test-briefs/CVF-105.yaml
+contract: .ai/project-contract.yaml
+canonical_commands_source: .ai/project-contract.yaml
+evidence_sources:
+  - .ai/validation/cvf105-author-summary.txt
+  - .ai/validation/cvf105-build.log
+  - .ai/validation/cvf105-configure.log
+  - .ai/validation/cvf105-ctest.log
+  - .ai/validation/cvf105-ctest-n.log
+  - .ai/validation/cvf105-buildable-run.txt
+  - .ai/validation/cvf105-failure-detail.txt
+  - .ai/validation/cvf105-from-spec.log
+  - .ai/validation/cvf105-manifest-audit.txt
+  - .ai/validation/cvf105-red-summary.txt
+  - .ai/validation/cvf105-test-engineer-author.sh
+  - .ai/validation/cvf105-run-buildable.sh
+  - .ai/validation/cvf105-from-spec.sh
+  - .ai/validation/cvf105-register.py
+
+authored_files:
+  - path: tests/unit/cvf105_test.helpers.h
+    sha256: 634e19a47fb5d0cb305c408081dfc9c0eb518397bca0a8b9d62b60e0179dba3a
+    role: shared test helpers
+  - path: tests/unit/cvf105_hex_test.cpp
+    sha256: 9b3672fa082e56b775b9a1b91b5ad01e7ca821df56ef9dc6571f0c4e023fd41f
+    role: B1 canonicalize_hex4
+  - path: tests/unit/cvf105_selector_test.cpp
+    sha256: 6e215ea45e93619cd9860956d790d0b5b10d3426c0037d9f0e79ee37cc8e3610
+    role: B2 identity resolution + config-load canonicalization
+  - path: tests/unit/cvf105_payload_test.cpp
+    sha256: d380e4a9f013ff1498ea2a80d1884b4d00b132a1069271d442b5bd0babe1464b
+    role: B6 payload bound-1/bound/bound+1
+  - path: tests/unit/cvf105_warnings_test.cpp
+    sha256: 27274d79953175b2c41ac1c50b34a280136f597b6d37d81f39296925f2bab56d
+    role: B5 concurrent warning accumulation/observation
+  - path: tests/unit/cvf105_abi_validation_test.cpp
+    sha256: 4a12787a3c8a8bfac8391fcb00b48b1fb7bb116431382d3f4b715bd05c92f6b6
+    role: B3/B4 C ABI pointer-length and capacity pairs
+  - path: tests/unit/cvf105_abi_pairs_test.cpp
+    sha256: 726c4646ae36754c61b7ae39dd102fccd306afdaa94f129f33cbb28e4cc2fcbb
+    role: B3/B4 request/root/output_json pairs through test backends
+  - path: tests/unit/cvf105_runtime_output_text_test.cpp
+    sha256: 1f05ab414543dc7fefa4f36d6bd6c6e15f627ba3a50a31d3461cd6139a096aab
+    role: B7 canonical pre-serialized InspectionOutcome::output_text
+
+ownership:
+  manifest: .ai/test-ownership.yaml
+  manifest_sha256: 05ed76e55b93f9c075d66fdb5baa3313ceaceea67267a8f46a984226a060a51e
+  manifest_sha256_recorded_in_audit: 927b1a3e0e6f71eb1895c4003e68f3beb1b889875ae849d77b5675b08d8c8c9c
+  cvf105_section_present: true
+  cvf105_section_owner: test-engineer
+  files_pinned: 8
+  rehash_result: match
+  mismatches: []
+
+rehash:
+  when: 2026-09-19
+  method: sha256sum
+  canonical_paths: tests/unit/
+  canonical_files_present: false
+  hold_dir: /tmp/opencode/cvf105-hold
+  hold_files_match_manifest:
+    - path: cvf105_test.helpers.h
+      sha256: 634e19a47fb5d0cb305c408081dfc9c0eb518397bca0a8b9d62b60e0179dba3a
+    - path: cvf105_hex_test.cpp
+      sha256: 9b3672fa082e56b775b9a1b91b5ad01e7ca821df56ef9dc6571f0c4e023fd41f
+    - path: cvf105_selector_test.cpp
+      sha256: 6e215ea45e93619cd9860956d790d0b5b10d3426c0037d9f0e79ee37cc8e3610
+    - path: cvf105_payload_test.cpp
+      sha256: d380e4a9f013ff1498ea2a80d1884b4d00b132a1069271d442b5bd0babe1464b
+    - path: cvf105_warnings_test.cpp
+      sha256: 27274d79953175b2c41ac1c50b34a280136f597b6d37d81f39296925f2bab56d
+    - path: cvf105_abi_validation_test.cpp
+      sha256: 4a12787a3c8a8bfac8391fcb00b48b1fb7bb116431382d3f4b715bd05c92f6b6
+    - path: cvf105_abi_pairs_test.cpp
+      sha256: 726c4646ae36754c61b7ae39dd102fccd306afdaa94f129f33cbb28e4cc2fcbb
+    - path: cvf105_runtime_output_text_test.cpp
+      sha256: 1f05ab414543dc7fefa4f36d6bd6c6e15f627ba3a50a31d3461cd6139a096aab
+  note: >-
+    At report-writing time the eight CVF-105 files are absent from tests/unit/:
+    sha256sum tests/unit/cvf105* reports "No such file or directory" and a glob of
+    tests/unit/* lists only the older CVF-003/004/005/006/103/104 and pre-existing
+    developer files. The CVF-105 additions are untracked, so a workspace
+    reset/stash/clean removes them. Byte-identical backups remain under
+    /tmp/opencode/cvf105-hold/ and their sha256 values match the values pinned in
+    .ai/test-ownership.yaml exactly, so the authored content is intact and there is
+    no hash mismatch. The files must be restored to tests/unit/ before verify.
+
+build_config:
+  cmake_registration_applied: true
+  cmake_registration_method: ".ai/validation/cvf105-register.py (idempotent, append-only)"
+  cmake_sha256_now: e93f1c70f55dab05f821ff3e0781d7a92ea86e1ee43db564d904046f3779a35f
+  cmake_sha256_recorded_in_audit: 226762b5fd03585f6663a86e087e6004cc5be34852590902aea8993ee7d0fa75
+  cmake_owned_by_test_engineer: false
+  registered_targets:
+    - cvf105_hex_tests
+    - cvf105_selector_tests
+    - cvf105_payload_tests
+    - cvf105_warnings_tests
+    - cvf105_abi_validation_tests
+    - cvf105_abi_pairs_tests
+    - cvf105_runtime_output_text_tests
+
+commands:
+  - command: "python3 .ai/validation/cvf105-register.py"
+    exit_code: 0
+    summary: "targets already registered; nothing to do (idempotent re-run)"
+  - command: "clang-format --dry-run --Werror tests/unit/cvf105_test.helpers.h"
+    exit_code: 0
+  - command: "clang-format --dry-run --Werror tests/unit/cvf105_hex_test.cpp"
+    exit_code: 0
+  - command: "clang-format --dry-run --Werror tests/unit/cvf105_selector_test.cpp"
+    exit_code: 0
+  - command: "clang-format --dry-run --Werror tests/unit/cvf105_payload_test.cpp"
+    exit_code: 0
+  - command: "clang-format --dry-run --Werror tests/unit/cvf105_warnings_test.cpp"
+    exit_code: 0
+  - command: "clang-format --dry-run --Werror tests/unit/cvf105_abi_validation_test.cpp"
+    exit_code: 0
+  - command: "clang-format --dry-run --Werror tests/unit/cvf105_abi_pairs_test.cpp"
+    exit_code: 0
+  - command: "clang-format --dry-run --Werror tests/unit/cvf105_runtime_output_text_test.cpp"
+    exit_code: 0
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    summary: "configure succeeded; build files written to build/wsl-gcc-debug"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 1
+    summary: "build failed on missing frozen seams (ninja: build stopped: subcommand failed)"
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 8
+    summary: "97% tests passed, 12 tests failed out of 384"
+  - command: "ctest --preset wsl-gcc-debug -N"
+    exit_code: 0
+    summary: "384 tests registered; CVF-105 targets present (4 discovered as *_NOT_BUILT)"
+  - command: "bash .ai/validation/cvf105-run-buildable.sh"
+    exit_code: 0
+    summary: >-
+      supplemental direct runs of the already-buildable targets:
+      cvf105_selector_tests exit 42 (59 assertions, 53 passed, 6 failed;
+      11 cases, 7 passed, 4 failed), cvf105_warnings_tests exit 0,
+      cvf105_abi_validation_tests exit 0, cvf105_abi_pairs_tests exit 42
+      (152 assertions, 146 passed, 6 failed; 8 cases, 4 passed, 4 failed)
+  - command: "bash .ai/validation/cvf105-from-spec.sh"
+    exit_code: 0
+    summary: "from-spec reference attribution for hex and payload files"
+
+red_evidence:
+  configure: "exit 0"
+  build: "exit 1"
+  ctest: "exit 8, 12 failed of 384"
+  missing_seams:
+    - seam: "cvforwin::recipes::canonicalize_hex4"
+      observed: >-
+        cvf105_hex_test.cpp:46:55 and :56:55: error: 'canonicalize_hex4' is not a
+        member of '{anonymous}::recipes'
+      target: cvf105_hex_tests
+    - seam: "cvforwin::runtime::k_max_result_payload_bytes"
+      observed: >-
+        cvf105_payload_test.cpp:49,51,124,138,162,180 and
+        cvf105_runtime_output_text_test.cpp:64:45: error: 'k_max_result_payload_bytes'
+        is not a member of '{anonymous}::rt'
+      target: cvf105_payload_tests, cvf105_runtime_output_text_tests
+    - seam: "cvforwin::runtime::serialize_result_payload"
+      observed: >-
+        cvf105_payload_test.cpp:63,77,93,109,127,141,167,182: error:
+        'serialize_result_payload' is not a member of '{anonymous}::rt'
+      target: cvf105_payload_tests
+    - seam: "cvforwin::runtime::InspectionOutcome::output_text"
+      observed: >-
+        cvf105_runtime_output_text_test.cpp:61-66: error: 'const struct
+        cvforwin::runtime::InspectionOutcome' has no member named 'output_text'
+      target: cvf105_runtime_output_text_tests
+    - seam: "cvf105_abi_pairs_tests / cvf105_runtime_output_text_tests targets"
+      observed: >-
+        not built in the canonical build; CTest discovered them as
+        cvf105_*_NOT_BUILT-b12d07c and marked them "Not Run"
+      target: cvf105_abi_pairs_tests, cvf105_runtime_output_text_tests
+  ctest_failures:
+    - test: "348 - cvf105_hex_tests_NOT_BUILT-b12d07c"
+      reason: "Not Run (uncompiled)"
+    - test: "349 - CVF-105 B2 boundary: mixed-case VID/PID on both sides resolves"
+      reason: "REQUIRE(resolved.has_value()) false"
+    - test: "352 - CVF-105 B2 negative: two descriptors that canonicalize to the same identity are ambiguous"
+      reason: "REQUIRE_FALSE(resolved.has_value()) failed (resolved unexpectedly true)"
+    - test: "355 - CVF-105 B2: config load keeps device_path and friendly_name byte-exact"
+      reason: "vendor_id \"1A2B\" != \"1a2b\"; product_id \"0C3D\" != \"0c3d\""
+    - test: "357 - CVF-105 B2: config load stores uppercase VID/PID as four lowercase hex digits"
+      reason: "vendor_id \"1A2B\" != \"1a2b\"; product_id \"0C3D\" != \"0c3d\""
+    - test: "359 - CVF-105 B2: uppercase enumerated VID/PID resolves against a lowercase selector"
+      reason: "REQUIRE(resolved.has_value()) false"
+    - test: "360 - CVF-105 B2: uppercase selector VID/PID resolves against a lowercase descriptor"
+      reason: "REQUIRE(resolved.has_value()) false"
+    - test: "361 - cvf105_payload_tests_NOT_BUILT-b12d07c"
+      reason: "Not Run (uncompiled)"
+    - test: "369 - CVF-105 B3: validation precedes side effects, so a valid-but-missing root reports CONFIG_ERROR"
+      reason: "CHECK(status == 5u) failed: observed 1 (INVALID_ARGUMENT), expected 5 (CONFIG_ERROR)"
+    - test: "373 - CVF-105 B4: a non-null error message buffer with zero capacity reports BUFFER_TOO_SMALL"
+      reason: "CHECK(status == 10u) failed: observed 1 (INVALID_ARGUMENT), expected 10 (BUFFER_TOO_SMALL)"
+    - test: "378 - cvf105_abi_pairs_tests_NOT_BUILT-b12d07c"
+      reason: "Not Run (uncompiled)"
+    - test: "379 - cvf105_runtime_output_text_tests_NOT_BUILT-b12d07c"
+      reason: "Not Run (uncompiled)"
+
+from_spec_attribution:
+  purpose: >-
+    Prove the canonical-build RED is the absent frozen seams and not a broken test
+    by compiling only the six canonicalization/ABI/payload/warning suite
+    derivations that depend on the two relocated seams against a from-spec overlay
+    under /tmp (declarations added plus a small test-engineer reference
+    implementation; no CMake target uses it).
+  hex:
+    source: tests/unit/cvf105_hex_test.cpp
+    compile_exit: 0
+    run_exit: 0
+    result: "All tests passed (296 assertions in 8 test cases)"
+  payload:
+    source: tests/unit/cvf105_payload_test.cpp
+    compile_exit: 0
+    run_exit: 0
+    result: "All tests passed (53 assertions in 9 test cases)"
+
+cross_change_conflict:
+  id: CVF-004-vs-FR-024
+  file: tests/unit/cvf004_config_test.cpp
+  file_sha256: 3cd3f957b5887b7dfbede112384c52e7befa67f25f5c9df5fb43077436750335
+  pinned_in_manifest: true
+  conflict: >-
+    The hash-pinned CVF-004 test asserts uppercase VID/PID preservation
+    (e.g. vendor_id == "1A2B"), while FR-024 canonicalizes VID/PID to four
+    lowercase hex digits. Once the FR-024 behavior lands, the CVF-004 uppercase
+    expectation and the CVF-105 lowercase expectation cannot both hold.
+  observed_evidence: >-
+    CVF-105 selector/config cases currently fail with "1A2B" == "1a2b" and
+    "0C3D" == "0c3d", i.e. the current implementation still returns the uppercase
+    form, which is exactly what the pinned CVF-004 assertion requires.
+  action: >-
+    Do NOT modify tests/unit/cvf004_config_test.cpp in this task. The test owner
+    must reconcile it as a recorded amendment during CVF-105 verify (update the
+    pinned uppercase expectation to the FR-024 lowercase canonical form and record
+    the new sha256 in .ai/test-ownership.yaml).
+  status: open
+
+author_assumptions:
+  - >-
+    Frozen seam spellings used by the tests: cvforwin::recipes::canonicalize_hex4
+    (std::string_view) returning core::Result<std::string>;
+    cvforwin::runtime::k_max_result_payload_bytes == 65535u;
+    cvforwin::runtime::serialize_result_payload(const nlohmann::json&) returning
+    core::Result<std::string>; std::string
+    cvforwin::runtime::InspectionOutcome::output_text.
+  - >-
+    Diagnostics::warnings()/clear_warnings() keep their existing signatures and
+    are backed by atomics; the tests observe only the returned warning bits and the
+    documented core::WarningFlags values.
+  - >-
+    Configuration VID/PID canonicalization is observed through the existing strict
+    config parse entry point; device_path and friendly_name stay byte-exact.
+  - >-
+    ABI status numbers asserted by the tests come from the frozen public header
+    (INVALID_ARGUMENT == 1, CONFIG_ERROR == 5, BUFFER_TOO_SMALL == 10).
+  - >-
+    Each test target links only library targets (cvforwin_recipes, cvforwin_camera,
+    cvforwin_runtime, cvforwin_diagnostics, cvforwin) plus Catch2 and
+    nlohmann_json; no production .cpp is included and no production source is read.
+  - >-
+    The ABI request-pair and runtime output_text targets require the deterministic
+    test backends; on the canonical wsl-gcc-debug preset CVFORWIN_BUILD_TEST_BACKENDS
+    was enabled, so all seven targets were registered.
+  - >-
+    CMakeLists.txt registration was applied by .ai/validation/cvf105-register.py
+    (idempotent, append-only) rather than by hand, because the repository-root path
+    is outside the test engineer's direct edit policy; CMakeLists.txt is build
+    configuration and is not an owned test artifact.
+  - >-
+    Tests are Catch2 v3 / C++20, deterministic, and hardware-free; any filesystem
+    state is created under per-test temporary directories at run time, so no binary
+    fixture is checked in.
+  - note: >-
+      Reconstructed from the persisted author harness and manifest notes because
+      the author-phase session context is not available; no assumption was inferred
+      from production source.
+
+blockers:
+  - >-
+    The eight authored CVF-105 test files are currently absent from tests/unit/
+    (untracked additions; only the byte-identical /tmp/opencode/cvf105-hold backups
+    remain). They must be restored to tests/unit/ before the verify phase can build
+    or re-hash them; the pinned hashes are unchanged and verified.
+  - >-
+    Open cross-change conflict: tests/unit/cvf004_config_test.cpp (hash-pinned
+    CVF-004) still requires uppercase VID/PID ("1A2B"), which FR-024 changes to
+    lowercase canonical. To be reconciled as a recorded amendment by the test owner
+    during CVF-105 verify; not modified in this task.

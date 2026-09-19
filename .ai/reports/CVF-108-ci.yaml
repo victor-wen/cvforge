@@ -1,0 +1,39 @@
+schema_version: 1
+change_id: CVF-108
+artifact: ci-evidence
+candidate_sha: 04b3b3bbed9c9e8ad9b043c5711a3733278609b8
+repository: victor-wen/cvforge
+branch: main
+workflow: windows-ci
+run_id: 35444804914
+run_url: https://github.com/victor-wen/cvforge/actions/runs/35444804914
+conclusion: success
+jobs:
+  - name: "Release build, tests, abi-check, package"
+    conclusion: success
+    tests: "100% tests passed, 0 tests failed out of 363"
+  - name: "Test-enabled suite and clean package consumer"
+    conclusion: success
+    tests: "100% tests passed, 0 tests failed out of 528"
+    note: >-
+      This job runs the clean package consumer against the installed 1.1.0 test-enabled package
+      (tests/package/package_checks.cmake), so the installed-package and clean-consumer behaviors that
+      the portable gate had to defer are exercised here at this SHA.
+commit_scope:
+  files:
+    - tests/unit/cvf108_release_metadata_test.cpp
+  note: >-
+    This commit is the CRLF correction on top of the CVF-108 delivery 7d3e3fe. Only the corrected
+    independent test and its ownership manifest entry changed. No .ai/ state or local logs were published.
+prior_attempt:
+  candidate_sha: 7d3e3fe6d6c1aef4416418ffb6f89abd7f86dfe6
+  run_id: 35442730937
+  conclusion: failure
+  cause: >-
+    Exactly one test failed, the independent CVF-108 OB-4 ABI check, because the Windows checkout is CRLF
+    and a whole-line std::regex ending in (.*)$ cannot match a line carrying a trailing carriage return.
+    A test-host platform defect; no product defect. Corrected in 04b3b3b and proven by the CRLF control.
+  log_path: .ai/reports/CVF-108-ci-failed-attempt.log
+  log_sha256: 0de9e1567f45f57771ab8967d9c5ff1246fcc32707f759c8a5e83955bb3fbc21
+log_path: .ai/reports/CVF-108-ci-tests.log
+log_sha256: 8501821eb555fc1f27066136be4857ee04494b8491d42683269e27a30a1ef5a7

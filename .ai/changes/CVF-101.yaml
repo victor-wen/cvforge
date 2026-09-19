@@ -1,0 +1,107 @@
+schema_version: 1
+change_id: CVF-101
+program: cvforwin-hardening-1.1.0
+title: "UVC 2D buffer signed-pitch conversion and accessible-bounds validation"
+risk: R2
+risk_justification: >-
+  Internal correction of the Windows UVC frame conversion path inside one module. No public
+  ABI, status value, schema, dependency-family, or packaging change. Implements contract
+  FR-019 and uvc_worker_lifecycle_v1 row addressing.
+intent: >-
+  Decode an IMF2DBuffer from its visual top scanline exactly once: source row r is
+  scanline0 + r * pitch for both positive and negative pitch, with no additional vertical
+  reversal, and every addressed row must fit inside the accessible buffer bounds.
+scope:
+  allowed_files:
+    production:
+      - src/camera/uvc_windows/**
+    developer_tests:
+      - tests/unit/** (files not matching cvf1*_* independent names)
+    windows_component_tests:
+      - tests/windows/uvc/**
+    build:
+      - CMakeLists.txt
+      - CMakePresets.json
+      - cmake/**
+    evidence_harness:
+      - .ai/validation/**
+  out_of_scope:
+    - include/cvforwin/**
+    - src/c_api/**
+    - src/camera/camera_backend.*
+    - src/camera/captured_frame.h
+    - src/runtime/**
+    - src/algorithms/**
+    - src/recipes/**
+    - docs/**
+    - .ai/project-contract.yaml
+interface_v1:
+  authority_note: >-
+    The camera::ICameraBackend contract and CapturedFrame BGR8 output are unchanged; only the
+    Media Foundation 2D-buffer read path inside the UVC backend is corrected.
+  frozen_test_seam:
+    header: src/camera/uvc_windows/uvc_frame_convert.h
+    guard: '#if defined(_WIN32)'
+    declaration: |
+      namespace cvforwin::camera::uvc {
+
+      enum class NativePixelFormat : std::uint32_t {
+          rgb24 = 1, rgb32 = 2, argb32 = 3, yuy2 = 4, uyvy = 5, nv12 = 6, i420 = 7, yv12 = 8,
+      };
+
+      struct Locked2DBufferView {
+          const std::uint8_t* scanline0 = nullptr; /* visual top row, from the 2D lock */
+          std::int32_t pitch = 0;                  /* bytes per row; may be negative */
+          std::uint32_t width = 0;
+          std::uint32_t height = 0;
+          NativePixelFormat format = NativePixelFormat::rgb24;
+          std::size_t accessible_bytes = 0;        /* reachable bytes from the lowest addressed byte */
+          bool accessible_bytes_known = false;     /* true when Lock2DSize bounded it */
+      };
+
+      core::Result<cv::Mat> decode_locked_buffer_to_bgr8(const Locked2DBufferView& view);
+
+      }  // namespace cvforwin::camera::uvc
+    native_memory_semantics:
+      - "rgb24 and rgb32 denote Media Foundation D3DFMT_R8G8B8 / X8R8G8B8 memory order, i.e. bytes are B,G,R (rgb32 adds a fourth byte). argb32 is B,G,R,A in memory."
+      - "These are byte-order definitions of the native buffer, not color-space conversions; the output is always BGR8."
+      - "The existing production behavior is authoritative: RGB32/ARGB32 go through cv::COLOR_BGRA2BGR and RGB24 is copied directly as B,G,R. The seam must preserve that behavior; it must not introduce a channel swap."
+      - "yuy2/uyvy/nv12/i420/yv12 are 8-bit YUV; U=V=128 is neutral and the BGR result must have equal channels there."
+    notes:
+      - "This header is the only test seam; it is Windows-only, internal, and not part of the public ABI."
+      - "uvc_backend.cpp must route its 2D-lock conversion through decode_locked_buffer_to_bgr8 so the seam and production share one code path."
+      - "The component test target must be named cvf101_windows_uvc_tests, live under tests/windows/uvc/, and be registered with add_test in the test-enabled Windows configuration (CVFORWIN_BUILD_TESTS) so windows-tests-quality runs it. It must never be registered in the release or hosted no-camera presets."
+  behavior:
+    - "2D access preference order: IMF2DBuffer2::Lock2DSize, then IMF2DBuffer::Lock2D, then IMFMediaBuffer::Lock with a computed packed stride."
+    - "Lock2DSize/GetContiguousLength supply accessible bounds; every row start and row end for packed formats must be validated against the accessible region before memcpy."
+    - "A negative pitch means bottom-up memory only; scanline0 already points to the visual top row, so no row-index reversal is allowed."
+    - "accessible_bytes is measured from the lowest addressed byte of the scanned region, which for every full-frame Media Foundation layout equals ppbBufferStart; row-fit checks therefore compare offsets computed from that same lowest addressed byte against accessible_bytes."
+    - "A caller whose lock reports a start pointer and length must pass length relative to the lowest addressed byte (buffer_start + buffer_length - lowest_addressed), not the raw length from scanline0."
+    - "Planar 4:2:0 layouts keep their existing canonical I420/ NV12 / YV12 handling and per-plane stride validation; they must not regress."
+    - "Row byte arithmetic must be overflow-safe for large dimensions; truncated or unattributable buffers fail with camera_io/capture_failed and no out-of-range read."
+    - "Converted frames remain owned BGR8 cv::Mat values with configured width/height and BGR8 metadata."
+invariants:
+  - "No inversion is applied merely because pitch is negative."
+  - "No row is read outside the bounds supplied by the lock."
+  - "Portable builds compile unchanged; Windows-only code is guarded by _WIN32."
+  - "No Media Foundation type leaves the module."
+verification:
+  portable_wsl:
+    - "cmake --preset wsl-gcc-debug && cmake --build --preset wsl-gcc-debug --parallel"
+    - "ctest --preset wsl-gcc-debug --output-on-failure"
+    - "cmake --build --preset wsl-gcc-debug --target format-check"
+    - "cmake --preset wsl-clang-analysis && cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+  windows:
+    - "windows-msvc-tests ctest includes the windows_uvc_component suite (row conversion fixtures)."
+  deferred:
+    - "Real-hardware orientation confirmation remains a designated-station item (CVF-107)."
+acceptance_reference: >-
+  Contract FR-019, uvc_worker_lifecycle_v1, invariants on scanline0/pitch, and acceptance check
+  on asymmetric row fixtures for RGB24/RGB32/YUY2.
+rollback: "Revert the conversion functions in src/camera/uvc_windows/uvc_backend.cpp."
+reporting:
+  developer_report: .ai/reports/CVF-101-implementation.yaml
+  test_red_report: .ai/reports/CVF-101-test-red.yaml
+  test_verify_report: .ai/reports/CVF-101-test-verify.yaml
+  review_report: .ai/reviews/CVF-101.yaml
+  quality_report: .ai/reports/CVF-101-quality.yaml

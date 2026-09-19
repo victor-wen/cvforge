@@ -1,0 +1,164 @@
+schema_version: 1
+change_id: CVF-101
+phase: VERIFY
+author: test-engineer
+recorded_at: 2026-09-18
+host: Linux (WSL2); Windows component suite executed via a -D_WIN32 Linux mirror
+
+summary: >-
+  The CVF-101 independent black-box component suite passes on the final test
+  artifact. The test file was re-hashed, internally consistency-checked, and one
+  formatting-only defect was fixed by the test owner. All five canonical quality
+  commands exit 0 on the final artifact. The previously reported i420/yv12
+  positive-pitch planar defect is confirmed closed from the test result.
+
+final_test_hashes:
+  - path: tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp
+    sha256: ae8874a546bccca4b117202b5ee30bd22d999c933c53573d1f6b641a296c9537
+    previous_sha256_at_session_start: 79a261b1a98298de0a7b515e65d0af0a55e470eb4fcbbfefd8a3c1a472ef57e0
+    change_this_session: "clang-format -i (whitespace / line-wrapping only)"
+
+final_manifest:
+  path: .ai/test-ownership.yaml
+  sha256: 2441c3656db05141da50b13212a7863c2b904caae09e1f9bcd2ac0c0ca3edab9
+  cvf101_section_files:
+    - path: tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp
+      sha256: ae8874a546bccca4b117202b5ee30bd22d999c933c53573d1f6b641a296c9537
+  other_sections_preserved: true
+  note: >-
+    Only the CVF-101 file sha256 and a CVF-101 notes paragraph were changed; the
+    CVF-001..CVF-008 sections are byte-for-byte unchanged. The manifest is
+    single-writer (test-engineer) per the ownership policy.
+
+commands:
+  - command: "bash .ai/validation/cvf101-test-engineer-verify.sh"
+    purpose: "Linux -D_WIN32 mirror: compile the independent Windows TU against the real seam + core + OpenCV + Catch2, then run it"
+    exit_code: 0
+    counts: "passed=752 assertions / 20 test cases, failed=0, skipped=0"
+    observed: "compile_exit=0; run_exit=0; 'All tests passed (752 assertions in 20 test cases)'; no FAILED/failure/error lines; no skip lines"
+  - command: "clang-format --dry-run --Werror tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp"
+    exit_code: 0
+    observed: "no violations on the final file"
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "272/272 tests passed, 0 failed (Total Test time ~3.23 s)"
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    observed: "format-check passed: 87 file(s) conform to .clang-format"
+  - command: "built server-binary '[B2][verify]' (planar orientation)"
+    exit_code: 0
+    observed: "All tests passed (121 assertions in 1 test case)"
+  - command: "built server-binary '[boundary][verify]' (planar boundaries)"
+    exit_code: 0
+    observed: "All tests passed (163 assertions in 2 test cases)"
+  - command: "built server-binary full-suite skip/disabled scan"
+    exit_code: 0
+    observed: "skip_lines=0, disabled_lines=0, 'All tests passed (752 assertions in 20 test cases)'"
+
+test_artifact_review:
+  file: tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp
+  lines: 1302
+  internal_consistency:
+    - "Packed rgb24/rgb32 memory semantics: fill_rgb24_row / fill_bgr32_row write (b,g,r[,a]) and every call site passes kBgr* channel values in (blue, green, red) order; arguments and expected BGR constants agree byte-for-byte. No stale R,G,B call-site literals remain."
+    - "Channel-order case asserts exact distinct B,G,R identity plus a != swapped guard for rgb24/rgb32/argb32, both pitch signs."
+    - "PlanarLock initializes its whole allocation to 0x80 (U=V=128 neutral) so any derived chroma pointer reads neutral data; no stale packed-format 0xEE guard bytes are reused for planar cases."
+    - "Accessible-bounds view() attributes exactly the minimum addressed extent; bounds-sensitive behavior is asserted by the dedicated B5/boundary cases."
+    - "No fixture files are checked in; all buffers are synthetic and generated at run time."
+  defect_found_and_fixed:
+    found: true
+    description: >-
+      clang-format --dry-run --Werror on the session-start file (sha256
+      79a261b1...) returned exit 1 with 5 [-Wclang-format-violations]: the
+      packed-format array initializer could fit one element per line, and two
+      trailing comments in the distinct-RGB case were mis-aligned.
+    fix: >-
+      clang-format -i on the test file (test owner). Recorded diff:
+      .ai/validation/cvf101-format.diff. The diff contains only the
+      packed-format initializer wrapping onto one element per line and the two
+      comment alignments. No assertion, case, expectation, or coverage changed.
+    not_a_weakening: true
+
+defect_closure_i420_yv12:
+  claim: "The previously reported i420/yv12 positive-pitch planar defect is genuinely fixed."
+  verdict: CLOSED
+  basis:
+    - >-
+      Test case "CVF-101 verify: negative pitch preserves orientation for every
+      packed and planar format" includes the top-down (positive-pitch) planar
+      loop over nv12/i420/yv12: 4x4, neutral chroma, gray ramp on rows 0/2/3,
+      asserting has_value(), CV_8UC3 4x4, structural neutrality of rows 0 and 3,
+      and row_luma_proxy(row0) < row_luma_proxy(row3). This case passed (exit 0).
+    - >-
+      Test case "CVF-101 verify: a bottom-up planar lock never reads out of
+      bounds" and the "[boundary][verify]" planar 2x2 minimum case also passed.
+    - >-
+      The full mirror run exercised the real seam and returned 752/752
+      assertions in 20/20 cases with no failures, no skips, and no disabled
+      tests. Under the prior defect this i420/yv12 positive-pitch assertion set
+      failed; it now passes.
+  independence_note: >-
+    The controller reproduced the i420/yv12 finding independently from source
+    semantics and a standalone OpenCV control, so this closure does not rest on
+    any production source exposed to the test-engineer session.
+
+independence_incident:
+  id: CVF-101-II-01
+  severity: process / independence
+  what_happened: >-
+    During this VERIFY session, codegraph_explore (invoked to locate the
+    portable "CVF-101 helper" tests and the frozen seam shape) returned verbatim
+    production implementation source into the test-engineer session:
+    src/camera/uvc_windows/uvc_frame_convert.cpp, uvc_frame_math.h, and
+    uvc_backend.cpp. The test-engineer role is implementation-blind; reading
+    those files was not intended and their content was not to be used.
+  timing:
+    before_exposure: >-
+      The session-start hash was confirmed; the test file was reviewed for
+      internal consistency; the formatting-only defect was found via
+      clang-format; clang-format -i was applied; the diff was captured; and the
+      final sha256 ae8874a5... was established.
+    after_exposure: >-
+      No test expectation, assertion, fixture, case, or hash was derived from,
+      or changed as a result of, the exposed source. The subsequent commands run
+      after the exposure (re-run of the five canonical commands, the focused
+      planar filters, the skip scan) used only the already-frozen test file.
+  containment: >-
+    All codegraph_explore use was stopped immediately after the exposure. The
+    remaining verification was performed with the pre-existing harness scripts
+    and the built binary only.
+  process_recommendation: >-
+    codegraph_explore is unsafe for an implementation-blind test role because a
+    natural-language query about test cases returns production .cpp source. The
+    test-engineer workflow should rely on test-path-only reads and the frozen
+    headers; codegraph tools should be denied to this role.
+
+ownership:
+  manifest: .ai/test-ownership.yaml
+  files_checked: 1
+  hash_matches:
+    - path: tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp
+      manifest_sha256: ae8874a546bccca4b117202b5ee30bd22d999c933c53573d1f6b641a296c9537
+      on_disk_sha256: ae8874a546bccca4b117202b5ee30bd22d999c933c53573d1f6b641a296c9537
+      match: true
+  assertions_weakened_skipped_or_removed: false
+  mismatches: []
+
+limitations:
+  - >-
+    This host is Linux; the portable wsl-gcc-debug suite is not evidence for the
+    Windows-only behavior. The -D_WIN32 Linux mirror exercises the real seam and
+    core with GCC/OpenCV, not MSVC/Media Foundation. Native Windows execution
+    remains deferred to the windows-2022 CI / windows-tests-quality workflow and
+    is not claimed here.
+  - >-
+    The portable ctest run includes seven "CVF-101 helper" cases from
+    tests/unit/uvc_frame_math_test.cpp (a developer unit test for the portable
+    uvc_frame_math detail header); they are not owned by test-engineer and are
+    not part of the independent CVF-101 component suite. They are listed here
+    only to account for the 272/272 portable count.
+
+blockers: []

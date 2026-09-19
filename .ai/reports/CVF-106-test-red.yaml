@@ -1,0 +1,211 @@
+schema_version: 1
+change_id: CVF-106
+phase: AUTHOR
+owner: test-engineer
+recorded_at: 2026-09-19
+target: "Algorithm preparation/asset lifecycle and template.match behavior"
+status: RED
+
+summary: >-
+  Independent black-box tests were authored before the frozen additive seam
+  exists. All three test translation units fail to compile because
+  src/algorithms/template_match.h is absent and the additive
+  AlgorithmAsset/AlgorithmAssetBundle/IPreparedAlgorithm/prepare types are not
+  declared in src/inspection/algorithm.h and src/inspection/registry.h. RED is
+  the absent seam, not a broken test: a self-contained from-spec ZNCC reference
+  run for the same deterministic input passes every expectation.
+
+authored_files:
+  - path: tests/unit/cvf106_test.helpers.h
+    sha256: edd4427af3debd802488a3981484661342d5a079df5a438faf6cb57ce1ef26e5
+  - path: tests/unit/cvf106_template_match_test.cpp
+    sha256: 3b302dd545e3cce1524e5d611c1aba38efa4481d668c613f0fb4d6b1df36eed3
+  - path: tests/unit/cvf106_prepare_test.cpp
+    sha256: c900a558877bebe3ed1d9e89201b6c79c25d7518a3f993019c8028ba327ed4ef
+  - path: tests/unit/cvf106_lifecycle_test.cpp
+    sha256: 67b1691c791fbb1a521a2f64e7f89adb8aae3a58b0e6648961d6cccd49a83b95
+
+ownership_manifest:
+  path: .ai/test-ownership.yaml
+  sha256: e3be1ee9c566bbcf34aec748f82be05e9c70bf4df37f168a84a4fc8948d16784
+  section: CVF-106
+  note: >-
+    Appended without touching the CVF-001..CVF-105 sections. Per-file sha256
+    values above match the manifest entries established after clang-format
+    normalization.
+
+commands:
+  - command: "python3 .ai/validation/cvf106-register.py"
+    exit_code: 0
+    summary: "registered cvf106_template_match_tests, cvf106_prepare_tests, cvf106_lifecycle_tests under if(CVFORWIN_BUILD_TEST_BACKENDS)"
+  - command: "clang-format --dry-run --Werror tests/unit/cvf106_test.helpers.h"
+    exit_code: 0
+    summary: "format clean"
+  - command: "clang-format --dry-run --Werror tests/unit/cvf106_template_match_test.cpp"
+    exit_code: 0
+    summary: "format clean"
+  - command: "clang-format --dry-run --Werror tests/unit/cvf106_prepare_test.cpp"
+    exit_code: 0
+    summary: "format clean"
+  - command: "clang-format --dry-run --Werror tests/unit/cvf106_lifecycle_test.cpp"
+    exit_code: 0
+    summary: "format clean"
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    summary: "configured with the canonical portable preset"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 1
+    summary: "RED: all three cvf106 TUs fail to compile on the absent frozen seam"
+  - command: "ctest --preset wsl-gcc-debug -N"
+    exit_code: 0
+    summary: "registers tests #415 cvf106_template_match_tests, #416 cvf106_prepare_tests, #417 cvf106_lifecycle_tests (422 total)"
+  - command: "ctest --preset wsl-gcc-debug -R cvf106 --output-on-failure"
+    exit_code: 8
+    summary: "RED: the three cvf106 executables are NOT_BUILT because the build failed"
+  - command: "g++ -std=c++20 -O0 -Wall -Wextra -Werror .ai/validation/cvf106-from-spec/reference_main.cpp -o .ai/validation/cvf106-from-spec/reference_main"
+    exit_code: 0
+    summary: "from-spec ZNCC reference builds clean"
+  - command: ".ai/validation/cvf106-from-spec/reference_main"
+    exit_code: 0
+    summary: "from-spec reference: all checks passed (7/7)"
+  - command: "bash .ai/validation/cvf106-from-spec-syntax.sh"
+    exit_code: 0
+    summary: "all three authored TUs pass g++ -fsyntax-only against the from-spec overlay of the additive seam (3/3 exit 0)"
+
+red_evidence:
+  build_log: .ai/validation/cvf106-build.log
+  configure_log: .ai/validation/cvf106-configure.log
+  ctest_n_log: .ai/validation/cvf106-ctest-n.log
+  observed_first_diagnostic: >-
+    tests/unit/cvf106_test.helpers.h:35:10: fatal error:
+    algorithms/template_match.h: No such file or directory
+  failing_targets:
+    - cvf106_template_match_tests
+    - cvf106_prepare_tests
+    - cvf106_lifecycle_tests
+  from_spec_reference: 
+    source: .ai/validation/cvf106-from-spec/reference_main.cpp
+    sha256: 003825e60f3bce4dd9a54a09326a6d7e6a63e741d10b0fc602bb9bab294fc5bd
+    run_log: .ai/validation/cvf106-from-spec-run.log
+    overlay_syntax_check: >-
+      .ai/validation/cvf106-from-spec-syntax.sh compiled all three authored TUs
+      with g++ -std=c++20 -Wall -Wextra -Werror -fsyntax-only against
+      .ai/validation/cvf106-from-spec/overlay placed ahead of src/ on the
+      include path; all three exited 0, so the tests are well-formed against the
+      recorded seam.
+    conclusion: >-
+      The same deterministic asymmetric input and the same observable
+      expectations (exact-copy score 1.0, coordinates (20,14), absent and
+      outside-ROI scores below threshold, threshold equality PASS, edge-ROI
+      coordinates) pass under a from-spec ZNCC implementation, so the RED is
+      the absent seam and not an impossible or broken test.
+
+cases:
+  direct_prepared_seam:
+    - id: B2
+      file: tests/unit/cvf106_template_match_test.cpp
+      case: "CVF-106 B2 template present at a known location passes with global coordinates"
+    - id: B3
+      file: tests/unit/cvf106_template_match_test.cpp
+      case: "CVF-106 B3 frame without the template fails with a deterministic defect"
+    - id: B5
+      file: tests/unit/cvf106_template_match_test.cpp
+      case: "CVF-106 B5 ROI restricts the search to the requested region"
+    - id: B6
+      file: tests/unit/cvf106_template_match_test.cpp
+      case: "CVF-106 B6 an already-expired deadline fails with algorithm_deadline_exceeded"
+    - id: boundary_threshold_equality
+      file: tests/unit/cvf106_template_match_test.cpp
+      case: "CVF-106 boundary: score exactly equal to the threshold passes"
+    - id: boundary_roi_edges
+      file: tests/unit/cvf106_template_match_test.cpp
+      case: "CVF-106 boundary: ROI at the frame edges reports edge coordinates"
+    - id: boundary_template_equals_roi
+      file: tests/unit/cvf106_template_match_test.cpp
+      case: "CVF-106 boundary: a template exactly the size of the ROI matches"
+    - id: negative_1x1
+      file: tests/unit/cvf106_template_match_test.cpp
+      case: "CVF-106 negative: 1x1 template and 1x1 ROI are rejected"
+    - id: negative_template_larger_than_roi
+      file: tests/unit/cvf106_template_match_test.cpp
+      case: "CVF-106 negative: template larger than the ROI is rejected"
+    - id: negative_zero_variance
+      file: tests/unit/cvf106_template_match_test.cpp
+      case: "CVF-106 negative: zero-variance template is rejected"
+    - id: negative_malformed_bytes
+      file: tests/unit/cvf106_template_match_test.cpp
+      case: "CVF-106 negative: malformed template bytes are rejected"
+    - id: negative_missing_asset_key
+      file: tests/unit/cvf106_template_match_test.cpp
+      case: "CVF-106 negative: a missing asset key is rejected"
+    - id: negative_unknown_parameter
+      file: tests/unit/cvf106_template_match_test.cpp
+      case: "CVF-106 negative: unknown parameter key is rejected"
+    - id: negative_non_finite_threshold
+      file: tests/unit/cvf106_template_match_test.cpp
+      case: "CVF-106 negative: non-finite threshold is rejected"
+    - id: compatibility_cvf003_shape
+      file: tests/unit/cvf106_template_match_test.cpp
+      case: "CVF-106 additive seam: the pinned pre-prepare algorithm shape still dispatches"
+  prepared_state:
+    - id: B4
+      file: tests/unit/cvf106_prepare_test.cpp
+      case: "CVF-106 B4 template is decoded at preparation and not re-read during inspect"
+    - id: B7
+      file: tests/unit/cvf106_prepare_test.cpp
+      case: "CVF-106 B7 a newly prepared template does not mutate an already prepared object"
+    - id: B1_prepare_roi
+      file: tests/unit/cvf106_prepare_test.cpp
+      case: "CVF-106 B1 preparation rejects an invalid ROI and a larger-than-ROI template"
+    - id: negative_empty_asset
+      file: tests/unit/cvf106_prepare_test.cpp
+      case: "CVF-106 negative: empty asset bytes are rejected at preparation"
+  lifecycle:
+    - id: B1_catalog
+      file: tests/unit/cvf106_lifecycle_test.cpp
+      case: "CVF-106 B1 a failing recipe rejects catalog creation (missing asset, escaping reference, invalid ROI, zero-variance template, oversized asset)"
+    - id: B1_reload_atomicity
+      file: tests/unit/cvf106_lifecycle_test.cpp
+      case: "CVF-106 B1 a failed reload keeps the previous snapshot active"
+    - id: B4_end_to_end
+      file: tests/unit/cvf106_lifecycle_test.cpp
+      case: "CVF-106 B4 removing the asset after load does not change inspect output"
+    - id: B7_reload_swap
+      file: tests/unit/cvf106_lifecycle_test.cpp
+      case: "CVF-106 B7 reload swaps to a new template only after a successful candidate"
+    - id: B8
+      file: tests/unit/cvf106_lifecycle_test.cpp
+      case: "CVF-106 B8 example.threshold keeps its observable output through the lifecycle"
+
+fixtures_and_tolerances:
+  fixture: >-
+    One license-cleared asymmetric 5x4 single-channel template generated
+    deterministically at run time in tests/unit/cvf106_test.helpers.h
+    (asymmetric_template) plus a second asymmetric template
+    (asymmetric_template_alt) for reload. No binary image is checked in; PNG
+    assets are encoded in-memory or written to per-test temporary directories.
+  golden_policy: >-
+    An exact template copy is expected to score 1.0 for ccoeff_normed; score
+    assertions use Catch::Approx with an absolute margin of 1e-6, and match
+    coordinates/size are asserted as exact integers in the global frame. The
+    boundary case derives the threshold from the measured score rather than
+    hard-coding a floating value. No sleeps and no machine-specific paths are
+    used.
+
+author_assumptions:
+  - "Frozen seam: src/algorithms/template_match.h exists with a class registered under key \"template.match\" by register_compiled_algorithms."
+  - "src/algorithms/template_match.h need not expose a fixed class name to this suite; the algorithm is obtained through AlgorithmRegistry::find(\"template.match\")."
+  - "AlgorithmAsset is constructible as {std::string key; std::string reference; std::vector<std::uint8_t> bytes;} in that field order (aggregate or equivalent)."
+  - "AlgorithmAssetBundle exposes a public std::vector<AlgorithmAsset> assets member (default-constructible) used only to build a one-asset bundle; its lookup API is not assumed by the tests."
+  - "IInspectionAlgorithm::prepare(const nlohmann::json&, const AlgorithmAssetBundle&) const returns core::Result<std::unique_ptr<IPreparedAlgorithm>>."
+  - "IPreparedAlgorithm::inspect(const AlgorithmRequest&) returns core::Result<AlgorithmResult>, and inspection::dispatch(const IPreparedAlgorithm&, const AlgorithmRequest&) exists."
+  - "template.match parameter keys are template_asset, roi ([x,y,w,h]), method (\"ccoeff_normed\"), threshold (0..1); measurements carry score, x, y, width, height; a FAIL defect carries kind == \"template_mismatch\"."
+  - "A preparation rejection is reported with broad status config_error (the brief permits algorithm_parameters_invalid or the documented config error, so the tests assert that broad status instead of one exact code)."
+  - "The recipe assets mapping is {\"<logical-key>\": \"<relative-reference>\"} and the runtime Context rejects the whole candidate on any asset/preparation failure while the previous snapshot stays active."
+  - "Context::create/reload_recipes read <config_root>/assets for recipe asset references; the deterministic file and synthetic backends are selected via RuntimeOptions.camera_override as in the CVF-006 suite."
+  - "These interface assumptions are the only implementation-adjacent choices; every expected value is derived from the brief and the approved contract. They are centralized in tests/unit/cvf106_test.helpers.h so a spelling correction is a one-file change."
+
+notes:
+  - "No production .cpp, diff, developer note, or root-cause report was read. Frozen headers were read over the codegraph header reader because the session read policy denies direct src/** reads."
+  - "The root CMakeLists.txt registration is applied by .ai/validation/cvf106-register.py because that path is outside this session's edit policy, exactly as CVF-103/CVF-104/CVF-105 recorded; CMakeLists.txt is not an owned test artifact."
+  - "The from-spec reference (reference_main.cpp) and the author harness are validation aids under .ai/validation, not owned test artifacts and not registered with CTest."

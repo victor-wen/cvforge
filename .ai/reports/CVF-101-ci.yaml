@@ -1,0 +1,23 @@
+schema_version: 1
+change_id: CVF-101
+kind: ci_evidence
+candidate_sha: 55f595e07e4409f33648b01a8784218955c1516a
+workflow: windows-ci
+run_id: 35288085573
+url: https://github.com/victor-wen/cvforge/actions/runs/35288085573
+status: completed
+conclusion: success
+jobs:
+  - name: Release build, tests, abi-check, package
+    conclusion: success
+    tests: "100% tests passed, 0 failed out of 200"
+  - name: Test-enabled suite and clean package consumer
+    conclusion: success
+    tests: "100% tests passed, 0 failed out of 289"
+key_evidence:
+  - "uvc_frame_convert.cpp compiled and linked by MSVC v143 x64 in both the release and test-enabled jobs."
+  - "cvf101_windows_uvc_tests.exe built and executed on Windows; every CVF-101 case (helpers, B1-B6, boundaries, negatives) reported Passed."
+  - "windows-tests-quality total 289/289 passed, 0 failed, including the CVF-101 Windows component suite."
+notes: >-
+  This closes the CVF-101 Windows evidence gap that the Linux host could not cover. The Linux
+  -D_WIN32 mirror run was a behavioral proxy; this MSVC run is the authoritative Windows evidence.

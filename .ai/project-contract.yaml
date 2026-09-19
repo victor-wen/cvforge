@@ -1,21 +1,27 @@
 schema_version: 1
-contract_version: 1.0.0
+contract_version: 1.1.0
 status: APPROVED
-updated_at: 2026-09-15
-approved_at: 2026-09-15
-approval_evidence: Explicit user reply "批准" in the architecture conversation.
+updated_at: 2026-09-18
+approved_at: 2026-09-18
+approval_evidence: Explicit user reply "批准继续干完你的活" in the architecture conversation.
 
 project:
   name: cvforwin
-  lifecycle: greenfield
+  lifecycle: production-hardening
+  target_release: 1.1.0
+  public_abi_version: 1
   purpose: >-
     Reusable C++ visual-inspection DLL template for Windows FCT stations. A native C
     host performs one inspection call while the DLL owns camera acquisition, recipe
     selection, OpenCV processing, diagnostics, and result encoding.
   repository_evidence: >-
-    The repository was surveyed on 2026-09-15 and is empty except for this architecture
-    contract. There are no manifests, source files, tests, CI workflows, documents, or
-    existing public interfaces to preserve.
+    The repository was re-surveyed on 2026-09-18. It is an implemented CMake/C++20 project
+    with a frozen five-function C ABI, runtime/context orchestration, strict recipe catalog,
+    compile-time algorithm registry, deterministic test camera backends, Windows Media
+    Foundation UVC backend, diagnostics/artifact services, 263 portable tests recorded by
+    the prior workflow, two windows-2022 CI jobs, package verification, and an opt-in UVC
+    hardware executable. Contract 1.1.0 is a bounded hardening revision of that implementation,
+    not a greenfield redesign.
 
 requirements:
   functional:
@@ -73,6 +79,42 @@ requirements:
     - id: FR-018
       statement: Include a deterministic example algorithm, example recipes, and a native C consumer that demonstrate the extension and calling contracts without representing a production inspection algorithm.
       source: architect default delegated by user
+    - id: FR-019
+      statement: Decode Media Foundation 2D buffers from the visual top scanline using scanline0 plus row times pitch for both positive and negative pitch, with overflow-safe accessible-buffer bounds validation and no second vertical reversal.
+      source: user code review, verified in src/camera/uvc_windows/uvc_backend.cpp
+    - id: FR-020
+      statement: Isolate all application-side UVC Media Foundation calls and held interface references, plus MFStartup/MFShutdown and COM initialization, in one DLL-owned MTA camera worker thread; only the required free-threaded SourceReader callback methods run on Media Foundation work-queue threads.
+      source: user code review
+    - id: FR-021
+      statement: Give every SourceReader stream a fresh callback and immutable stream generation; late callbacks from a retired stream must be ignored and must never complete a read for a replacement stream.
+      source: user code review
+    - id: FR-022
+      statement: Enforce the inspection deadline through final result serialization and required artifact completion; optional artifact work must not invalidate a valid verdict or extend the call beyond the deadline, and retention must run outside the inspection critical path.
+      source: user code review
+    - id: FR-023
+      statement: Route every post-frame outcome through one finalization path so fail_or_error can persist the latest valid frame after algorithm, serialization, or later technical failure and return a safely completed diagnostic image path.
+      source: user code review
+    - id: FR-024
+      statement: Canonicalize configured and enumerated UVC VID/PID values to four lowercase ASCII hexadecimal digits before identity comparison while preserving exact device-path and friendly-name matching.
+      source: user code review
+    - id: FR-025
+      statement: Validate every C ABI pointer-length or pointer-capacity pair before side effects; a null pointer with a nonzero length or capacity is invalid, and zero-length optional input is absent regardless of a nonnull pointer value.
+      source: user code review
+    - id: FR-026
+      statement: Make diagnostics warning accumulation and observation race-free across inspect, reload, maintenance, and callback-capable threads.
+      source: user code review
+    - id: FR-027
+      statement: Assemble and serialize the complete ABI output JSON exactly once and enforce one 65535-byte UTF-8 payload maximum, excluding the required trailing NUL in the 65536-byte public buffer.
+      source: user code review
+    - id: FR-028
+      statement: Prepare immutable per-recipe algorithm state and bounded root-contained assets during initialization or atomic recipe reload, never by reading files during inspect.
+      source: user request for template matching and Python/OpenCV portability
+    - id: FR-029
+      statement: Provide a compiled template.match reference algorithm using OpenCV C++, a cached decoded template, bounded ROI, ccoeff_normed scoring, deterministic global-frame coordinates, and strict parameters without changing the C ABI or camera modules.
+      source: user request
+    - id: FR-030
+      statement: Before any new implementation task brief is activated, clear the prior CVF-001 through CVF-008 workflow from active state by archiving completed change/test-brief descriptors and resetting workflow-state, while retaining reports, reviews, and test-ownership hashes as audit history.
+      source: user
   non_functional:
     - id: NFR-001
       statement: Target Windows 10 and Windows 11 x64 with Visual Studio 2022, MSVC v143, CMake, and C++20.
@@ -104,22 +146,53 @@ requirements:
       statement: Configuration, logging, optional image persistence, and callback failures must be deterministic and represented as errors or warning flags according to this contract.
     - id: NFR-015
       statement: No throughput SLA is imposed beyond serialized operation and the per-request deadline; every algorithm must accept and honor the propagated deadline.
+    - id: NFR-016
+      statement: The host has no obligation to initialize COM or choose an apartment model before calling any cvforwin API.
+    - id: NFR-017
+      statement: No directory scan, retention sort, or retention deletion may execute synchronously on the normal cvf_inspect path.
+    - id: NFR-018
+      statement: Prepared algorithm assets are immutable, bounded, loaded only below the fixed config_root/assets directory, and remain alive with the recipe snapshot used by an in-flight inspection.
+    - id: NFR-019
+      statement: Production release evidence includes at least 1000 consecutive captures plus timeout, reconnect, orientation, and color checks on a designated Windows 10/11 UVC station.
+    - id: NFR-020
+      statement: Release 1.1.0 preserves C ABI v1, the exact five exports, status values, caller-owned memory, one-context semantics, static Windows packaging, and existing module dependency direction.
 
 existing_architecture:
-  summary: This is a greenfield repository with no pre-existing implementation architecture.
+  summary: >-
+    The implemented system follows public_c_api -> runtime_orchestrator -> camera, recipe,
+    inspection, algorithm, diagnostics/artifact, and core leaf modules. CMake static component
+    libraries feed one shared library; recipes select compile-time registered algorithms; a
+    single runtime context serializes inspections; Windows Media Foundation is confined to the
+    UVC backend; deterministic backends cover hardware-free tests; windows-2022 builds and
+    verifies the release and test-enabled packages.
   preserve: true
   preserved_elements:
     - Windows-native FCT DLL purpose.
-    - Native C caller and stable C ABI boundary.
+    - Native C caller, exact five exported functions, and stable C ABI v1 boundary.
     - One normal inspection invocation owns both acquisition and inspection.
     - OpenCV-oriented C++ algorithm authoring model.
     - WSL local build/test plus GitHub Actions final Windows build.
+    - One live context, one configured camera, and serialized inspections.
+    - Compile-time algorithm registration with strict versioned recipes and atomic catalog replacement.
+    - Existing module paths, target boundaries, dependency direction, status/verdict separation, managed output roots, and one-DLL static-link package policy.
+    - Test-owner independence, hash-pinned prior evidence, clean C consumer, and hardware-free mandatory CI.
   known_problems:
-    - No source, build system, dependency lock, API, tests, CI, or documentation currently exists.
-    - Hosted CI has no physical UVC camera, so real-hardware validation cannot be an automated release gate there.
+    - copy_packed_rows reverses row indices in addition to applying a negative pitch, contrary to IMF2DBuffer scanline0 semantics, and Lock2D uses a contiguous length that Microsoft documents as inapplicable to the Lock2D view.
+    - COM is initialized only in a local enumeration scope while Media Foundation objects survive and are later used from arbitrary host calling threads.
+    - One ReadCallback instance is reused across replacement SourceReader objects, allowing a retired reader's late event to mutate active callback state.
+    - PNG encoding, file writing, and a full retention scan execute synchronously without a deadline-aware service; retention runs after every inspection.
+    - Runtime returns immediately on algorithm or serialization failure after frame acquisition, so fail_or_error never observes execution_ok=false.
+    - Configuration accepts uppercase VID/PID but enumeration produces lowercase identifiers and identity comparison is exact.
+    - input_json NULL plus nonzero length is not rejected by the current request mirror.
+    - Diagnostics stores warnings in a non-atomic uint32_t while reload and inspect can access it concurrently.
+    - Registry estimates measurements plus defects separately, while the C API later serializes a larger wrapped object and requires an additional NUL byte.
+    - The algorithm interface has validation and inspect only; no immutable recipe-preparation/resource lifecycle exists, so safe template loading and caching would otherwise require file I/O during inspect or racy mutable global/registry state.
+    - Windows-only UVC conversion, apartment, timeout, and stale-callback behavior lacks deterministic component coverage; the current hardware smoke defaults to 50 captures and does not prove orientation or color.
+    - .ai/workflow-state.yaml and active CVF-001 through CVF-008 descriptors still describe the completed implementation workflow and must not seed the new hardening task queue.
+    - Hosted CI has no physical UVC camera, so representative hardware evidence requires a designated self-hosted or manually operated station.
 
 change_scope:
-  state: Complete for baseline 1.0.0; implementation remains blocked until explicit approval.
+  state: Contract 1.1.0 revision proposed; all implementation and new task briefs remain blocked until explicit approval.
   modules:
     - public_c_api
     - runtime_orchestrator
@@ -147,6 +220,34 @@ change_scope:
       - docs/**
       - LICENSES/**
       - .github/workflows/**
+      - .ai/workflow-state.yaml
+      - .ai/archive/**
+    workflow_cleanup_only:
+      - .ai/changes/CVF-001.yaml
+      - .ai/changes/CVF-002.yaml
+      - .ai/changes/CVF-003.yaml
+      - .ai/changes/CVF-004.yaml
+      - .ai/changes/CVF-005.yaml
+      - .ai/changes/CVF-006.yaml
+      - .ai/changes/CVF-007.yaml
+      - .ai/changes/CVF-008.yaml
+      - .ai/test-briefs/CVF-001.yaml
+      - .ai/test-briefs/CVF-002.yaml
+      - .ai/test-briefs/CVF-003.yaml
+      - .ai/test-briefs/CVF-004.yaml
+      - .ai/test-briefs/CVF-005.yaml
+      - .ai/test-briefs/CVF-006.yaml
+      - .ai/test-briefs/CVF-007.yaml
+      - .ai/test-briefs/CVF-008.yaml
+    workflow_cleanup_destination:
+      changes: .ai/archive/cvforwin-implementation-1.0.0/changes/
+      test_briefs: .ai/archive/cvforwin-implementation-1.0.0/test-briefs/
+      move_rule: Preserve each archived file byte-for-byte and leave active .ai/changes and .ai/test-briefs empty before the 1.1.0 controller creates anything.
+    audit_history_preserved:
+      - .ai/reports/**
+      - .ai/reviews/**
+      - .ai/test-ownership.yaml
+      - .ai/validation/**
     architect_only:
       - .ai/project-contract.yaml
     excluded:
@@ -155,9 +256,10 @@ change_scope:
       - Python interpreters, scripts executed at runtime, or Python embedding
       - Daheng SDK implementation or redistributables
       - Runtime-loaded inspection plug-in DLLs
+      - Automatic Python-to-C++ transpilation or execution of Python algorithms in production
       - GUI, network service, database, cloud, or FCT host implementation
       - x86, ARM, multi-camera, or multiple-live-context support
-      - Porting any production Python inspection whose source and acceptance samples were not provided
+      - Porting any specific production Python inspection whose source, representative images, expected outputs, and tolerances were not provided
 
 architecture:
   language_and_toolchain:
@@ -171,7 +273,7 @@ architecture:
   dependencies:
     external:
       - name: OpenCV 4.x
-        use: Internal image model and algorithm operations; initial components are core, imgproc, and imgcodecs.
+        use: Internal image model, UVC conversion, recipe-time asset decoding, template matching, and artifact encoding; approved components remain core, imgproc, and imgcodecs.
         linkage: Static through vcpkg; never present in the public API.
       - name: nlohmann-json
         use: Strict global/recipe parsing and bounded algorithm JSON conversion.
@@ -221,6 +323,9 @@ architecture:
         - Enumerate Media Foundation UVC devices and resolve exactly one configured identity.
         - Open, configure, capture, close, and perform one bounded reconnect/recapture.
         - Convert Windows-native frames and errors to camera_contract types.
+        - Own one long-lived application-created MTA worker and confine COM initialization, Media Foundation startup, all backend-held Media Foundation references/calls, and deterministic reverse-order teardown to it; the free-threaded callback only captures generation-tagged completion data on Media Foundation MTA work queues.
+        - Use a fresh callback and monotonically increasing generation for each SourceReader and discard retired-generation events.
+        - Interpret scanline0 as visual row zero, apply signed pitch exactly once, prefer IMF2DBuffer2::Lock2DSize, and validate every addressed row against accessible bounds.
       dependencies:
         - camera_contract
         - core_model
@@ -228,6 +333,7 @@ architecture:
       forbidden_dependencies:
         - Inspection algorithms
         - Daheng SDK
+        - Host COM initialization or host thread apartment assumptions
     - name: test_camera_backends
       paths:
         - src/camera/test_backends/**
@@ -243,22 +349,26 @@ architecture:
         - src/recipes/**
       responsibilities:
         - Strictly parse and validate global configuration and all versioned recipe documents.
-        - Build an immutable recipe snapshot indexed by recipe_id.
-        - Atomically replace the snapshot only after every candidate recipe passes validation.
+        - Canonicalize VID/PID and resolve bounded relative algorithm assets beneath config_root/assets without following an escape through symlinks or reparse points.
+        - Build an immutable recipe snapshot indexed by recipe_id, retaining opaque immutable prepared objects returned by the selected algorithm; recipe_store loads bounded asset bytes but does not decode algorithm-specific formats.
+        - Atomically replace the snapshot only after every candidate recipe, asset, and prepared algorithm passes validation.
       dependencies:
         - core_model
         - nlohmann-json
-        - inspection_contract_and_registry validation contract
+        - inspection_contract_and_registry preparation contract
+        - C++ filesystem
       forbidden_dependencies:
         - Camera implementations
         - Public C ABI
+        - Network or arbitrary absolute asset locations
     - name: inspection_contract_and_registry
       paths:
         - src/inspection/**
       responsibilities:
-        - Define IInspectionAlgorithm, AlgorithmRequest, AlgorithmResult, and deadline semantics.
+        - Define the compiled algorithm factory/entry, immutable per-recipe prepared algorithm, AlgorithmRequest, AlgorithmResult, and deadline semantics.
         - Register compiled algorithms by stable key and reject duplicate or unknown keys.
-        - Dispatch one captured frame and validated recipe to the selected algorithm.
+        - Prepare one immutable execution object per recipe from validated parameters and a bounded in-memory asset bundle without filesystem access.
+        - Dispatch one captured frame and optional input JSON to the prepared object without mutating registry-global state.
       dependencies:
         - core_model
         - camera_contract
@@ -271,9 +381,10 @@ architecture:
       paths:
         - src/algorithms/**
       responsibilities:
-        - Implement isolated OpenCV-based algorithms behind IInspectionAlgorithm.
-        - Validate each algorithm's parameters and produce bounded structured results.
+        - Implement isolated OpenCV-based factories and immutable prepared algorithms behind the inspection contract.
+        - Strictly validate parameters and in-memory resources at recipe load, honor deadlines at inspect, and produce bounded structured results.
         - Provide one deterministic example algorithm showing how cv2-style operations map to C++.
+        - Provide template.match with a recipe-time decoded template, optional bounded ROI, ccoeff_normed score, threshold verdict, and global-frame match coordinates.
       dependencies:
         - inspection_contract_and_registry
         - OpenCV approved components
@@ -282,13 +393,17 @@ architecture:
         - Public C ABI
         - Camera backend types
         - Logging sinks
+        - Direct filesystem access, Python runtime, or mutable process-global caches
     - name: diagnostics_and_artifacts
       paths:
         - src/diagnostics/**
         - src/artifacts/**
       responsibilities:
         - Fan out diagnostics to optional synchronous C callback and rotating files.
-        - Persist requested captures, return UTF-8 paths, and enforce managed-directory retention.
+        - Accumulate warnings atomically across all permitted caller and maintenance threads.
+        - Serialize C callback invocations so the host never receives concurrent callbacks from inspect, reload, or maintenance, without holding internal warning/state locks across host code.
+        - Persist requested captures through a bounded save worker using temporary files and publish UTF-8 paths only after an atomic in-root commit completed before the applicable deadline.
+        - Coalesce and run managed-directory retention on a separate background maintenance worker that never occupies the save queue or blocks the inspection thread on a scan, sort, or deletion.
         - Convert optional sink failures to warning flags unless a recipe marks an artifact as required.
       dependencies:
         - core_model
@@ -304,7 +419,8 @@ architecture:
       responsibilities:
         - Own the single process context, camera session, recipe snapshot, registry, diagnostics, and serialization gate.
         - Initialize in dependency order and roll back fully on failure.
-        - Execute queue wait, recipe lookup, capture, optional reconnect, algorithm, encoding, and persistence under one deadline.
+        - Execute queue wait, recipe lookup, capture, optional reconnect, prepared algorithm dispatch, one final JSON serialization, and required persistence under one absolute deadline.
+        - Preserve the latest valid frame and route every post-acquisition success or failure through one finalizer that applies artifact policy and deterministic error precedence.
         - Coordinate atomic reload and orderly shutdown.
       dependencies:
         - core_model
@@ -346,7 +462,9 @@ architecture:
       responsibilities:
         - Provide identical preset-driven dependency, build, test, analysis, and package entry points.
         - Build portable WSL targets and the final statically linked Windows DLL.
+        - Version the hardening deliverable and package as 1.1.0 while preserving public C ABI version 1 and the exact export set.
         - Verify the C-only consumer, exact exports, runtime dependency allowlist, package contents, and notices.
+        - Provide hardware-free Windows component coverage for UVC row conversion, worker/apartment ownership, timeout, and callback generations plus an opt-in designated-station stress executable.
       dependencies:
         - CMake
         - vcpkg
@@ -357,8 +475,12 @@ architecture:
         - Physical camera availability in mandatory CI jobs
   dependency_rules:
     - Dependencies flow from public_c_api to runtime_orchestrator and then toward contracts and leaf implementations; leaf modules never depend back on the public API or runtime.
-    - Algorithms receive an owned frame, validated parameters, optional input JSON, and deadline only; they never open cameras, select recipes, save files, or call host callbacks.
+    - Recipe_store alone resolves and reads algorithm assets; algorithms receive bounded in-memory assets only during preparation and receive an owned frame, immutable prepared state, optional input JSON, and deadline during inspect.
+    - Algorithm factories are stateless or internally synchronized for concurrent recipe reload; prepared objects are immutable and remain owned by their recipe snapshot.
+    - Algorithms never open cameras, resolve paths, read or write files, select recipes, save artifacts, call host callbacks, or execute Python.
     - Camera backends acquire frames only; they never evaluate product verdicts or know recipe algorithms.
+    - Every Media Foundation interface and startup/shutdown call is owned by the UVC worker; only backend-neutral commands and owned frames cross between it and caller threads.
+    - Artifact save and retention workers never call camera or algorithm code; retention is background-only and save completion is observed through the original absolute inspection deadline.
     - Configuration models are internal and must not be aliases of public ABI structures.
     - Windows-only includes and link libraries are confined to uvc_windows_backend and Windows delivery checks.
   role_responsibilities:
@@ -367,17 +489,21 @@ architecture:
     api_owner:
       - Preserve cvf_api.h source and binary compatibility and maintain C consumer tests.
     algorithm_author:
-      - Work only behind IInspectionAlgorithm, provide parameter validation and deterministic sample-based tests, and avoid camera/ABI dependencies.
+      - Work only behind the preparation/inspection contract, provide strict parameter/resource validation and deterministic sample-based tests, map Python cv2/NumPy prototypes to OpenCV C++ without embedding Python, and avoid camera/ABI/filesystem dependencies.
     camera_adapter_author:
-      - Implement camera_contract without leaking vendor types; future Daheng work requires an approved R3 revision.
+      - Implement camera_contract without leaking vendor types, own the UVC MTA worker and callback generations, and provide Windows-specific deterministic evidence; future Daheng work requires an approved R3 revision.
     configuration_owner:
-      - Version schemas, provide valid examples, and preserve atomic reload and path-safety rules.
+      - Version schemas, provide valid examples/assets, enforce root-contained resource bounds, and preserve atomic reload and path-safety rules.
+    diagnostics_artifact_owner:
+      - Preserve deadline-aware atomic saves, background-only retention, warning atomics, and managed-root deletion safety.
     test_owner:
       - Author tests independently from production implementation evidence and maintain mock/fault fixtures.
     quality_owner:
       - Run canonical commands, record real output and exit codes, and reject unverified packages.
     release_owner:
       - Publish only CI-produced packages that pass ABI, dependency, license, and clean-consumer checks.
+    workflow_controller:
+      - Before creating new task briefs, archive completed CVF-001 through CVF-008 active descriptors, reset workflow-state to contract 1.1.0, retain immutable reports/reviews/test hashes, and never edit this contract.
 
 interfaces:
   - name: cvforwin_c_abi_v1
@@ -393,11 +519,11 @@ interfaces:
       - signature: "uint32_t cvf_get_abi_version(void)"
         semantics: Return the compile-time ABI version without creating state.
       - signature: "cvf_status_t cvf_initialize(const cvf_init_options_v1* options, cvf_context** out_context, cvf_error_info_v1* error)"
-        semantics: Copy caller options, validate configuration and recipes, create diagnostics, resolve/open one camera, and publish a context only after complete success.
+        semantics: Copy caller options, validate configuration, assets, and prepared recipes, start owned services, resolve/open one camera on the UVC worker, and publish a context only after complete success.
       - signature: "cvf_status_t cvf_reload_recipes(cvf_context* context, cvf_error_info_v1* error)"
-        semantics: Validate a complete candidate recipe set and atomically swap it; keep the prior set on any error.
+        semantics: Validate and prepare a complete candidate recipe/asset set and atomically swap it; keep the prior immutable set on any error.
       - signature: "cvf_status_t cvf_inspect(cvf_context* context, const cvf_inspection_request_v1* request, cvf_inspection_result_v1* result)"
-        semantics: Perform queueing, acquisition, inspection, result encoding, and requested persistence as the one normal-cycle call.
+        semantics: Perform queueing, acquisition, prepared inspection, one final result serialization, and deadline-bounded finalization/persistence as the one normal-cycle call.
       - signature: "cvf_status_t cvf_shutdown(cvf_context* context)"
         semantics: Close resources and invalidate the opaque context; the host must stop new calls and allow active calls to finish first.
     required_fields:
@@ -444,13 +570,16 @@ interfaces:
       request_id_max_utf8_bytes: 128
       input_json_max_utf8_bytes: 65536
       result_json_required_capacity: 65536
+      result_json_max_utf8_payload_bytes_excluding_nul: 65535
       error_message_required_capacity: 1024
       image_path_required_capacity: 4096
     ownership_and_buffer_rules:
       - Input pointers remain valid for the duration of their call; initialization copies retained values before returning.
       - The log callback and user_data remain valid until cvf_shutdown returns and the callback must not re-enter this context.
       - Output buffers are validated to the v1 required capacities before acquisition; bytes_written excludes and output text includes a trailing NUL.
-      - JSON is a UTF-8 top-level object. Null plus zero length means no input_json; embedded NUL is rejected.
+      - Every pointer-length/capacity pair is checked before constructing string_view or performing a side effect; NULL plus nonzero is INVALID_ARGUMENT.
+      - For optional input_json, byte length zero means absent whether the pointer is NULL or non-NULL; a positive length requires a non-NULL pointer and a valid UTF-8 top-level object without embedded NUL.
+      - Required identifiers and roots require both a non-NULL pointer and a positive valid length; output buffers may use non-NULL plus zero but then follow the existing BUFFER_TOO_SMALL rule.
       - The DLL owns cvf_context storage and frees it only in cvf_shutdown; the caller never dereferences or frees it.
     status_values:
       CVF_STATUS_OK: 0
@@ -470,8 +599,10 @@ interfaces:
     error_and_warning_rules:
       - The function return and result status use the stable broad status; error_code supplies a stable subsystem-specific detail and is zero on success.
       - Any non-OK inspect status sets verdict to NOT_EVALUATED and clears output_json and image_path unless a diagnostic path was safely completed.
-      - Optional file-log or optional image-save failure leaves an already computed PASS/FAIL intact and sets a warning flag.
-      - A recipe-declared required image-save failure returns CVF_STATUS_REQUIRED_ARTIFACT_ERROR and NOT_EVALUATED.
+      - Once a valid frame exists, post-frame algorithm/serialization failures preserve their primary technical status while finalization may safely return an image_path for fail_or_error.
+      - For an optional artifact only, file-log/image-save failure, optional-save queue saturation, cancellation, or deadline exhaustion leaves an already computed PASS/FAIL intact and sets a warning flag; no late final artifact is published after cancellation.
+      - A recipe-declared required image-save encode/write/commit failure before deadline returns CVF_STATUS_REQUIRED_ARTIFACT_ERROR and NOT_EVALUATED; deadline exhaustion returns CVF_STATUS_TIMEOUT and takes precedence.
+      - If a required diagnostic save also fails after an earlier technical error, required-artifact failure takes precedence unless the absolute deadline has expired; the bounded message retains the earlier error context.
   - name: global_configuration_v1
     path: config root/cvforwin.json
     producer: configuration_owner
@@ -483,10 +614,13 @@ interfaces:
     required_fields:
       - schema_version equal to 1
       - camera.backend equal to uvc
-      - camera.selector containing device_path or VID/PID plus sufficient identity to select exactly one device
-      - camera.base_capture width, height, frame rate, and pixel-format preference
+      - camera containing device_path or VID/PID plus sufficient identity to select exactly one device
+      - base_capture width, height, frame rate, and pixel-format preference
       - logging level, rolling max_file_bytes, and max_files
       - retention max_age_days and max_total_bytes
+    normalization:
+      - camera.vendor_id and camera.product_id accept either hexadecimal case at the JSON boundary and are stored as exactly four lowercase ASCII hexadecimal digits.
+      - Enumerated UVC VID/PID values use the same lowercase representation before matching; device_path and friendly_name remain exact byte comparisons.
     forbidden_fields:
       - Relative root paths
       - Executable code, scripts, DLL/plugin paths, credentials, or network locations
@@ -505,8 +639,15 @@ interfaces:
       - parameters object validated by that algorithm
       - capture object with bounded overrides and settle-frame count
       - artifacts object with save_policy of always, fail_or_error, or never and a required boolean
+    optional_fields:
+      - assets object mapping a logical key matching [a-z0-9._-]{1,64} to one UTF-8 relative file reference beneath config_root/assets
+    asset_rules:
+      - A recipe may declare at most 16 assets; one encoded file is at most 16777216 bytes and their encoded total is at most 67108864 bytes.
+      - A reference is at most 512 UTF-8 bytes, uses forward-slash separators, is relative, contains no backslash, empty, dot, or dot-dot component, drive prefix, URI, alternate data stream, or network form, and resolves to a regular non-link file beneath config_root/assets.
+      - Asset bytes are loaded before algorithm preparation; image assets are decoded only during preparation and are limited to 8192 by 8192 pixels and 134217728 decoded bytes.
+      - No asset is automatically re-read; cvf_reload_recipes prepares a complete new immutable snapshot and an in-flight call retains its old prepared state.
     forbidden_fields:
-      - Native pointers, camera SDK objects, arbitrary paths, plug-in names, executable code, or secrets
+      - Native pointers, camera SDK objects, absolute or escaping paths, plug-in names, executable code, or secrets
       - Duplicate recipe_id, unknown algorithm key, unknown schema keys, or unbounded output declarations
   - name: algorithm_extension_contract
     path: src/inspection/**
@@ -515,12 +656,71 @@ interfaces:
       - compiled_algorithms
     required_fields:
       - Stable internal algorithm key
-      - Parameter-validation operation
-      - Inspect operation receiving one owned frame, immutable validated parameters, optional input JSON, and deadline
-      - AlgorithmResult containing verdict, bounded measurements/defects JSON value, and diagnostics metadata
+      - Preparation operation receiving immutable JSON parameters and a bounded in-memory asset bundle and returning an immutable per-recipe prepared object
+      - Preparation rejects unknown parameters/resources, malformed or oversized decoded data, and all invalid cross-field combinations before catalog publication
+      - Inspect operation receiving one owned frame, immutable prepared state, optional input JSON, and the remaining absolute deadline
+      - AlgorithmResult containing verdict, a measurements object, a defects array, and bounded diagnostics metadata; every numeric value is finite and the final runtime serializer is the sole payload-size authority
+      - Factory/registry state that is stateless or synchronized against concurrent recipe reload while prepared objects require no mutation during inspect
     forbidden_fields:
       - Camera opening or control
-      - File persistence, host callbacks, public C structures, global mutable state, or unbounded blocking
+      - Filesystem access, file persistence, host callbacks, public C structures, Python execution, global mutable state, or unbounded blocking
+      - Lazy template/model loading in inspect or mutation of a prepared object after publication
+  - name: algorithm_asset_bundle_v1
+    path: config root/assets/**
+    related_paths:
+      - src/inspection/**
+    producer: recipe_store
+    consumers:
+      - inspection_contract_and_registry
+      - compiled_algorithms during preparation only
+    required_fields:
+      - Logical asset key
+      - Validated normalized relative reference for diagnostics only
+      - Immutable bounded byte content owned by the candidate recipe snapshot
+    forbidden_fields:
+      - Open file handles, writable byte views, absolute paths, network locations, executable content, or lifetime shorter than the prepared recipe
+  - name: template_match_algorithm_v1
+    path: src/algorithms/template_match.*
+    related_paths:
+      - config/examples/recipes/template.match.json
+      - config/examples/assets/**
+    producer: compiled_algorithms
+    consumers:
+      - inspection_contract_and_registry
+      - FCT recipes
+    algorithm_key: template.match
+    required_parameters:
+      - template_asset naming one recipe assets entry
+      - roi as [x, y, width, height] in global frame coordinates with positive dimensions and bounds checked against configured capture dimensions
+      - method equal to ccoeff_normed
+      - threshold as a finite number in 0.0 through 1.0
+    preparation:
+      - Decode .png, .jpg, or .jpeg bytes once with OpenCV imgcodecs, normalize the template to grayscale, and reject empty, oversized, larger-than-ROI, or zero-variance templates.
+      - Store the decoded template and validated scalar values in the immutable prepared recipe object; inspect performs no disk I/O.
+    result:
+      - measurements is an object containing finite score, x, y, width, and height; x and y are global-frame coordinates of the best match.
+      - verdict is PASS exactly when score is greater than or equal to threshold, otherwise FAIL; defects contains a deterministic template_mismatch entry on FAIL.
+      - The algorithm checks the propagated deadline before preprocessing, before matchTemplate, and before returning.
+    python_portability:
+      - Python cv2 image operations map to the same OpenCV C++ primitives over cv::Mat; NumPy slicing maps to bounded cv::Rect/Mat views and reductions map to cv:: functions or explicit checked loops.
+      - Porting is source translation with golden-image/tolerance tests, not automatic transpilation and not Python embedding.
+    forbidden_fields:
+      - Template path in parameters or input_json, per-inspection imread/imdecode, hidden process-global cache, non-finite score, or coordinates relative to the ROI
+  - name: final_result_payload_v1
+    path: src/runtime/**
+    related_paths:
+      - src/c_api/**
+    producer: runtime_orchestrator
+    consumers:
+      - public_c_api
+    required_fields:
+      - One final object assembled from measurements and optional defects
+      - One canonical UTF-8 serialization retained as a string through the C API copy
+      - Serialized content length at most 65535 bytes so the fixed 65536-byte buffer always includes NUL
+    forbidden_fields:
+      - Separate component-size estimates as acceptance authority
+      - Re-serializing the object in the C ABI layer
+      - Truncating a successful JSON document
   - name: camera_backend_contract
     path: src/camera/camera_backend.*
     producer: camera_contract
@@ -533,79 +733,193 @@ interfaces:
       - Backend-neutral identity, settings, frame, timestamp, and error values
     forbidden_fields:
       - Product verdicts, algorithm selection, public C ABI structures, or backend types in CapturedFrame
+  - name: uvc_worker_lifecycle_v1
+    path: src/camera/uvc_windows/**
+    producer: uvc_windows_backend
+    consumers:
+      - camera_backend_contract callers through synchronous methods only
+    required_fields:
+      - One application-created worker thread initialized with CoInitializeEx COINIT_MULTITHREADED and one balanced MFStartup/MFShutdown lifetime
+      - IMFActivate, IMFMediaSource, IMFSourceReader, media-buffer access, and backend-held associations are created, consumed, reset, and released on that worker; the callback may perform only thread-safe QueryInterface/refcount plus the minimal sample AddRef needed to enqueue generation-tagged completion for worker-side consumption
+      - Synchronous command completion bounded by the caller's absolute deadline for enumerate, open, capture, and reconnect
+      - Fresh callback per SourceReader carrying an immutable stream generation; events not matching the active generation are discarded
+      - Callback completion state has independent reference-counted lifetime and no raw pointer to a destroyed backend; teardown retires the generation before releasing reader/source references
+      - Close is idempotent, tears down reader/source/callback before MFShutdown and CoUninitialize, and joins the worker without consulting host COM state
+      - 2D access preference order Lock2DSize, Lock2D, then contiguous Lock, with scanline0 plus signed pitch and checked row extents
+    forbidden_fields:
+      - Returning Media Foundation pointers across the worker boundary
+      - Reusing callback state for a replacement SourceReader
+      - Calling MFStartup/MFShutdown from a Media Foundation work-queue callback
+      - Reversing row indexes merely because pitch is negative
+  - name: artifact_finalization_v1
+    path: src/runtime/**
+    related_paths:
+      - src/artifacts/**
+    producer: runtime_orchestrator and diagnostics_and_artifacts
+    consumers:
+      - cvforwin_c_abi_v1
+    required_fields:
+      - Latest valid acquired frame retained until one finalization decision is complete
+      - save_policy evaluated with the real execution_ok value for success and every post-frame technical error
+      - One save worker with at most one executing and one queued save, plus a separate maintenance worker with at most one coalesced retention request
+      - Save through a managed-root temporary file and publish by same-root atomic rename only if not cancelled and completed by the applicable deadline
+      - Required save waits only to the absolute deadline; optional save may use remaining time but cancellation preserves a valid PASS/FAIL with warning and removes its temporary file
+      - Retention is requested after 60 seconds since the prior run or 100 committed captures, whichever occurs first, is never awaited by inspect, and retains existing age/size/path-safety rules
+      - Retention skips temporary and in-progress save names and synchronizes final-file publication/deletion without occupying or delaying the save queue
+    scheduling_constants:
+      retention_time_trigger_seconds: 60
+      retention_committed_capture_trigger: 100
+      deployment_configurable_in_v1_1: false
+    forbidden_fields:
+      - Directory iteration, stat/sort, retention deletion, PNG encoding, or disk-write wait directly on the inspection caller thread
+      - Publishing an image_path before atomic commit or publishing a final artifact after its save was cancelled
+      - Attempting fail_or_error persistence when no valid frame was ever acquired
 
 invariants:
   - Only the architect may edit this contract or its status, and implementation is forbidden until status becomes APPROVED after explicit user confirmation.
   - The v1 public header remains C11-compatible and the export set, numeric statuses, calling convention, field order, field widths, alignment, and ownership rules cannot change without R3 revision.
   - All public structures carry struct_size; extensibility uses trailing reserved fields, never reinterpretation of an existing field.
-  - No exception crosses the C ABI, and every public entry point validates inputs before observable acquisition or persistence side effects.
+  - No exception crosses the C ABI, and every public entry point validates structures and every pointer-length/capacity pair before constructing a view or causing acquisition or persistence side effects.
   - The opaque context is the only DLL-managed allocation crossing the boundary; no CRT allocation is released by the opposite side.
   - Technical execution status and product verdict remain independent; errors are NOT_EVALUATED and product defects are FAIL with OK execution status.
   - At most one live context and one selected camera exist per process; inspect calls are thread-safe but execute serially.
   - The caller must quiesce inspect/reload calls before shutdown; callbacks must not re-enter any API on the same context.
-  - timeout_ms covers queue wait, capture, one reconnect/recapture, algorithm, encoding, required persistence, and return; each stage receives only the remaining deadline.
-  - Device matching must resolve exactly one configured UVC identity or initialization fails; there is no first-device fallback.
-  - Algorithms depend on backend-neutral frames and never include UVC, Media Foundation, or future Daheng types.
-  - Recipe reload is all-or-nothing; readers observe one immutable old or new snapshot and never a partial set.
+  - timeout_ms creates one absolute deadline covering queue wait, capture, one reconnect/recapture, algorithm, final serialization, required persistence, and return; no stage receives a fresh timeout or begins after expiry.
+  - Required artifact waiting stops at the deadline and reports TIMEOUT; optional artifact work cannot turn a valid PASS/FAIL into TIMEOUT and is cancelled with a warning when its budget is exhausted.
+  - Once any valid frame has been acquired, every later outcome uses one finalization path; fail_or_error sees execution_ok=false for algorithm, serialization, and other post-frame technical failures.
+  - Retention scanning, sorting, and deletion are background-only, coalesced, lower priority than saves, and never awaited by cvf_inspect.
+  - Device matching resolves exactly one configured UVC identity or initialization fails; VID/PID compare in canonical lowercase and there is no first-device fallback.
+  - The UVC backend is independent of host COM state: one owned MTA worker creates, uses, and releases Media Foundation resources and balances startup/shutdown in reverse order.
+  - IMF2DBuffer scanline0 is visual row zero; every row address is scanline0 plus row times signed pitch, with pitch applied exactly once and accessible bounds checked whenever Lock2DSize supplies them.
+  - A SourceReader callback is never reused by another SourceReader; stream generations are monotonic and retired-generation callbacks cannot satisfy an active capture.
+  - Algorithms depend on backend-neutral frames and immutable prepared recipe state and never include UVC, Media Foundation, future Daheng, filesystem, or public C ABI types.
+  - Recipe reload is all-or-nothing across JSON, assets, and algorithm preparation; readers observe one immutable old or new snapshot and in-flight readers retain the old assets until completion.
   - Global and recipe JSON is strict, bounded, UTF-8, versioned, duplicate-key-safe, and validated before activation.
-  - Identifiers cannot form paths; generated filenames are sanitized and cannot escape the configured output root.
+  - Recipe/request identifiers cannot form paths; only explicit asset references may name files, and they are normalized beneath config_root/assets without link/reparse escape.
+  - No algorithm performs per-inspection resource loading; template.match uses a decoded immutable template prepared before publication and returns global-frame coordinates.
+  - The complete result object is serialized exactly once; its UTF-8 payload is at most 65535 bytes and the public 65536-byte buffer always reserves one byte for NUL.
+  - Diagnostics and artifact warning bits use race-free atomic accumulation; relaxed ordering is sufficient because the bits carry no dependent data, and host log-callback invocations are serialized without holding internal state locks.
   - Retention deletes only library-created files beneath the managed captures root and never follows a link or junction outside it.
-  - Optional diagnostic sink failure sets warnings without changing a valid verdict; a required artifact failure follows the explicit technical-error rule.
+  - Optional diagnostic/save failure sets warnings without changing a valid verdict; required artifact failure and timeout follow the explicit precedence rules and never hide a safely committed diagnostic path.
   - WSL is authoritative for portable compilation/unit behavior but never for Windows ABI; Windows CI is authoritative for DLL, exports, dependencies, and package evidence.
   - The Windows UVC release contains exactly one project runtime DLL and no non-system runtime DLL dependency.
+  - Before a 1.1.0 task brief is activated, prior active workflow descriptors are archived and workflow-state is reset; reports, reviews, and test-ownership hashes remain immutable audit history.
   - Daheng implementation, vendor binaries, multi-camera support, and dynamic algorithm loading require an approved R3 revision.
 
 sensitive_paths:
   - path: .ai/project-contract.yaml
     owner: architect
     rule: Only the architect may change content, version, or approval status.
+  - path: .ai/workflow-state.yaml
+    owner: workflow_controller
+    rule: Prior active descriptors may be archived and state reset only after contract approval; no new task brief may coexist with stale CVF-001 through CVF-008 active queue entries.
+  - path: .ai/changes/**
+    owner: workflow_controller
+    rule: Only the approved active program may remain here; completed descriptors are archived before new briefs are created.
+  - path: .ai/test-briefs/**
+    owner: workflow_controller and test_owner
+    rule: Only the approved active program may remain here; completed briefs are archived with their matching changes.
+  - path: .ai/archive/**
+    owner: workflow_controller
+    rule: Append-only home for completed active descriptors; moving an artifact here must not alter its bytes.
+  - path: .ai/reports/**
+    owner: test_owner and quality_owner
+    rule: Immutable audit evidence; workflow cleanup must not delete, rewrite, or silently re-hash these artifacts.
+  - path: .ai/reviews/**
+    owner: test_owner and quality_owner
+    rule: Immutable audit evidence; workflow cleanup must not delete or rewrite these artifacts.
+  - path: .ai/test-ownership.yaml
+    owner: test_owner
+    rule: Hash ownership changes only when the independent test owner records a new or explicitly amended test artifact.
+  - path: .ai/validation/**
+    owner: test_owner and quality_owner
+    rule: Prior logs and harnesses referenced by reports/reviews remain audit evidence and are not removed by active-workflow cleanup.
   - path: include/cvforwin/cvf_api.h
     owner: api_owner
     rule: Public source/ABI contract; any incompatible semantic or layout change is R3.
   - path: src/c_api/cvforwin.def
     owner: api_owner
     rule: Exact Windows export allowlist; additions, removals, or renames are R3.
-  - path: vcpkg.json and vcpkg-configuration.json
+  - path: vcpkg.json
     owner: quality_owner
     rule: Dependency graph and baseline are pinned; new dependency families, linkage changes, or license changes require architecture review.
-  - path: CMakePresets.json and cmake/toolchains/**
+  - path: vcpkg-configuration.json
+    owner: quality_owner
+    rule: Registry and builtin baseline are pinned; floating refs are forbidden.
+  - path: CMakePresets.json
     owner: quality_owner
     rule: Preserve GCC portable and MSVC v143 release identities, static Windows linkage, and canonical command names.
+  - path: cmake/toolchains/**
+    owner: quality_owner
+    rule: Preserve approved compiler, architecture, CRT, and static dependency policy.
   - path: .github/workflows/windows.yml
     owner: quality_owner
     rule: Use windows-2022, immutable action references, least permissions, no secrets in logs, and the canonical commands below.
   - path: src/camera/uvc_windows/**
     owner: camera_adapter_author
-    rule: Windows device/resource lifetime and identity matching are release-critical; no vendor SDK leakage.
-  - path: src/inspection/** and src/algorithms/**
+    rule: Worker-thread apartment ownership, signed-pitch conversion, callback generations, device lifetime, and identity matching are release-critical; no host COM dependency or vendor SDK leakage.
+  - path: src/inspection/**
     owner: algorithm_author
-    rule: Preserve deadline, bounded output, deterministic validation, and backend isolation.
-  - path: config/examples/** and docs/schemas/**
+    rule: Preserve immutable preparation, no inspect-time I/O, deadline checks, final-payload bounds, deterministic validation, and backend/ABI isolation.
+  - path: src/algorithms/**
+    owner: algorithm_author
+    rule: Preserve immutable preparation, no inspect-time I/O, deadline checks, deterministic outputs, and camera/ABI isolation.
+  - path: src/runtime/**
+    owner: diagnostics_artifact_owner
+    rule: Post-frame finalization, deadline precedence, atomic save publication, queue bounds, and background-only retention are release-critical.
+  - path: src/artifacts/**
+    owner: diagnostics_artifact_owner
+    rule: Atomic save publication, queue bounds, cancellation, temporary-file cleanup, and background-only retention are release-critical.
+  - path: src/diagnostics/**
+    owner: diagnostics_artifact_owner
+    rule: Warning state and cross-thread observation must remain data-race-free; callback failures stay contained.
+  - path: config/examples/**
     owner: configuration_owner
-    rule: Schema examples and documentation must change together and remain versioned.
-  - path: LICENSES/** and package manifest
+    rule: Schema examples, template assets, licenses, bounds, and documentation change together; deployment assets stay beneath the fixed assets root.
+  - path: runtime:config_root/assets/**
+    owner: FCT deployment
+    rule: Deployment assets are data only, bounded by the recipe contract, and cannot escape the fixed assets root.
+  - path: docs/schemas/**
+    owner: configuration_owner
+    rule: Schema documentation changes with parser behavior and examples.
+  - path: tests/hardware/**
+    owner: test_owner and camera_adapter_author
+    rule: Hardware evidence is independent, opt-in on designated Windows UVC equipment, records selector/device identity and cycle counts, and cannot be replaced by a hosted no-camera run.
+  - path: LICENSES/**
     owner: release_owner
     rule: Every redistributed or statically linked third-party component must have an auditable notice.
-  - path: runtime config_root and output_root
+  - path: cmake/CvfPackage.cmake*
+    owner: release_owner
+    rule: Package version, contents, dependency allowlist, notices, and clean-consumer verification remain synchronized.
+  - path: runtime:config_root
     owner: FCT deployment
-    rule: Both are absolute caller-provided paths; no credentials are stored, and cleanup cannot escape the managed captures subtree.
-  - path: vendor/** and third_party/binaries/**
+    rule: Absolute caller-provided configuration root; no credentials or executable content are stored.
+  - path: runtime:output_root
+    owner: FCT deployment
+    rule: Absolute caller-provided output root; cleanup cannot escape the managed captures subtree.
+  - path: vendor/**
     owner: architect
-    rule: Forbidden in baseline 1.0.0; Daheng or other binary intake requires approved R3 revision and license evidence.
+    rule: Forbidden in baseline 1.1.0; Daheng or other binary intake requires approved R3 revision and license evidence.
+  - path: third_party/binaries/**
+    owner: architect
+    rule: Forbidden in baseline 1.1.0; binary intake requires approved R3 revision and license evidence.
 
 test_policy:
   framework: Catch2 v3 for C++ tests plus standalone C11 consumer/ABI executables.
   authoring:
     - Production authors add focused tests for behavior they change, but their assertions are not sole acceptance evidence.
     - Test owners maintain independent contract, fault-injection, ABI, and package-consumer suites.
+    - New independent hardening tests receive new ownership entries and hashes; existing CVF-001 through CVF-008 hash-pinned files are not edited by production authors.
   verification:
     - Only real canonical command output with exit code zero counts as PASS.
     - WSL and Windows results are distinct evidence; one cannot substitute for the other.
+    - WSL cannot certify Media Foundation code paths; Windows component tests and designated-camera evidence are required in addition to portable non-regression.
     - Quality/release verification must be performed independently from implementation claims.
   ownership:
     unit_tests: test_owner with algorithm_author fixtures
     abi_and_package_tests: test_owner and quality_owner
-    physical_camera_tests: camera_adapter_author on designated Windows hardware
+    windows_uvc_component_tests: test_owner, independently verified by quality_owner
+    physical_camera_tests: test_owner-authored suite operated by camera_adapter_author on designated Windows hardware
     release_decision: release_owner using recorded independent evidence
   suites:
     - name: portable_unit
@@ -615,7 +929,7 @@ test_policy:
         - WSL GCC
         - Windows MSVC
       coverage:
-        - Status/verdict mapping, identifier/path validation, JSON bounds, recipes, registry, algorithm example, deadlines, serialization, logging warnings, and retention safety.
+        - Status/verdict mapping, mixed-case VID/PID normalization, identifier/asset path validation, pointer-length pairs, exact final JSON boundaries, immutable recipe preparation/reload, template.match golden cases, deadline-aware finalization, fail_or_error error captures, diagnostics warning concurrency/callback serialization, and retention safety.
     - name: camera_contract
       paths:
         - tests/camera/**
@@ -624,6 +938,17 @@ test_policy:
         - Windows MSVC with synthetic/file/fault backends
       coverage:
         - Open/configure/capture/reconnect/close ordering, ambiguous identity, disconnect, timeout, and one-retry limit.
+    - name: windows_uvc_component
+      paths:
+        - tests/windows/uvc/**
+        - production-neutral conversion helpers exercised by those tests
+      environments:
+        - Windows MSVC v143 x64 without physical hardware
+      registration: Registered in CTest for windows-msvc-tests and therefore executed by windows_tests_full_quality.
+      coverage:
+        - Positive and negative pitch with an asymmetric TOP/BOTTOM pattern for RGB24, RGB32, and YUY2; padded rows; Lock2DSize bounds; overflow and truncated-buffer rejection.
+        - Calls from a thread with no COM initialization and from an STA host thread while all Media Foundation facade operations execute on the owned MTA worker.
+        - Fresh callback per SourceReader, monotonic stream generation, delayed retired-reader callback rejection, timeout/flush/reconnect ordering, idempotent close, and reverse-order teardown.
     - name: c_abi_contract
       paths:
         - tests/abi/**
@@ -631,27 +956,29 @@ test_policy:
         - WSL C11 compile against the public header
         - Windows MSVC C mode against the built DLL
       coverage:
-        - C compilation, sizes/alignment, exact numeric constants, buffer rules, invalid inputs, exception containment, exact export names, and lifecycle.
+        - C compilation, sizes/alignment, exact numeric constants, all NULL/non-NULL plus zero/nonzero pointer-length/capacity combinations, invalid inputs, exception containment, exact export names, and lifecycle.
     - name: package_consumer
       paths:
         - tests/package/**
       environments:
         - Clean windows-2022 job using only the installed package
       coverage:
-        - Native C configure/link/load/synthetic inspect, package contents, notices, and runtime dependency allowlist.
+        - Native C configure/link/load/synthetic inspect, template.match example recipe/assets/docs, package contents, notices, and runtime dependency allowlist.
     - name: hardware_uvc
       paths:
         - tests/hardware/**
       environments:
         - Opt-in designated Windows 10/11 x64 station with configured UVC hardware
       coverage:
-        - Stable identity selection, acquisition, unplug/replug retry, settings, image integrity, and repeated-cycle resource stability.
+        - Stable identity selection, host-COM independence, acquisition, forced timeout, reconnect, unplug/replug, configured settings, an asymmetric TOP/BOTTOM orientation and color chart, and at least 1000 consecutive valid captures without stale frames or resource growth.
       mandatory_in_hosted_ci: false
-      production_release_requirement: A recorded PASS on representative hardware is required before FCT deployment.
+      production_release_requirement: A recorded PASS with at least 1000 cycles and no skipped timeout, reconnect, orientation, or color checks on representative hardware is required before FCT deployment.
+      scheduled_policy: Run on the designated station for every production candidate and nightly when that station is available; it is never added to the hosted no-camera jobs.
   independence_rules:
     - Mandatory unit, ABI, and package tests never require a physical camera or machine-specific path.
-    - Test images and recipes are deterministic, small, license-cleared, and stored under tests/fixtures.
+    - Test images, templates, and recipes are deterministic, asymmetric, small, license-cleared, and stored under tests/fixtures; vertically symmetric fixtures do not count as orientation evidence.
     - Hardware tests are explicitly gated and cannot silently fall back to the first camera.
+    - Fault seams inject clocks, encoder/writer completion, retention scheduling, Media Foundation operations, and delayed callbacks without weakening production bounds or exposing those seams in the public ABI.
     - Failures may not be waived by an author assertion; waivers affecting acceptance require user approval or an R3 revision as applicable.
 
 quality_commands:
@@ -663,6 +990,10 @@ quality_commands:
       - GCC 12 or newer, Ninja, clang-format, and clang-tidy are installed.
     windows_ci:
       - GitHub Actions runner is windows-2022 with Visual Studio 2022 v143 and x64 tools.
+    windows_hardware:
+      - A designated Windows 10/11 x64 station has Visual Studio 2022 v143, one explicitly selected UVC camera, and the documented asymmetric TOP/BOTTOM color target in view.
+      - CVF_HW_UVC_DEVICE_PATH or the CVF_HW_UVC_VID/CVF_HW_UVC_PID pair is set; no command may infer or select the first device.
+      - Commands run from the repository root in PowerShell, and docs/hardware-uvc.md defines target placement, color tolerances, interactive unplug/replug prompts, and evidence capture.
   canonical:
     wsl_configure: "cmake --preset wsl-gcc-debug"
     wsl_build: "cmake --build --preset wsl-gcc-debug --parallel"
@@ -678,9 +1009,15 @@ quality_commands:
     windows_package: "cmake --build --preset windows-msvc-release --config Release --target package"
     windows_package_verify: "cmake --build --preset windows-msvc-release --config Release --target package-verify"
     windows_full_quality: "cmake --workflow --preset windows-ci"
+    windows_tests_full_quality: "cmake --workflow --preset windows-tests-quality"
+    windows_clean_consumer: "cmake -DCVF_PACKAGE_ROOT=$PWD/build/windows-msvc-tests/package/cvforwin-1.1.0 -P tests/package/package_checks.cmake"
+    windows_hardware_configure: "cmake --preset windows-msvc-tests -DCVFORWIN_BUILD_HARDWARE_TESTS=ON"
+    windows_hardware_build: "cmake --build --preset windows-msvc-tests --config Release --target cvf_hw_uvc_smoke --parallel"
+    windows_hardware_stress: "$env:CVF_HW_CYCLES='1000'; $env:CVF_HW_UNPLUG_TEST='1'; $env:CVF_HW_REQUIRE_ORIENTATION='1'; $env:CVF_HW_REQUIRE_COLOR='1'; .\\build\\windows-msvc-tests\\Release\\cvf_hw_uvc_smoke.exe"
   command_policy:
     - Presets encode generators, build directories, vcpkg toolchains/triplets, warning-as-error policy, and test configuration; ad hoc replacements are not acceptance evidence.
-    - GitHub Actions runs windows_full_quality and uploads only the verified package and separate symbols archive.
+    - GitHub Actions runs windows_full_quality, windows_tests_full_quality, and windows_clean_consumer and uploads only the verified release package and separate symbols archive.
+    - windows_hardware_stress requires an explicit exact camera selector and the documented asymmetric orientation/color target; its console log, device identity, cycle count, Windows version, camera firmware/driver, and exit code are retained as release evidence.
     - Required targets fail on compiler warnings, test failure, format drift, static-analysis findings, export drift, forbidden runtime DLLs, missing notices, or package-consumer failure.
 
 risk_rules:
@@ -693,56 +1030,79 @@ risk_rules:
     criteria:
       - Routine change inside one approved module with no interface, dependency, schema, path-safety, deadline, packaging, or invariant impact.
       - Examples, comments, internal refactors, and test corrections that preserve observable contracts.
+      - Local atomic-warning or canonical-case normalization fixes that implement this contract without changing a cross-module interface.
     route: Build workflow with focused tests and canonical local quality evidence.
     approval_required: false
   R2:
     criteria:
-      - A new compiled algorithm behind IInspectionAlgorithm with versioned recipes and no ABI change.
-      - Backward-compatible optional recipe/input/output JSON extension within size bounds.
+      - Implementation of the approved UVC worker, stream-generation, signed-pitch, finalization, artifact-worker, and prepared-recipe hardening across the existing modules without changing the public ABI.
+      - A new compiled prepared algorithm behind the algorithm extension contract with versioned recipes and no ABI change.
+      - Backward-compatible optional recipe assets or input/output JSON extension within the documented bounds.
       - Additional approved OpenCV component statically linked while the one-DLL and license checks continue to pass.
+      - Internal dependency-injection seams and Windows-only component tests that do not enter release interfaces or packages.
       - Feature work spanning approved modules without changing dependency direction or invariants.
     route: Build workflow with independent unit, integration, Windows ABI, and package verification appropriate to touched modules.
     approval_required: false
   R3:
     criteria:
-      - Any public C symbol, status value, layout, calling convention, ownership, lifecycle, or timeout semantic change.
+      - Any public C symbol, status value, layout, calling convention, ownership, lifecycle, or timeout/error-precedence semantic change beyond the behavior fixed by contract 1.1.0.
       - Incompatible configuration/recipe schema change or dynamic plug-in introduction.
       - New dependency family, non-system runtime DLL, CRT/linkage policy change, or target/toolchain/runner change.
       - Daheng/vendor SDK implementation, multi-camera, multiple live contexts, async API, or changed module boundary/dependency direction.
-      - Relaxation of camera identity, path deletion, recipe atomicity, error/verdict, test independence, or package invariants.
+      - Python/ONNX runtime introduction or relaxation of camera identity, host-COM independence, asset/capture path containment, recipe atomicity, deadline/finalization, callback generation, error/verdict, test independence, or package invariants.
     route: Persist escalation evidence under .ai/reports, return to the architect for the smallest contract revision, and wait for explicit user approval before implementation resumes.
     approval_required: true
 
 forbidden_changes:
   - Implementing production code, tests, build files, workflows, or implementation plans before this contract is explicitly APPROVED.
   - Editing this contract or its status by any role other than architect.
+  - Activating a new task brief before the old CVF-001 through CVF-008 active descriptors are archived and workflow-state is reset to the approved 1.1.0 contract.
+  - Deleting or rewriting prior reports, reviews, or test-ownership hashes as part of workflow cleanup.
   - Exporting C++/OpenCV/vendor types, exceptions, compiler-sized layouts, or DLL-owned result memory through the C ABI.
   - Changing or appending public exports without an approved R3 revision and updated C consumer/ABI evidence.
   - Treating a technical error as product FAIL or reporting PASS/FAIL on a non-OK inspection status.
   - Selecting the first camera after missing or ambiguous identity matching.
+  - Requiring the host to call CoInitializeEx, retaining Media Foundation objects on a host thread, or calling MFStartup/MFShutdown from a Media Foundation callback thread.
+  - Reusing one ReadCallback for replacement SourceReaders, accepting a retired stream generation, or allowing a late callback to complete a current capture.
+  - Reversing row indices because pitch is negative, applying signed pitch twice, or reading a 2D row without overflow-safe extent checks.
   - Automatically hot-reloading files, partially activating recipes, or executing code/scripts from configuration.
-  - Opening cameras, writing files, invoking callbacks, or using global mutable state from an inspection algorithm.
+  - Opening cameras, resolving/reading/writing files, invoking callbacks, lazily loading assets, or using global mutable state from an inspection algorithm.
+  - Running PNG encode/write waits or retention directory scan/sort/delete on the inspection caller thread.
+  - Publishing a cancelled/late artifact, exposing its path before atomic commit, or bypassing fail_or_error finalization after a valid frame exists.
+  - Estimating result JSON from fragments as the authoritative limit, serializing it more than once, or allowing more than 65535 content bytes into the fixed v1 result buffer.
   - Creating more than one live context, processing inspections concurrently on one context, or calling back reentrantly into it.
-  - Loading runtime inspection plug-ins, embedding Python, or bundling the Daheng SDK in baseline 1.0.0.
-  - Introducing a non-system runtime DLL dependency or using dynamic MSVC CRT in the initial Windows package.
+  - Loading runtime inspection plug-ins, embedding Python, or bundling the Daheng SDK in baseline 1.1.0.
+  - Introducing a non-system runtime DLL dependency or using dynamic MSVC CRT in the 1.1.0 Windows package.
   - Using MinGW artifacts as Windows ABI or release evidence.
   - Depending on the current working directory, hard-coded machine paths, credentials, or network availability.
   - Deleting, following links to, or modifying files outside the library-managed captures subtree.
+  - Editing an existing hash-pinned test-owner file from the production implementation role or using an up/down-symmetric image as orientation evidence.
   - Publishing a package built outside the canonical windows-2022 workflow or without license and clean-consumer verification.
 
 acceptance_checks:
-  - The user explicitly approves contract version 1.0.0 and the architect changes status to APPROVED before build work begins.
+  - The user explicitly approves contract version 1.1.0 and the architect changes status to APPROVED before workflow cleanup or build work begins.
+  - Before the first new task brief, completed CVF-001 through CVF-008 change/test-brief descriptors are archived out of active directories, .ai/workflow-state.yaml names contract 1.1.0 and the new hardening program, and reports/reviews/test-ownership/validation evidence remains intact.
   - All planned files stay within change_scope and every dependency follows the documented module direction.
   - A C11 sample host can query ABI version, initialize one context, call cvf_inspect once per cycle, reload recipes, and shut down without C++ knowledge.
   - The public header contains no forbidden ABI type and the Windows DLL exports exactly the five approved functions.
-  - Initialization rejects malformed configuration, duplicate/invalid recipes, unknown algorithms, missing or ambiguous cameras, and a second live context without leaking resources.
-  - Inspection distinguishes OK+PASS, OK+FAIL, warnings, and error+NOT_EVALUATED and honors caller buffers and the end-to-end deadline.
-  - Camera fault tests prove at most one reconnect/recapture and no fallback to an unrelated device.
-  - Recipe reload tests prove complete validation and old-snapshot preservation on every failure path.
-  - Algorithms can be added behind the internal registry without modifying camera, runtime, or C ABI contracts, and the example documents cv2-to-C++ mapping.
+  - ABI tests cover NULL+0, NULL+nonzero, non-NULL+0, and non-NULL+nonzero for every applicable pair; NULL+nonzero is rejected before side effects and zero-length optional input is absent.
+  - Initialization rejects malformed configuration, escaping/oversized assets, duplicate/invalid recipes, failed algorithm preparation, unknown algorithms, missing or ambiguous cameras, and a second live context without leaking resources.
+  - Mixed-case configured VID/PID resolves against lowercase enumeration, while missing or ambiguous identity still fails with no first-device fallback.
+  - Windows component tests prove all Media Foundation calls and releases occur on the owned MTA worker from both uninitialized and STA host callers, with balanced MF/COM lifetime and idempotent shutdown.
+  - Asymmetric row fixtures prove positive and negative pitch preserve visual TOP/BOTTOM orientation for RGB24, RGB32, and YUY2 and reject every truncated, overflowing, or out-of-bounds layout.
+  - Delayed-callback tests prove a fresh callback per SourceReader, monotonic generations, stale callback rejection after timeout/reconnect, and no old frame or false completion.
+  - Inspection distinguishes OK+PASS, OK+FAIL, warnings, and error+NOT_EVALUATED; absolute-deadline tests cover queue, capture, algorithm, final serialization, required save, and return without synchronous retention.
+  - Artifact tests prove fail_or_error saves the latest valid frame after algorithm and serialization errors, optional cancellation preserves verdict with warning, required failure/timeout precedence is deterministic, and no cancelled late file is published.
+  - Concurrent diagnostics tests have no data race and warning bits are never lost while reload, inspect, callbacks, and maintenance report failures.
+  - Final-payload tests prove the complete wrapped JSON is serialized once, 65535 content bytes fit with NUL, 65536 content bytes fail deterministically before ABI copy, and no fragment estimate can admit overflow.
+  - Recipe reload tests prove complete JSON/asset/preparation validation, old-snapshot preservation on every failure, and lifetime safety for an in-flight old prepared object.
+  - template.match loads/decodes its template exactly once per prepared recipe, performs no inspect-time I/O, matches deterministic asymmetric golden images within documented floating tolerance, returns global coordinates, honors ROI/deadline, and passes threshold boundary tests.
+  - Contributor documentation maps common cv2/NumPy image operations to OpenCV C++/cv::Mat and clearly states that production Python source requires an explicit hand port with representative images and expected tolerances; no Python runtime is packaged.
+  - Existing camera fault tests still prove at most one reconnect/recapture and no fallback to an unrelated device.
   - WSL GCC build, unit tests, format check, static analysis, and sanitizer workflow pass with recorded zero exit codes.
-  - Windows MSVC build, unit tests, C ABI/export checks, package build, dependency allowlist, notices, and clean C consumer pass with recorded zero exit codes.
-  - The verified Windows package contains cvforwin.dll, cvforwin.lib, cvf_api.h, example configuration/recipes, usage documentation, and notices, with no non-system runtime DLL.
-  - Rolling logs and managed capture retention remain bounded and cannot affect a valid verdict except when a recipe explicitly requires persistence.
-  - Representative Windows 10/11 UVC hardware passes the opt-in hardware suite before production FCT deployment.
-  - Daheng support remains an unimplemented extension point with no SDK header, binary, or runtime dependency in the initial package.
+  - Both Windows workflows, Windows UVC component tests, C ABI/export checks, package build/verify, dependency allowlist, notices, and clean C consumer pass with recorded zero exit codes.
+  - CMake, package names, CI artifact paths, documentation, and the clean consumer identify release 1.1.0 while cvf_get_abi_version still returns ABI version 1.
+  - The verified Windows 1.1.0 package contains cvforwin.dll, cvforwin.lib, cvf_api.h, example configuration/recipes/assets including template.match, usage/development documentation, and notices, with no non-system runtime DLL.
+  - Rolling logs, save queue, temporary files, and managed capture retention remain bounded; retention never appears on the inspection critical path and optional persistence cannot alter a valid verdict.
+  - Representative Windows 10/11 UVC hardware passes at least 1000 consecutive captures plus non-skipped timeout, reconnect, unplug/replug, orientation, and color checks before production FCT deployment.
+  - Daheng support remains an unimplemented extension point with no SDK header, binary, or runtime dependency in the 1.1.0 package.

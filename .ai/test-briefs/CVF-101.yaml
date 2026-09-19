@@ -1,0 +1,69 @@
+schema_version: 1
+change_id: CVF-101
+program: cvforwin-hardening-1.1.0
+target: "UVC 2D-buffer row decoding: signed pitch, orientation, and bounds"
+in_scope:
+  - Reading one locked 2D video buffer (base pointer, pitch, width, height, pixel format, accessible length) and producing one owned BGR8 frame.
+  - Positive and negative pitch orientation preservation.
+  - Accessible-bounds rejection for truncated/overflowing/out-of-range layouts.
+out_of_scope:
+  - Real hardware execution, camera enumeration, recipe/inspection/ABI behavior, COM lifetime, callback generations.
+constraints:
+  - "Windows-only behavior; the portable suite must stay green and is not evidence for this change."
+  - "A Windows component test seam is frozen by the change contract at src/camera/uvc_windows/uvc_frame_convert.h: it accepts an already-locked buffer description (scanline0, signed pitch, width, height, native format, accessible byte count) and returns either an owned BGR8 cv::Mat or a documented camera failure. Tests include that header; they must not read production .cpp files."
+  - "Tests must supply synthetic buffer bytes and pitch; no hardware and no Media Foundation object is required."
+  - "Fixtures must be vertically asymmetric so TOP and BOTTOM are distinguishable."
+  - "Byte-order and range semantics are fixed, not free for the test to invent: the seam models Media Foundation native memory layouts. NativePixelFormat rgb24 and rgb32 use B,G,R byte order in memory (MF D3DFMT_R8G8B8 / X8R8G8B8); argb32 uses B,G,R,A memory order. NativePixelFormat yuy2/uyvy/nv12/i420/yv12 are 8-bit YUV where U=V=128 is neutral. Channel-order/range assertions must follow these definitions; a test that assumes R,G,B memory order for rgb24/rgb32 is a test defect."
+  - "Because rgba/bgra memory order is a byte-order definition rather than an inference, a channel-order test must use a fixture with distinct R, G, and B values and assert the resulting BGR triple, not only a neutral gray."
+  - "Do not assert a specific limited-versus-full YUV range unless the change contract fixes one; assert orientation, channel order, and structural neutrality (equal BGR channels for U=V=128) instead."
+interface_reference:
+  - "cvforwin::camera::CapturedFrame (BGR8, owned pixels, width/height/sequence metadata)"
+  - "cvforwin::camera::PixelFormat and camera failure values (camera_io/capture_failed)"
+  - "frozen seam header src/camera/uvc_windows/uvc_frame_convert.h: NativePixelFormat, Locked2DBufferView (scanline0, pitch, width, height, format, accessible_bytes, accessible_bytes_known), decode_locked_buffer_to_bgr8(view) -> core::Result<cv::Mat> BGR8"
+  - "cvforwin::core::{Status, ErrorCode, Result}"
+observable_behaviors:
+  - id: B1
+    behavior: "Given a top-down buffer (pitch > 0) whose top row is pattern A and bottom row is pattern B, the returned frame's first row equals A and last row equals B."
+  - id: B2
+    behavior: "Given a bottom-up buffer (pitch < 0) with the same visual content, the returned frame's first row equals A and last row equals B (no double flip)."
+  - id: B3
+    behavior: "The same orientation rule holds for packed RGB24, RGB32, and YUY2 inputs converted to BGR8."
+  - id: B4
+    behavior: "Rows with padding are decoded by pitch, not width; padding bytes never appear in the output."
+  - id: B5
+    behavior: "A buffer whose accessible length cannot contain every addressed row fails with camera_io/capture_failed and produces no frame."
+  - id: B6
+    behavior: "Dimension/pitch arithmetic that would overflow fails cleanly instead of reading out of range."
+boundary_cases:
+  - "1x1 packed image with positive and negative pitch."
+  - "Height 1 and width 1 edges for each packed format."
+  - "Accessible length exactly equal to the minimum required extent (accepted) versus one byte short (rejected)."
+  - "Padded row where width is not a multiple of 4."
+negative_cases:
+  - "Height/width zero or a null base pointer with a nonzero extent -> documented failure, no crash."
+  - "pitch magnitude smaller than one packed row -> documented failure."
+acceptance_criteria:
+  - "Portable build/test/format/static-analysis remain green."
+  - "New Windows component tests exist and are format-clean; their execution result is recorded honestly (Windows/CI or explicitly deferred)."
+allowed_context:
+  - .ai/project-contract.yaml
+  - .ai/changes/CVF-101.yaml
+  - .ai/test-briefs/CVF-101.yaml
+  - tests/windows/uvc/**
+  - tests/unit/** (developer test paths only if needed)
+  - CMakeLists.txt, CMakePresets.json
+  - "frozen headers (may #include, must not open .cpp files): src/camera/camera_backend.h, src/camera/captured_frame.h, src/camera/uvc_windows/uvc_frame_convert.h, src/core/{status,error,result}.h"
+forbidden_context:
+  - "any src/** .cpp implementation file"
+  - .ai/changes/** (other than CVF-101.yaml), .ai/reports/**, .ai/reviews/**
+  - "any diff, changed-file list, developer note, or root-cause description"
+allowed_test_paths:
+  - tests/windows/uvc/**
+  - tests/unit/**
+ownership_manifest: .ai/test-ownership.yaml
+evidence:
+  red_report: .ai/reports/CVF-101-test-red.yaml
+  verify_report: .ai/reports/CVF-101-test-verify.yaml
+notes: >-
+  RED must be honest: if the seam header does not exist yet, the compile failure is the RED
+  evidence. Do not fabricate Windows execution output on a Linux host.

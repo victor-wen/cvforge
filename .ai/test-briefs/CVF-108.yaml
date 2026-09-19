@@ -1,0 +1,90 @@
+schema_version: 1
+change_id: CVF-108
+program: cvforwin-hardening-1.1.0
+title: "Release 1.1.0 version, package, CI artifact, and documentation synchronization"
+kind: delivery-metadata-and-documentation
+brief_author: build-controller
+brief_is_code_blind: true
+authoring_note: >-
+  This brief describes only externally observable delivery metadata and documented behaviour. It
+  deliberately names no source file internals, no diff, and no root cause.
+
+objective: >-
+  Release 1.1.0 must be internally consistent everywhere it is observable: build metadata, staged
+  package and archive names, CI artifact names, the installed package's own version report, and the
+  documentation. Simultaneously the public C ABI must remain at version 1 with exactly five exported
+  symbols. A partially applied release bump must be detectable.
+
+observable_behaviors:
+  - id: OB-1
+    statement: >-
+      The build metadata declares product version 1.1.0, and that single declared version is the only
+      source of the product version string used by the packaging steps.
+  - id: OB-2
+    statement: >-
+      The staged package directory, the package archive, and the separate symbols archive are all
+      named with the 1.1.0 product version, as are the CI artifacts that publish them.
+  - id: OB-3
+    statement: >-
+      The installed package reports its own version as 1.1.0 to a consumer that reads the package's
+      metadata, so a consumer can tell which release it linked against.
+  - id: OB-4
+    statement: >-
+      The public C ABI version is still 1, and a caller that supplies an ABI version other than 1 is
+      still rejected as an ABI mismatch.
+  - id: OB-5
+    statement: >-
+      The library still exports exactly the five approved public symbols and nothing more.
+  - id: OB-6
+    statement: >-
+      Documentation describes the 1.1.0 names and paths, mentions the shipped example that demonstrates
+      the template-matching algorithm together with its asset and recipe, and describes the background
+      artifact retention behaviour.
+  - id: OB-7
+    statement: >-
+      Third-party license and notice material covers every statically linked component that the
+      product actually uses, including the image-codec component newly used by the algorithm path.
+
+inputs:
+  - The repository's build metadata files: the top-level build definition, the preset definitions, the
+    packaging CMake modules, the dependency manifest, and the CI workflow definitions.
+  - The documentation set and the license/notice material.
+  - The installed-package layout produced by the packaging step (package directory, archives, and the
+    package's own metadata file), when a Windows station or package build is available.
+
+outputs:
+  - A pass/fail assertion per observable behavior.
+  - On failure, a message that names the specific file and the value that is inconsistent.
+
+boundaries:
+  - The product version string must be exactly "1.1.0". "1.1", "1.1.0.0", "1.10.0", and "2.0.0" are all
+    failures for OB-1..OB-3.
+  - The ABI version must remain exactly 1. Moving it to 2 is a failure, not a release improvement.
+  - The export set must remain exactly five symbols. Four or six is a failure.
+  - A historical mention of an earlier release (for example a changelog entry, an archive path in
+    old release notes, or the prior program's archived material under .ai/) is legitimate and must NOT
+    be reported as an inconsistency. Only references that present the earlier version as the current
+    product version fail.
+  - The dependency manifest's own package version field is part of the release metadata and must match
+    the product version.
+  - Documentation that quotes a concrete staged path or artifact name must quote a 1.1.0 path; a
+    documentation file that still shows a 1.0.0 staged path or artifact name as the current one fails.
+  - Absence of a required file is a failure, never a skip.
+  - An assertion may not be satisfied by matching a substring that a superset version string would also
+    satisfy; "1.1.0" must not be accepted because "1.1.0-something-else" matched.
+
+test_scope:
+  allowed_paths:
+    - tests/unit/**
+  forbidden:
+    - Editing the hash-pinned independent suites already recorded in the test ownership manifest.
+    - Editing any source file under the production source or public header directories.
+  independence_note: >-
+    Author the portable independent check from this brief alone. It must be observable as RED before the
+    release metadata is synchronized, and must not be derived from the implementation diff.
+
+environment:
+  portable: "WSL GCC via the debug preset and CTest; this is where the independent check runs."
+  windows: "An installed package and a clean package consumer are the only place the package-level
+    behaviors (OB-2, OB-3) can be fully exercised; record those as a deferred platform when no Windows
+    package build is available in the author environment."

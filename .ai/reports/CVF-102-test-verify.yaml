@@ -1,0 +1,192 @@
+schema_version: 1
+change_id: CVF-102
+phase: VERIFY
+verifier: test-engineer
+recorded_at: 2026-09-18
+host: Linux (WSL); native Windows MSVC execution deferred to windows-tests-quality CI
+
+summary: >-
+  Independent VERIFY of the frozen UVC worker / COM+Media Foundation lifetime seam.
+  The frozen seam exists and matches the CVF-102 frozen_test_seam exactly: the
+  UvcWorkerSnapshot struct carries the eight frozen fields with the frozen widths
+  and the accessor is UvcWorkerSnapshot UvcCameraBackend::worker_snapshot() const
+  noexcept in src/camera/uvc_windows/uvc_backend.h. The implementation isolates
+  COM and Media Foundation on one application-created worker thread:
+  CoInitializeEx(nullptr, COINIT_MULTITHREADED) and MFStartup run in the worker
+  start hook, and MFShutdown then CoUninitialize run in reverse order in the
+  worker teardown hook before join. The CMake target cvf102_windows_uvc_tests is
+  registered only under WIN32 AND CVFORWIN_BUILD_TESTS AND
+  CVFORWIN_BUILD_TEST_BACKENDS; windows-msvc-release keeps TEST_BACKENDS=OFF and
+  windows-msvc-tests sets both ON, so the target never exists in the release or
+  hosted no-camera jobs. The owned test compiles -D_WIN32 -std=c++20
+  -Wall -Wextra -Werror -fsyntax-only against the real include tree with exit 0.
+  The portable canonical gates are green (284/284). One requirement-derived
+  coverage gap was closed in this session (see amendment); no assertion was
+  removed, skipped, disabled, or weakened. No implementation defect was found
+  against the contract.
+
+frozen_seam_check:
+  authority: .ai/changes/CVF-102.yaml#frozen_test_seam
+  header: src/camera/uvc_windows/uvc_backend.h
+  struct: UvcWorkerSnapshot
+  fields_match: true
+  fields:
+    - com_init_count: "std::uint64_t"
+    - com_uninit_count: "std::uint64_t"
+    - mf_startup_count: "std::uint64_t"
+    - mf_shutdown_count: "std::uint64_t"
+    - commands_marshalled: "std::uint64_t"
+    - worker_thread_id: "std::uint32_t"
+    - last_caller_thread_id: "std::uint32_t"
+    - worker_running: "bool"
+  accessor_match: "UvcWorkerSnapshot worker_snapshot() const noexcept"
+  result: MATCH
+
+worker_isolation_check:
+  worker_header: src/camera/uvc_windows/uvc_command_worker.h
+  start_hook: "CoInitializeEx(nullptr, COINIT_MULTITHREADED) then MFStartup(MF_VERSION, MFSTARTUP_LITE)"
+  teardown_hook: "teardown_stream, callback release, MFShutdown, CoUninitialize (reverse order)"
+  caller_thread_assumption: "none; record_caller() only stores GetCurrentThreadId"
+  result: ISOLATED
+
+cmake_gating_check:
+  target: cvf102_windows_uvc_tests
+  gate: "if(WIN32 AND CVFORWIN_BUILD_TESTS AND CVFORWIN_BUILD_TEST_BACKENDS)"
+  registered_via: catch_discover_tests
+  windows_msvc_release:
+    CVFORWIN_BUILD_TESTS: ON
+    CVFORWIN_BUILD_TEST_BACKENDS: OFF
+  windows_msvc_tests:
+    CVFORWIN_BUILD_TESTS: ON
+    CVFORWIN_BUILD_TEST_BACKENDS: ON
+  linux_configure_target_count: 0
+  result: CORRECT
+
+coverage:
+  observable_behaviors:
+    - id: B1
+      covered: true
+      case: "CVF-102 B1: a no-COM caller thread completes every operation without apartment failure"
+    - id: B2
+      covered: true
+      case: "CVF-102 B2: an STA caller thread completes every operation without apartment failure"
+    - id: B3
+      covered: true
+      cases:
+        - "CVF-102 B3: open with an identity that resolves nothing fails camera_not_found with no fallback"
+        - "CVF-102 B3: identity resolution is exact and never falls back to the first candidate"
+    - id: B4
+      covered: true
+      cases:
+        - "CVF-102 B4: close before any open and repeated close are idempotent and balanced"
+        - "CVF-102 B4: an open followed by destruction without close leaves no observable worker"
+    - id: B5
+      covered: true
+      case: "CVF-102 B5: a failed startup leaves no running worker and balances COM/MF lifetime"
+    - id: B6
+      covered: true
+      case: "CVF-102 B6: an already-expired deadline fails immediately for every operation"
+  boundary_cases:
+    - id: zero_devices
+      covered: true
+      case: "CVF-102 boundary: with zero enumerable devices enumerate succeeds empty and open fails"
+    - id: close_before_open
+      covered: true
+      case: "CVF-102 B4: close before any open and repeated close are idempotent and balanced"
+    - id: destructor_without_close
+      covered: true
+      case: "CVF-102 B4: an open followed by destruction without close leaves no observable worker"
+  negative_cases:
+    - id: capture_before_open
+      covered: true
+      case: "CVF-102 negative: capture and reconnect before open fail without crashing"
+  marshalling:
+    covered: true
+    case: "CVF-102: every command is marshalled to the owned worker thread"
+  windows_off_nonempty:
+    guarded_by: "#if defined(_WIN32)"
+    portable_effect: "empty translation unit; portable suite unaffected"
+
+verify_phase_amendment:
+  owner: test-engineer
+  reason: >-
+    The brief in_scope requires every camera backend operation to be exercised from
+    a thread with no COM initialization and from an STA thread, but B1/B2 drove
+    only enumerate and close and the marshalling case only enumerate. Requirement-derived
+    edge cases were added; no assertion was removed, skipped, disabled, or weakened.
+  added:
+    - "exercise_apartment now drives open, capture, and reconnect in addition to enumerate and close on the caller thread; B1/B2 assert each fails with a documented camera failure (camera_not_found or camera_io) rather than an apartment failure."
+    - "the marshalling case asserts commands_marshalled strictly increases across enumerate, open, capture, and reconnect with worker_thread_id != last_caller_thread_id after each."
+  previous_test_sha256: ce2cc80ee41e7cf5579dd4cf6c7a46f29eaa066179912ab46beb54e195562109
+  final_test_sha256: 81688985d11af7840e46e748bf489d0a7141c0d49d460fbc1fd535149e84203a
+  manifest_note_updated: true
+  other_manifest_sections_unchanged: true
+
+assertion_integrity:
+  skip_macros: 0
+  disabled_macros: 0
+  hidden_tags: 0
+  mayfail_tags: 0
+  trivial_true_assertions: 0
+  test_cases: 11
+  sections: 8
+  check_macros: 53
+  require_macros: 19
+  result: "no test skipped, disabled, or weakened"
+
+commands:
+  - command: >-
+      g++ -D_WIN32 -std=c++20 -Wall -Wextra -Werror -fsyntax-only
+      -isystem <scratch Win OS stubs> -I<src> -I<include> -I<tests>
+      -isystem <opencv4> -isystem <vcpkg include>
+      tests/windows/uvc/cvf102_uvc_worker_lifecycle_test.cpp
+    exit_code: 0
+    result: PASS
+    observed: "real frozen seam and core headers compile clean on _WIN32; Windows OS stub provides only HRESULT/CoInitializeEx/CoUninitialize"
+  - command: "clang-format --style=file:.clang-format --dry-run --Werror tests/windows/uvc/cvf102_uvc_worker_lifecycle_test.cpp"
+    exit_code: 0
+    result: PASS
+    observed: "no formatting violations"
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    result: PASS
+    observed: "Configuring done; Generating done"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    result: PASS
+    observed: "ninja: no work to do (Windows target gated out on Linux)"
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    result: PASS
+    counts: "passed=284, failed=0, skipped=0"
+    observed: "100% tests passed, 0 tests failed out of 284"
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    result: PASS
+    observed: "format-check passed: 90 file(s) conform to .clang-format"
+  - command: "bash .ai/validation/cvf102-test-engineer-final-check.sh"
+    exit_code: 0
+    result: PASS
+    observed: "YAML parse OK; ownership hash match; cvf102 target in combined gate"
+
+windows_execution:
+  performed: false
+  reason: "no Windows host in this session; native MSVC evidence is deferred to the windows-tests-quality CI workflow (windows-msvc-tests preset) and is not claimed here"
+
+hashes:
+  test_file:
+    path: tests/windows/uvc/cvf102_uvc_worker_lifecycle_test.cpp
+    sha256: 81688985d11af7840e46e748bf489d0a7141c0d49d460fbc1fd535149e84203a
+  ownership_manifest:
+    path: .ai/test-ownership.yaml
+    sha256: 58041894a276dd7503576f1eeafd30f1c2340055282a311d7bdc32ece3b2e928
+  manifest_match: true
+  independence_violations: []
+
+defects: []
+blockers: []
+
+notes:
+  - "The Windows suite is compiled but not executed on this Linux host; the portable 284/284 green result is explicitly not evidence for this Windows-only change."
+  - "B1/B2 assert enumerate is empty, which is the documented zero-device behavior on a hosted no-camera Windows runner; that is the intended CI environment."
+  - "Author-phase RED evidence remains .ai/reports/CVF-102-test-red.yaml; this report records the post-implementation verify evidence only."

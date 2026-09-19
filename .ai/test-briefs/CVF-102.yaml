@@ -1,0 +1,57 @@
+schema_version: 1
+change_id: CVF-102
+program: cvforwin-hardening-1.1.0
+target: "UVC backend independence from host COM apartment and Media Foundation lifetime"
+in_scope:
+  - Calling every camera backend operation from a thread with no COM initialization.
+  - Calling every camera backend operation from an STA-initialized thread.
+  - Balanced Media Foundation startup/shutdown and idempotent close.
+out_of_scope:
+  - Frame pixel content, callback generations, recipe/inspection/ABI behavior.
+constraints:
+  - "Windows-only; no physical camera required (enumeration may return zero devices)."
+  - "Tests may drive the backend through the frozen camera backend header only."
+  - "A Windows component test seam is frozen by the change contract: UvcCameraBackend::worker_snapshot() returns a UvcWorkerSnapshot (com_init_count, com_uninit_count, mf_startup_count, mf_shutdown_count, commands_marshalled, worker_thread_id, last_caller_thread_id, worker_running). Tests include src/camera/uvc_windows/uvc_backend.h; they must not read production .cpp files."
+  - "Tests must not require a real device; enumerating zero devices and using failing opens is enough to observe worker/apartment behavior."
+interface_reference:
+  - "cvforwin::camera::ICameraBackend (enumerate/open/capture/reconnect/close, backend_key \"uvc\")"
+  - "cvforwin::camera::UvcCameraBackend::worker_snapshot() -> UvcWorkerSnapshot (see change contract frozen_test_seam)"
+  - "cvforwin::core::{Deadline, Result, Status, ErrorCode}"
+observable_behaviors:
+  - id: B1
+    behavior: "construct + enumerate + close called from a thread that never called CoInitializeEx completes without a COM apartment failure."
+  - id: B2
+    behavior: "the same sequence from a thread that called CoInitializeEx as STA completes without a COM apartment failure."
+  - id: B3
+    behavior: "open with a selector that resolves nothing fails with camera_not_found; with an ambiguous selector fails with camera_identity_ambiguous; never a first-device fallback."
+  - id: B4
+    behavior: "close is idempotent: repeated close calls succeed and leave no live worker/thread after destruction."
+  - id: B5
+    behavior: "a startup failure is reported as camera_io and leaves no leaked worker or unbalanced shutdown."
+  - id: B6
+    behavior: "each operation respects the supplied deadline; an already-expired deadline fails immediately."
+boundary_cases:
+  - "Zero enumerable devices: enumerate succeeds empty; open fails camera_not_found."
+  - "close before any open; destructor without close."
+  - "Open followed immediately by destruction without an explicit close."
+negative_cases:
+  - "Calling capture before open -> documented camera failure, no crash."
+acceptance_criteria:
+  - "Portable suite remains green; Windows component tests exist and are format-clean with honest execution status."
+allowed_context:
+  - .ai/project-contract.yaml
+  - .ai/changes/CVF-102.yaml
+  - .ai/test-briefs/CVF-102.yaml
+  - tests/windows/uvc/**
+  - CMakeLists.txt
+  - "frozen headers (may #include, must not open .cpp files): src/camera/camera_backend.h, src/camera/captured_frame.h, src/core/{status,error,result,deadline}.h"
+forbidden_context:
+  - "any src/** .cpp implementation file"
+  - .ai/changes/** (other than CVF-102.yaml), .ai/reports/**, .ai/reviews/**
+  - "any diff, changed-file list, developer note, or root-cause description"
+allowed_test_paths:
+  - tests/windows/uvc/**
+ownership_manifest: .ai/test-ownership.yaml
+evidence:
+  red_report: .ai/reports/CVF-102-test-red.yaml
+  verify_report: .ai/reports/CVF-102-test-verify.yaml

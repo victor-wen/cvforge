@@ -1,0 +1,29 @@
+format: 1
+change_id: CVF-105
+script_report: /home/administrator/c_cpp_project/cvforwin/.ai/reports/CVF-105-quality.json
+script_verdict: PASS
+script_exit_code: 0
+candidate_sha: de167ba1c84e3b9354a16aaf16ab7bed14316d2a
+plan_sha256: 107d7321371eafade9399c41e9a715775730d6c1d86ce58ca299c41a95a4907f
+commands_checked: 6
+test_counts:
+  passed: 836
+  failed: 0
+  skipped: 0
+failed_command_ids: []
+analysis: >-
+  Deterministic gate PASS at HEAD de167ba1c84e3b9354a16aaf16ab7bed14316d2a (CVF-104 delivery; the CVF-105
+  changes are the uncommitted worktree under test). All six canonical WSL commands passed: configure, build,
+  ctest (418/418), format (115 files), clang static analysis (24 files), sanitizer suite (418/418) - 836 passed
+  / 0 failed / 0 skipped aggregate. The ownership manifest sha256
+  26ad8d3c9445cec424532cd0b06a0421d951adc653ea54a3c8baaf621ff8b3c9 reconciles with zero mismatches across the
+  eight independent CVF-105 files; the amended CVF-004 file is also pinned and consistent. The plan pins the
+  approved 1.1.0 contract, the CVF-105 change contract (with the canonicalize_hex4 / serialize_result_payload /
+  output_text seams and the build-wiring scope), the ownership manifest, workflow state, and the reviewer
+  verdict 88acb2206c5a7deae3dc568bd728fd28c6342ecb3855c20fcbdba0fae34740c1 (PASS_WITH_FINDINGS, zero blocking
+  findings, six non-blocking items recorded for controller follow-up). CVF-105 is portable config/C-API/
+  diagnostics/runtime work; no Windows-specific behavior is claimed here.
+next_action: >-
+  Commit only the CVF-105 source/test/build files at this scope, push to main, and wait for the windows-2022 CI
+  jobs to succeed at the new SHA. Then freeze the batch-2 candidate (CVF-104 + CVF-105) and run the batch-level
+  quality gate plus release review.

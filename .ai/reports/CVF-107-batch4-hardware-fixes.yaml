@@ -1,0 +1,141 @@
+schema_version: 1
+change_id: CVF-107
+task: batch-4-release-review-hardware-fixes
+owner: test-engineer
+recorded_at: 2026-09-19
+source_review: .ai/reports/batch-4-source-a-release.yaml
+scope:
+  owned_files_changed:
+    - tests/hardware/uvc_smoke.cpp
+    - docs/hardware-uvc.md
+    - .ai/test-ownership.yaml
+  production_files_touched: []
+  protected_paths_untouched:
+    - src/**
+    - include/**
+    - .github/**
+    - .ai/project-contract.yaml
+    - CMakeLists.txt
+edit_mechanism: >-
+  The interactive editor allowlist matches only nested test paths
+  (`**/tests/**`), so the owned test/doc files were edited with the
+  whitelisted .ai/validation/cvf107-batch4-fixes.sh helper (anchored,
+  single-match Python replacements; it aborts without writing on any anchor
+  mismatch and asserts it never touches a protected path). .ai/test-ownership.yaml
+  was edited in place directly. The helper and a write-permission probe
+  (.ai/validation/cvf107-batch4-probe.txt) remain under .ai/validation as audit
+  tooling; neither is a product artifact.
+findings:
+  - id: B4A-01
+    title: mandatory colour check could be satisfied by the neutral spread control
+    status: FIXED
+    requirement: >-
+      A required colour check must fail closed when the saturated CVF-COLOR-1
+      target is not actually tested; the neutral control is never a substitute.
+    changes:
+      tests_hardware_uvc_smoke_cpp:
+        - "1109-1146 run_color_case: added the required+!CVF_HW_COLOR_TEST fail-closed gate (1116-1123), the non-required skip gate (1125-1128), and the required+CVF_HW_COLOR_EXPECT=neutral fail-closed gate (1137-1146); the gate now reads the CVF_HW_COLOR_TEST flag before any expectation is honoured"
+        - "1168-1170 comment in the neutral branch stating the neutral spread control is a non-required control and never a substitute for the positive saturated target"
+        - "93-95 header colour procedure note stating the same"
+    failure_message_names_flags: true
+
+  - id: B4A-02
+    title: orientation positive check and symmetric control were required on one frame
+    status: FIXED
+    requirement: >-
+      The positive asymmetric-target checks and the symmetric negative control
+      must not be required to hold on one captured frame; each runs on its own
+      capture and neither invalidates the other when only one target is set up.
+    changes:
+      tests_hardware_uvc_smoke_cpp:
+        - "1025-1100 run_orientation_case rewritten: the positive checks capture and evaluate one frame (1051-1073) and the symmetric control captures and evaluates its own separate frame at control time (1075-1099), with no early return between them; each report.check is independent"
+        - "69-72 header orientation procedure note: the control is captured/evaluated separately and needs its own run with a vertically symmetric card"
+      docs_hardware_uvc_md:
+        - "121-126 section 5: the symmetric control is a separate, non-required negative check evaluated on its own captured frame and needs its own run with a vertically symmetric card; it is never a substitute for the positive target"
+    regression_invariants_preserved: >-
+      CMake wiring untouched; the developer wiring tests #451-#453 still pin
+      WIN32 + opt-in, never-registered-with-CTest, and no hosted CI job.
+
+  - id: B4A-03
+    title: recorded evidence could not prove which requirement/control flags were set
+    status: FIXED
+    requirement: >-
+      Every relevant CVF_HW_* requirement/control flag in effect is recorded in
+      the release-evidence block, and each mandatory-check failure message names
+      the specific flags that were set.
+    changes:
+      tests_hardware_uvc_smoke_cpp:
+        - "424-435 EvidenceRecord: added orientation_test, orientation_min_contrast, orientation_symmetric_control, color_test, color_expect, color_min_dominance, color_min_level, color_max_spread, color_tolerance, color_reference_configured, unplug_test, expect_zero_devices"
+        - "498-509 evidence_text(): emit the twelve added fields"
+        - "712-734 added orientation_flag_state() and color_flag_state() helpers that render the flags in effect"
+        - "1475-1495 run_suite(): populate the added evidence fields from the live environment"
+        - "1038-1042 orientation mandatory failure message now appends the orientation flag state"
+        - "1117-1121 and 1140-1144 colour mandatory failure messages now append the colour flag state"
+      docs_hardware_uvc_md:
+        - "90-92 section 4: flags in effect are recorded and named in mandatory-failure messages"
+        - "225-236 section 10 example block: added the orientation/colour/unplug/zero-device flag lines"
+        - "258-264 section 10: documents that the block records the flags and that mandatory-failure messages name them"
+hashes:
+  algorithm: sha256
+  tests/hardware/uvc_smoke.cpp: f72263aa0eaba72004aeabc610a0bd2b9f869c4aa9dbc44b515906af3d941f30
+  docs/hardware-uvc.md: 42276204b8583ef05f357f92594ce2ad1a54bb3f3361d19af3d41898e6b6a987
+  .ai/test-ownership.yaml: 42237619e7be676e9a4d7d1e709f0c3f1fb63838b19f990843ebaac7d2e1a349
+  previous_uvc_smoke_sha256: 5737fb74e5e8d61a3d2e47ae714b968a3d3cbd39cfb9fe927e0a42f20e0d413f
+  manifest_entries_updated:
+    - "CVF-007 / tests/hardware/uvc_smoke.cpp"
+    - "CVF-107 / tests/hardware/uvc_smoke.cpp"
+commands:
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    via: ".ai/validation/cvf107-test-engineer-author.sh build"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    via: ".ai/validation/cvf107-test-engineer-author.sh build"
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "485/485 passed, 0 failed, 0 skipped"
+    via: ".ai/validation/cvf107-test-engineer-author.sh build"
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    detail: "format-check passed: 127 file(s) conform to .clang-format"
+    via: ".ai/validation/cvf107-test-engineer-author.sh build"
+  - command: "clang-format --dry-run --Werror tests/hardware/uvc_smoke.cpp"
+    exit_code: 0
+    via: ".ai/validation/cvf107-test-engineer-author.sh format"
+  - command: "g++ -std=c++20 -Wall -Wextra -Werror -fsyntax-only -D_WIN32 (throwaway Windows/MF/COM stubs)"
+    exit_code: 0
+    via: ".ai/validation/cvf107-test-engineer-author.sh stub"
+  - command: "g++ -std=c++20 -Wall -Wextra -Werror -fsyntax-only tests/hardware/uvc_smoke.cpp (no _WIN32, empty TU)"
+    exit_code: 0
+    via: ".ai/validation/cvf107-test-engineer-author.sh stub"
+  - command: "ctest --preset wsl-gcc-debug -N -R uvc_smoke"
+    exit_code: 0
+    detail: >-
+      3 matching tests, all developer-owned wiring regression cases (#451
+      "add_executable(cvf_hw_uvc_smoke) is inside the opt-in Windows gate", #452
+      "cvf_hw_uvc_smoke is never registered with CTest", #453 "cvf_hw_uvc_smoke
+      never joins a hosted no-camera CI job"); the hardware executable itself is
+      not registered with CTest
+  - command: ".ai/validation/cvf107-test-engineer-author.sh hash (manifest audit)"
+    exit_code: 0
+    counts: "manifest_files_checked=70 mismatches=0"
+ctest_counts:
+  preset: wsl-gcc-debug
+  total: 485
+  passed: 485
+  failed: 0
+  skipped: 0
+  prior_total: 485
+hardware_execution:
+  status: UNVERIFIED
+  reason: >-
+    No Windows UVC station on this host. The Windows-only translation unit is an
+    empty TU on WSL; execution evidence remains deferred to a designated Windows
+    10/11 x64 station and is not claimed here.
+notes: >-
+  No assertion was removed, weakened, disabled, or skipped. B4A-01/02/03 are
+  strictly stronger: the colour and orientation mandatory gates now fail closed,
+  the orientation control is evaluated on its own capture, and the evidence block
+  and mandatory-failure messages are self-evidencing. The portable suite stays
+  green at 485/485 and format-check passes on 127 files. The hardware target's
+  wiring regression invariants are untouched (CMakeLists.txt not modified).

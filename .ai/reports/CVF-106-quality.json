@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "change_id": "CVF-106",
+  "verdict": "PASS",
+  "git_head": "b4256e7e108e0631fb10622e08c9fe5e0823616c",
+  "git_head_after": "b4256e7e108e0631fb10622e08c9fe5e0823616c",
+  "worktree_fingerprint": "25eabbde6a1fb03ebf5349bf690da0f645f2b33005845d0ddfd8d711b2850580",
+  "worktree_fingerprint_after": "25eabbde6a1fb03ebf5349bf690da0f645f2b33005845d0ddfd8d711b2850580",
+  "plan_sha256": "810a7c678509cd51ca3b897b41c676df0467a8ef372dd2a2bcca5b85eb933f71",
+  "required_platforms": [
+    "wsl-portable"
+  ],
+  "commands": [
+    {
+      "platform": "wsl-portable",
+      "id": "wsl_configure",
+      "kind": "build",
+      "command": "cmake --preset wsl-gcc-debug",
+      "started": "2026-09-19T00:23:40.752Z",
+      "exit_code": 0,
+      "verdict": "PASS",
+      "counts": null,
+      "summary": "Preset CMake variables:\n\n  CMAKE_BUILD_TYPE=\"Debug\"\n  CMAKE_CXX_COMPILER=\"g++\"\n  CMAKE_C_COMPILER=\"gcc\"\n  CMAKE_EXPORT_COMPILE_COMMANDS=\"ON\"\n  CMAKE_TOOLCHAIN_FILE:FILEPATH=\"/home/administrator/vcpkg/scripts/buildsystems/vcpkg.cmake\"\n  CVFORWIN_BUILD_TESTS=\"ON\"\n  CVFORWIN_WARNINGS_AS_ERRORS=\"ON\"\n  VCPKG_HOST_TRIPLET=\"x64-linux\"\n  VCPKG_MANIFEST_FEATURES=\"test\"\n  VCPKG_TARGET_TRIPLET=\"x64-linux\"\n\nPreset environment variables:\n\n  VCPKG_MAX_CONCURRENCY=\"6\"\n\n-- Running vcpkg install\nwarning: attempting to set builtin-baseline in vcpkg.json while overriding the default-registry in vcpkg-configuration.json.\nthe default-registry from vcpkg-configuration.json will be used.\nDetecting compiler hash for triplet x64-linux...\nCompiler found: /usr/bin/c++\nThe following packages are already installed:\n    catch2:x64-linux@3.16.0\n  * fmt:x64-linux@12.2.0#1\n  * libjpeg-turbo:x64-linux@3.2.0\n  * libpng:x64-linux@1.6.58\n    nlohmann-json:x64-linux@3.12.0#2\n    opencv4[core,thread,png,jpeg,fs]:x64-linux@4.12.0#9\n    spdlog[core,tz-offset,fmt]:x64-linux@1.17.0#1\n  * vcpkg-cmake:x64-linux@2025-08-07\n  * vcpkg-cmake-config:x64-linux@2026-07-21\n  * vcpkg-get-python-packages:x64-linux@2025-04-05\n  * zlib:x64-linux@1.3.2#2\nThe package nlohmann-json provides CMake targets:\r\n\r\n    find_package(nlohmann_json CONFIG REQUIRED)\r\n    target_link_libraries(main PRIVATE nlohmann_json::nlohmann_json)\r\n\r\nThe package nlohmann-json can be configured to not provide implicit conversions via a custom triplet file:\r\n\r\n    set(nlohmann-json_IMPLICIT_CONVERSIONS OFF)\r\n\r\nFor more information, see the docs here:\r\n    \r\n    https://json.nlohmann.me/api/macros/json_use_implicit_conversions/\r\n\nopencv4 is compatible with built-in CMake variables. In case of multiple OpenCV version installed, set OpenCV_ROOT *before* the find_package call:\n\n    set(OpenCV_ROOT \"${VCPKG_INSTALLED_DIR}/x64-linux/share/opencv4\")\n    find_package(OpenCV REQUIRED)\n\nThe package spdlog provides CMake targets:\n\n    find_package(spdlog CONFIG REQUIRED)\n    target_link_libraries(main PRIVATE spdlog::spdlog)\n\n    # Or use the header-only version\n    find_package(spdlog CONFIG REQUIRED)\n    target_link_libraries(main PRIVATE spdlog::spdlog_header_only)\n\ncatch2 provides CMake targets:\n\n  # this is heuristically generated, and may not be correct\n  find_package(Catch2 CONFIG REQUIRED)\n  target_link_libraries(main PRIVATE Catch2::Catch2 Catch2::Catch2WithMain)\n\ncatch2 provides pkg-config modules:\n\n  # A modern, C++-native test framework for C++14 and above (links in default main)\n  catch2-with-main\n\n  # A modern, C++-native, test framework for C++14 and above\n  catch2\n\nAll requested installations completed successfully in: 168 us\n-- Running vcpkg install - done\n-- cvforwin: compiler GNU 13.3.0\n-- cvforwin: build type Debug\n-- cvforwin: format-check uses /usr/bin/clang-format\n-- Configuring done (17.7s)\n-- Generating done (0.0s)\n-- Build files have been written to: /home/administrator/c_cpp_project/cvforwin/build/wsl-gcc-debug\n",
+      "log": "/tmp/opencode-quality/ee5763d5f69076a8/CVF-106/wsl_configure.log",
+      "timed_out": false
+    },
+    {
+      "platform": "wsl-portable",
+      "id": "wsl_build",
+      "kind": "build",
+      "command": "cmake --build --preset wsl-gcc-debug --parallel",
+      "started": "2026-09-19T00:23:58.846Z",
+      "exit_code": 0,
+      "verdict": "PASS",
+      "counts": null,
+      "summary": "[0/2] Re-checking globbed directories...\nninja: no work to do.\n",
+      "log": "/tmp/opencode-quality/ee5763d5f69076a8/CVF-106/wsl_build.log",
+      "timed_out": false
+    },
+    {
+      "platform": "wsl-portable",
+      "id": "wsl_test",
+      "kind": "test",
+      "command": "ctest --preset wsl-gcc-debug --output-on-failure",
+      "started": "2026-09-19T00:23:58.888Z",
+      "exit_code": 0,
+      "verdict": "PASS",
+      "counts": {
+        "passed": 447,
+        "failed": 0,
+        "skipped": 0,
+        "total": 447
+      },
+      "summary": "ut ...........................................................................   Passed    0.01 sec\n        Start 437: CVF-106 B7 reload swaps to a new template only after a successful candidate\n437/447 Test #437: CVF-106 B7 reload swaps to a new template only after a successful candidate .......................................................................   Passed    0.01 sec\n        Start 438: CVF-106 B8 example.threshold keeps its observable output through the lifecycle\n438/447 Test #438: CVF-106 B8 example.threshold keeps its observable output through the lifecycle ....................................................................   Passed    0.01 sec\n        Start 439: CVF-106 developer: an injected camera override is authoritative for descriptor selection\n439/447 Test #439: CVF-106 developer: an injected camera override is authoritative for descriptor selection ..........................................................   Passed    0.01 sec\n        Start 440: CVF-106 developer: template.match golden image match within tolerance\n440/447 Test #440: CVF-106 developer: template.match golden image match within tolerance .............................................................................   Passed    0.01 sec\n        Start 441: CVF-106 developer: template.match parameter validation\n441/447 Test #441: CVF-106 developer: template.match parameter validation ............................................................................................   Passed    0.00 sec\n        Start 442: CVF-106 developer: the shipped example recipe and asset load and match\n442/447 Test #442: CVF-106 developer: the shipped example recipe and asset load and match ............................................................................   Passed    0.00 sec\n        Start 443: cvf.abi.c11_surface\n443/447 Test #443: cvf.abi.c11_surface ...............................................................................................................................   Passed    0.00 sec\n        Start 444: cvf.abi.runtime\n444/447 Test #444: cvf.abi.runtime ...................................................................................................................................   Passed    0.00 sec\n        Start 445: cvf.abi.cpp20_include\n445/447 Test #445: cvf.abi.cpp20_include .............................................................................................................................   Passed    0.00 sec\n        Start 446: cvf.abi.header_isolation\n446/447 Test #446: cvf.abi.header_isolation ..........................................................................................................................   Passed    0.00 sec\n        Start 447: cvf006.lifecycle\n447/447 Test #447: cvf006.lifecycle ..................................................................................................................................   Passed    0.02 sec\n\n100% tests passed, 0 tests failed out of 447\n\nTotal Test time (real) =  11.73 sec\n",
+      "log": "/tmp/opencode-quality/ee5763d5f69076a8/CVF-106/wsl_test.log",
+      "timed_out": false
+    },
+    {
+      "platform": "wsl-portable",
+      "id": "wsl_format",
+      "kind": "format",
+      "command": "cmake --build --preset wsl-gcc-debug --target format-check",
+      "started": "2026-09-19T00:24:11.885Z",
+      "exit_code": 0,
+      "verdict": "PASS",
+      "counts": null,
+      "summary": "[0/2] Re-checking globbed directories...\n[1/1] Checking clang-format conformance (tests/abi and tests/camera excluded: test-owner files)\n-- format-check passed: 123 file(s) conform to .clang-format\n",
+      "log": "/tmp/opencode-quality/ee5763d5f69076a8/CVF-106/wsl_format.log",
+      "timed_out": false
+    },
+    {
+      "platform": "wsl-portable",
+      "id": "wsl_static",
+      "kind": "static",
+      "command": "cmake --preset wsl-clang-analysis && cmake --build --preset wsl-clang-analysis --target static-analysis --parallel",
+      "started": "2026-09-19T00:24:17.210Z",
+      "exit_code": 0,
+      "verdict": "PASS",
+      "counts": null,
+      "summary": "ildsystems/vcpkg.cmake\"\n  CVFORWIN_BUILD_TESTS=\"ON\"\n  CVFORWIN_ENABLE_CLANG_TIDY=\"OFF\"\n  CVFORWIN_WARNINGS_AS_ERRORS=\"ON\"\n  VCPKG_HOST_TRIPLET=\"x64-linux\"\n  VCPKG_MANIFEST_FEATURES=\"test\"\n  VCPKG_TARGET_TRIPLET=\"x64-linux\"\n\nPreset environment variables:\n\n  VCPKG_MAX_CONCURRENCY=\"6\"\n\n-- Running vcpkg install\nwarning: attempting to set builtin-baseline in vcpkg.json while overriding the default-registry in vcpkg-configuration.json.\nthe default-registry from vcpkg-configuration.json will be used.\nDetecting compiler hash for triplet x64-linux...\nCompiler found: /usr/bin/c++\nThe following packages are already installed:\n    catch2:x64-linux@3.16.0\n  * fmt:x64-linux@12.2.0#1\n  * libjpeg-turbo:x64-linux@3.2.0\n  * libpng:x64-linux@1.6.58\n    nlohmann-json:x64-linux@3.12.0#2\n    opencv4[core,thread,png,jpeg,fs]:x64-linux@4.12.0#9\n    spdlog[core,tz-offset,fmt]:x64-linux@1.17.0#1\n  * vcpkg-cmake:x64-linux@2025-08-07\n  * vcpkg-cmake-config:x64-linux@2026-07-21\n  * vcpkg-get-python-packages:x64-linux@2025-04-05\n  * zlib:x64-linux@1.3.2#2\nThe package nlohmann-json provides CMake targets:\r\n\r\n    find_package(nlohmann_json CONFIG REQUIRED)\r\n    target_link_libraries(main PRIVATE nlohmann_json::nlohmann_json)\r\n\r\nThe package nlohmann-json can be configured to not provide implicit conversions via a custom triplet file:\r\n\r\n    set(nlohmann-json_IMPLICIT_CONVERSIONS OFF)\r\n\r\nFor more information, see the docs here:\r\n    \r\n    https://json.nlohmann.me/api/macros/json_use_implicit_conversions/\r\n\nopencv4 is compatible with built-in CMake variables. In case of multiple OpenCV version installed, set OpenCV_ROOT *before* the find_package call:\n\n    set(OpenCV_ROOT \"${VCPKG_INSTALLED_DIR}/x64-linux/share/opencv4\")\n    find_package(OpenCV REQUIRED)\n\nThe package spdlog provides CMake targets:\n\n    find_package(spdlog CONFIG REQUIRED)\n    target_link_libraries(main PRIVATE spdlog::spdlog)\n\n    # Or use the header-only version\n    find_package(spdlog CONFIG REQUIRED)\n    target_link_libraries(main PRIVATE spdlog::spdlog_header_only)\n\ncatch2 provides CMake targets:\n\n  # this is heuristically generated, and may not be correct\n  find_package(Catch2 CONFIG REQUIRED)\n  target_link_libraries(main PRIVATE Catch2::Catch2 Catch2::Catch2WithMain)\n\ncatch2 provides pkg-config modules:\n\n  # A modern, C++-native test framework for C++14 and above (links in default main)\n  catch2-with-main\n\n  # A modern, C++-native, test framework for C++14 and above\n  catch2\n\nAll requested installations completed successfully in: 161 us\n-- Running vcpkg install - done\n-- cvforwin: compiler Clang 18.1.3\n-- cvforwin: build type Debug\n-- cvforwin: format-check uses /usr/bin/clang-format\n-- Configuring done (16.8s)\n-- Generating done (0.0s)\n-- Build files have been written to: /home/administrator/c_cpp_project/cvforwin/build/wsl-clang-analysis\n[0/2] Re-checking globbed directories...\n[1/1] Running clang-tidy over project sources (warnings are errors)\n-- static-analysis passed: 26 file(s) clean under .clang-tidy\n",
+      "log": "/tmp/opencode-quality/ee5763d5f69076a8/CVF-106/wsl_static.log",
+      "timed_out": false
+    },
+    {
+      "platform": "wsl-portable",
+      "id": "wsl_sanitizers",
+      "kind": "test",
+      "command": "cmake --preset wsl-gcc-asan && cmake --build --preset wsl-gcc-asan --parallel && ctest --preset wsl-gcc-asan --output-on-failure",
+      "started": "2026-09-19T00:31:31.734Z",
+      "exit_code": 0,
+      "verdict": "PASS",
+      "counts": {
+        "passed": 447,
+        "failed": 0,
+        "skipped": 0,
+        "total": 447
+      },
+      "summary": "ut ...........................................................................   Passed    0.03 sec\n        Start 437: CVF-106 B7 reload swaps to a new template only after a successful candidate\n437/447 Test #437: CVF-106 B7 reload swaps to a new template only after a successful candidate .......................................................................   Passed    0.04 sec\n        Start 438: CVF-106 B8 example.threshold keeps its observable output through the lifecycle\n438/447 Test #438: CVF-106 B8 example.threshold keeps its observable output through the lifecycle ....................................................................   Passed    0.04 sec\n        Start 439: CVF-106 developer: an injected camera override is authoritative for descriptor selection\n439/447 Test #439: CVF-106 developer: an injected camera override is authoritative for descriptor selection ..........................................................   Passed    0.06 sec\n        Start 440: CVF-106 developer: template.match golden image match within tolerance\n440/447 Test #440: CVF-106 developer: template.match golden image match within tolerance .............................................................................   Passed    0.03 sec\n        Start 441: CVF-106 developer: template.match parameter validation\n441/447 Test #441: CVF-106 developer: template.match parameter validation ............................................................................................   Passed    0.02 sec\n        Start 442: CVF-106 developer: the shipped example recipe and asset load and match\n442/447 Test #442: CVF-106 developer: the shipped example recipe and asset load and match ............................................................................   Passed    0.03 sec\n        Start 443: cvf.abi.c11_surface\n443/447 Test #443: cvf.abi.c11_surface ...............................................................................................................................   Passed    0.03 sec\n        Start 444: cvf.abi.runtime\n444/447 Test #444: cvf.abi.runtime ...................................................................................................................................   Passed    0.02 sec\n        Start 445: cvf.abi.cpp20_include\n445/447 Test #445: cvf.abi.cpp20_include .............................................................................................................................   Passed    0.02 sec\n        Start 446: cvf.abi.header_isolation\n446/447 Test #446: cvf.abi.header_isolation ..........................................................................................................................   Passed    0.01 sec\n        Start 447: cvf006.lifecycle\n447/447 Test #447: cvf006.lifecycle ..................................................................................................................................   Passed    0.08 sec\n\n100% tests passed, 0 tests failed out of 447\n\nTotal Test time (real) =  26.28 sec\n",
+      "log": "/tmp/opencode-quality/ee5763d5f69076a8/CVF-106/wsl_sanitizers.log",
+      "timed_out": false
+    }
+  ],
+  "ownership": {
+    "files_checked": 4,
+    "mismatches": []
+  },
+  "deferred_platforms": [
+    {
+      "platform": "windows-msvc",
+      "reason": "CVF-106 touches portable inspection/recipe/algorithm/runtime code and OpenCV-based template matching. Native Windows evidence is still collected by windows-ci / windows-tests-quality at the delivery SHA, including the template.match example and clean package consumer. No hardware claim is made."
+    }
+  ],
+  "reasons": [],
+  "completed_at": "2026-09-19T00:32:13.406Z",
+  "gate_exit_code": 0
+}

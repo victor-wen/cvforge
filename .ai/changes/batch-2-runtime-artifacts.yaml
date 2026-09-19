@@ -1,0 +1,43 @@
+change_id: batch-2-runtime-artifacts
+title: Batch 2 runtime/artifact hardening (CVF-104 deadline+finalization+workers, CVF-105 VID/PID+ABI pairs+atomic warnings+single payload)
+risk: R2
+batch: batch-2-runtime-artifacts
+member_changes:
+- id: CVF-104
+  delivery_sha: b4256e7e108e0631fb10622e08c9fe5e0823616c
+  scope: One absolute deadline, single post-frame finalization, deadline-bounded save worker, background retention
+- id: CVF-105
+  delivery_sha: ab47119c8abc00f9d2d69cb1d61c70b22ddc1813
+  scope: VID/PID canonicalization, C ABI pointer-length pairs, atomic diagnostics warnings, single final result JSON payload
+candidate_sha: b4256e7e108e0631fb10622e08c9fe5e0823616c
+scope:
+  allowed_files:
+    production:
+    - src/runtime/**
+    - src/artifacts/**
+    - src/diagnostics/**
+    - src/recipes/**
+    - src/camera/camera_backend.*
+    - src/c_api/**
+    developer_tests:
+    - tests/unit/** (non cvf1* independent names)
+    build_files:
+    - CMakeLists.txt
+  out_of_scope:
+  - include/cvforwin/**
+  - src/camera/uvc_windows/**
+invariants:
+- No public C symbol, status value, struct layout, calling convention, or export changes.
+- No directory scan, retention sort, PNG encode, or disk-write wait on the inspection caller thread.
+- No image_path reported before atomic commit.
+- Diagnostics warning accumulation and observation are race-free.
+- The 65535-byte payload bound fails closed rather than truncating.
+acceptance: >-
+  CVF-104 and CVF-105 are committed, each task reviewer verdict consumed, the deterministic quality gate PASS at
+  the frozen candidate SHA, and the windows-2022 CI jobs (windows-ci and windows-tests-quality) succeed at the
+  delivery SHA of each member. Portable behavior is verified on the WSL host; hardware evidence is absent by
+  design and is not claimed.
+verification:
+  canonical_gate: .ai/validation/batch-2-quality-plan.yaml -> .ai/reports/batch-2-quality.json
+  independent_manifest: .ai/test-ownership.yaml
+  release_review: .ai/reviews/batch-2.yaml

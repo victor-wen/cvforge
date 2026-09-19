@@ -1,0 +1,37 @@
+batch: batch-2-runtime-artifacts
+candidate_sha: b4256e7e108e0631fb10622e08c9fe5e0823616c
+run_id: "35400487206"
+run_url: https://github.com/victor-wen/cvforge/actions/runs/35400487206
+conclusion: success
+jobs:
+- name: Test-enabled suite and clean package consumer
+  conclusion: success
+  tests: "463/463"
+- name: Release build, tests, abi-check, package
+  conclusion: success
+  tests: "326/326"
+member_runs:
+- change: CVF-104
+  sha: de167ba1c84e3b9354a16aaf16ab7bed14316d2a
+  run_id: "35386486871"
+  result: "397/397"
+- change: CVF-105
+  sha: ab47119c8abc00f9d2d69cb1d61c70b22ddc1813
+  run_id: "35396078367"
+  result: "462/462 test-enabled, 325/325 release"
+superseded_candidate:
+  sha: ab47119c8abc00f9d2d69cb1d61c70b22ddc1813
+  reason: >-
+    Release-review segment A found a cancellation/commit TOCTOU in src/artifacts/save_worker.cpp
+    (a final file could be published after cancellation); fixed in b4256e7 with a deterministic
+    regression test, which advanced the candidate SHA and invalidated the earlier batch gate.
+test_counts:
+  passed: 463
+  failed: 0
+  skipped: 0
+log_copy: .ai/reports/batch-2-ci-tests.log
+sha256:
+  tests_log: 14876448b8714032bf27e5bfe369e7884bce30c7654fba3b85f1171140c771d6
+notes: >-
+  Native MSVC execution at the frozen batch-2 candidate b4256e7e108e0631fb10622e08c9fe5e0823616c.
+  No hardware evidence; not claimed.

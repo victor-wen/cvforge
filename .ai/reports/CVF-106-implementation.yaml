@@ -1,0 +1,494 @@
+schema_version: 1
+change_id: CVF-106
+phase: IMPLEMENTATION
+author: developer
+recorded_at: 2026-09-19
+host: "Linux (WSL) GCC 13.3.0 / Clang 18.1.3; Windows MSVC not executable here"
+status: NEEDS_CONTEXT
+
+summary: >-
+  Completed the remaining CVF-106 deliverables: the shipped template.match
+  example recipe and license-cleared asymmetric template asset, the cv2/NumPy ->
+  OpenCV C++/cv::Mat porting guide in docs/development.md, and developer-owned
+  Catch2 coverage under tests/unit/test_template_match_developer.cpp (not
+  matching the cvf1*_* independent pattern). Ran the full portable verification
+  matrix. The only BLOCKER is outside developer scope: two hash-pinned CVF-003
+  tests (tests/unit/cvf003_registry_test.cpp lines 161 and 182) still assert
+  `registry.size() == 1u` after register_compiled_algorithms(), but the
+  approved additive CVF-106 change registers a second compiled algorithm
+  (template.match) in src/algorithms/compiled_algorithms.cpp. Full ctest is
+  445/447 in both debug and ASan with tests 119/120 failing; those two files are
+  test-engineer-owned and hash-pinned, so the fix requires a bounded test-owner
+  amendment (CVF-004 Amendment 4 precedent) and cannot be made from this role.
+
+deliverables:
+  - requirement: "Add config/examples/recipes/template.match.json and a license-cleared asymmetric template asset under config/examples/assets/."
+    status: done
+    note: >-
+      Added config/examples/recipes/template.match.json (algorithm template.match,
+      parameters template_asset=tmpl / roi [0,0,64,48] / method ccoeff_normed /
+      threshold 0.8, assets {tmpl: tmpl.asymmetric.png}, capture 64x48) and the
+      12x8 8-bit grayscale PNG config/examples/assets/tmpl.asymmetric.png. The PNG
+      is generated from an in-project formula (author-owned, no third-party pixels
+      or metadata) and has non-zero variance, so it prepares successfully.
+      RecipeCatalog::load(config/examples/recipes) succeeds and prepares it; see
+      the developer test below.
+  - requirement: "Add a LICENSES entry/note for the example asset."
+    status: done
+    note: >-
+      LICENSES/README.md gained a project-authored-assets note stating that
+      config/examples/assets/tmpl.asymmetric.png is generated in-project, carries
+      no third-party pixels/metadata, and is not a third-party component.
+  - requirement: "Extend docs/development.md with a cv2/NumPy -> OpenCV C++/cv::Mat mapping guide and the explicit Python-porting/no-runtime statement."
+    status: done
+    note: >-
+      Added a "The preparation/asset seam" subsection and a "Porting cv2/NumPy
+      inspection code to OpenCV C++" subsection under section 6, including the
+      explicit statement that production Python source is ported by hand with
+      representative images and explicit tolerances and that there is no Python
+      runtime/interpreter/transpiler packaged. Also updated the recipe step and
+      the Configuration and recipes section to mention the assets mapping/bounds.
+  - requirement: "Add developer-owned tests that do not match the cvf1*_* pattern covering parameter validation, a golden-image/tolerance match, and the example recipe load."
+    status: done
+    note: >-
+      tests/unit/test_template_match_developer.cpp (4 cases, 156 assertions) covers
+      parameter validation (13 sections), a golden exact-placement match
+      (score == 1.0 within 1e-6, global x/y) cross-checked against an independent
+      cv::matchTemplate oracle within 1e-9, a no-template FAIL with the
+      template_mismatch defect, an expired-deadline failure, the shipped example
+      recipe/asset load through load_recipe_file + RecipeCatalog::load, and a
+      runtime regression proving the injected camera_override is authoritative for
+      descriptor selection. Registered as CMake target
+      template_match_developer_tests.
+  - requirement: "Run the full verification matrix and record real commands/exit codes/results."
+    status: done
+    note: "See verification_matrix; every command was executed in this session."
+  - requirement: "Report sha256 of each changed/new file and confirm the independent cvf106 files and .ai/test-ownership.yaml were not modified."
+    status: done
+    note: "See hashes; every independent cvf106 hash equals the CVF-106 verify report's pinned value."
+  - requirement: "Explain the src/runtime/context.cpp camera_override descriptor-selection change."
+    status: done
+    note: "See context_override_change below."
+  - requirement: "No Windows/hardware claim."
+    status: done
+    note: >-
+      No Windows MSVC, UVC hardware, or tests/hardware/uvc_smoke run is claimed.
+      All evidence is the portable WSL GCC/Clang matrix.
+
+scope_confirmation:
+  allowed_files_touched:
+    - config/examples/recipes/template.match.json   # new example recipe
+    - config/examples/assets/tmpl.asymmetric.png     # new license-cleared asset
+    - LICENSES/README.md                             # project-asset note
+    - docs/development.md                            # cv2/NumPy porting guide + asset seam
+    - tests/unit/test_template_match_developer.cpp   # new developer tests
+    - CMakeLists.txt                                 # register template_match_developer_tests
+    - src/recipes/recipe.cpp                         # clang-format whitespace fix (in scope)
+  production_files_verified_present_and_compiling:
+    - src/inspection/algorithm.h
+    - src/inspection/algorithm.cpp
+    - src/inspection/registry.h
+    - src/inspection/registry.cpp
+    - src/recipes/recipe.h
+    - src/recipes/recipe_catalog.h
+    - src/recipes/recipe_catalog.cpp
+    - src/runtime/context.cpp
+    - src/algorithms/template_match.h
+    - src/algorithms/template_match.cpp
+    - src/algorithms/compiled_algorithms.cpp
+  not_touched:
+    - include/cvforwin/**
+    - src/c_api/**
+    - src/camera/**
+    - .ai/changes/**
+    - .ai/project-contract.yaml
+    - .ai/test-ownership.yaml
+    - tests/unit/cvf1*_* (independent, hash-pinned)
+  format_fix_note: >-
+    format-check flagged pre-existing drift at src/recipes/recipe.cpp:240-241 in
+    the already-present CVF-106 asset-reference parsing. clang-format -i changed
+    only the continuation-line indentation of one ternary; no token changed
+    (verified with a before/after diff).
+
+context_override_change:
+  file: src/runtime/context.cpp
+  symbol: select_descriptor
+  what_changed: >-
+    Context::create() now computes `const bool overridden = options.camera_override != nullptr;`
+    before backend selection and passes it to the new select_descriptor() helper.
+    When overridden is false the helper calls camera::resolve_identity(candidates,
+    selector) exactly as the previous inline code did. When overridden is true it
+    requires exactly one enumerated descriptor and returns candidates.front()
+    as-is, without applying the config-derived CameraSelector.
+  why_needed: >-
+    A test injects a deterministic backend (FileCameraBackend/SyntheticCameraBackend)
+    whose descriptor identifiers come from the injected config, while the selector
+    was built from cvforwin.json camera fields (e.g. vendor_id/product_id/friendly_name)
+    that describe the *real* device. resolve_identity() treats non-empty selector
+    fields as exact matches, so the injected backend's single descriptor did not
+    match and Context::create() failed with camera_not_found even though the
+    override was already the chosen device. The override is the testing hook that
+    already bypasses build_backend(); making its enumerated descriptor authoritative
+    is the additive, test-only fix. It is covered by the developer regression
+    "an injected camera override is authoritative for descriptor selection", whose
+    config selector (vendor FFFF / product EEEE / friendly "configured-not-injected")
+    deliberately cannot match the injected file backend.
+  no_override_behavior: >-
+    Confirmed unchanged: when options.camera_override is null, overridden is false
+    and select_descriptor() returns camera::resolve_identity(candidates, selector),
+    byte-for-byte the same call and arguments the code made before. The only new
+    branch is gated on an injected override, which does not exist in production
+    configurations. No public ABI, error code, or status value changed.
+
+verification_matrix:
+  debug_configure:
+    command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    result: "Configuring done; Generating done; build files written to build/wsl-gcc-debug"
+  debug_build:
+    command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    result: "Full build succeeds; template_match_developer_tests and all cvf106_* targets link"
+  debug_ctest:
+    command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 8
+    result: "99% tests passed, 2 tests failed out of 447"
+    total: 447
+    passed: 445
+    failed: 2
+    failures:
+      - "119 - CVF-003 B2 negative: a second registration fails with algorithm_duplicate_key and keeps the original"
+      - "120 - CVF-003 B2: register_compiled_algorithms publishes example.threshold on a fresh registry"
+    failure_cause: >-
+      Both cases assert registry.size() == 1u at
+      tests/unit/cvf003_registry_test.cpp:182 and :161. register_compiled_algorithms()
+      in src/algorithms/compiled_algorithms.cpp now registers ExampleThresholdAlgorithm
+      and TemplateMatchAlgorithm, so size() is 2. This is the approved additive
+      CVF-106 change, not a deliverable added in this session; the CVF-003 file is
+      test-engineer-owned and hash-pinned (sha256 matches d43c2ec1...), so it cannot
+      be amended from the developer role.
+  cvf106_binaries:
+    targets:
+      - target: cvf106_template_match_tests
+        command: "build/wsl-gcc-debug/cvf106_template_match_tests"
+        exit_code: 0
+        assertions: 188
+        test_cases: 15
+      - target: cvf106_prepare_tests
+        command: "build/wsl-gcc-debug/cvf106_prepare_tests"
+        exit_code: 0
+        assertions: 81
+        test_cases: 4
+      - target: cvf106_lifecycle_tests
+        command: "build/wsl-gcc-debug/cvf106_lifecycle_tests"
+        exit_code: 0
+        assertions: 212
+        test_cases: 5
+      - target: template_match_developer_tests
+        command: "build/wsl-gcc-debug/template_match_developer_tests"
+        exit_code: 0
+        assertions: 156
+        test_cases: 4
+    independent_cvf106_total:
+      test_cases: 24
+      assertions: 481
+  format_check:
+    command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    result: "format-check passed: 123 file(s) conform to .clang-format"
+    note: "After the src/recipes/recipe.cpp whitespace fix; first run failed on that file only."
+  static_analysis_configure:
+    command: "cmake --preset wsl-clang-analysis"
+    exit_code: 0
+    result: "Clang 18.1.3; generating done"
+  static_analysis:
+    command: "cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+    exit_code: 0
+    result: "static-analysis passed: 26 file(s) clean under .clang-tidy"
+  asan_configure:
+    command: "cmake --preset wsl-gcc-asan"
+    exit_code: 0
+    result: "build files written to build/wsl-gcc-asan"
+  asan_build:
+    command: "cmake --build --preset wsl-gcc-asan --parallel"
+    exit_code: 0
+    result: "50/50 objects built, including template_match_developer_tests and all cvf106_* targets"
+  asan_ctest:
+    command: "ctest --preset wsl-gcc-asan --output-on-failure"
+    exit_code: 8
+    result: "99% tests passed, 2 tests failed out of 447"
+    total: 447
+    passed: 445
+    failed: 2
+    failures:
+      - "119 - CVF-003 B2 negative: a second registration fails with algorithm_duplicate_key and keeps the original"
+      - "120 - CVF-003 B2: register_compiled_algorithms publishes example.threshold on a fresh registry"
+  abi_check:
+    command: "cmake --build --preset wsl-gcc-debug --target abi-check"
+    exit_code: 0
+    result: "abi-check passed: exactly 5 export(s): cvf_get_abi_version;cvf_initialize;cvf_inspect;cvf_reload_recipes;cvf_shutdown"
+
+hashes:
+  algorithm: sha256
+  developer_added:
+    - path: config/examples/recipes/template.match.json
+      sha256: 88dfc847df89f627eae936b25dd4d0ac6c9bb484faaeae9efbf251f9dab78108
+    - path: config/examples/assets/tmpl.asymmetric.png
+      sha256: ef97a566919bb4130964d6890680784fa67347efe15c359cd2715dc4c438c751
+    - path: tests/unit/test_template_match_developer.cpp
+      sha256: 4dd480493a92f85df2879607d4f034cfc1c87897923a8e6ab60191b774d3e393
+  developer_modified:
+    - path: LICENSES/README.md
+      sha256: 8bf864fff459feeb85470af30401afc283ba899c653308ceda7361fca62ec28c
+    - path: docs/development.md
+      sha256: 981695fc9695c5bf3ee655076fc764cca7bfb9c0ec56cfb76ee043d4e1b51855
+    - path: CMakeLists.txt
+      sha256: dbee6d7fcc0696447944446ecd157e7ec7728b534268619af7337ec1c3fa6221
+    - path: src/recipes/recipe.cpp
+      sha256: 86174b6618f4f31a72c518194fe707a651f62a6f88cbc849e1349cca39b1e22c
+  cvf106_production_present:
+    - path: src/inspection/algorithm.h
+      sha256: dcbc4c2a26be9717948a9e972969b7b4edd3008bdcfce97c4a2355ad9eb18614
+    - path: src/inspection/algorithm.cpp
+      sha256: 93070ef6cf59f3a2ea84313213626122f4b84e351e08ffe1fdc286f1962ceea9
+    - path: src/inspection/registry.h
+      sha256: c0e09b7277e7105c18bd698bcd68659e45a2d5a9259d72aa4941a0571afc7060
+    - path: src/inspection/registry.cpp
+      sha256: ed5e305ef7adb6f63b83dfcf4d50379c6af82835a3f5fcdc3e3e86dba916e83d
+    - path: src/recipes/recipe.h
+      sha256: 750bc88eede400d4cdeecd6546c429c643742cff43b32a41a932ce2d74101c97
+    - path: src/recipes/recipe_catalog.h
+      sha256: fc88207858802e3928eae5a4e63a5dbac79770f4897732c694b540c3f9ba8192
+    - path: src/recipes/recipe_catalog.cpp
+      sha256: a939c2667b99ba7a7b609841ffa1f166291799cff5458f0fd1ef0707ca12800c
+    - path: src/runtime/context.cpp
+      sha256: 90f4bff671dd54d6e955e04cb0d510441ce1d5a3105d6bfd12ab1404af90c134
+    - path: src/algorithms/template_match.h
+      sha256: 3f8d9f2c07a4542548e808b8a5d58db9c4c100cd3240cd57edb340fc1b89fdd5
+    - path: src/algorithms/template_match.cpp
+      sha256: 4cf10908cae3d2d34ed96db0a863019a7e8b523724bae3be3460f791d7055dbe
+    - path: src/algorithms/compiled_algorithms.cpp
+      sha256: 0cf54408efbfc87debe6884d5db36fe975bfcadd3618aa6c2893963390d96c3e
+  independent_cvf106_unchanged:
+    - path: tests/unit/cvf106_test.helpers.h
+      sha256: 059c4a4030cfe37517c07b7c272faa043a9fb203e28a5241d8d6d652471c53d6
+      matches_verify_report: true
+    - path: tests/unit/cvf106_prepare_test.cpp
+      sha256: c900a558877bebe3ed1d9e89201b6c79c25d7518a3f993019c8028ba327ed4ef
+      matches_verify_report: true
+    - path: tests/unit/cvf106_template_match_test.cpp
+      sha256: 3b302dd545e3cce1524e5d611c1aba38efa4481d668c613f0fb4d6b1df36eed3
+      matches_verify_report: true
+    - path: tests/unit/cvf106_lifecycle_test.cpp
+      sha256: 4c32847f8a1270d159982da170eb797efab3bf8afedb4df3610283301b2e0a57
+      matches_verify_report: true
+  test_ownership_manifest:
+    path: .ai/test-ownership.yaml
+    sha256: 26bac6b0d3ffc51383de2f21d8e5464d2849bd1b6972e6e1f4d29787519ac0dc
+    note: "Matches the CVF-106 verify report's recorded manifest hash; not modified in this session."
+
+blocker:
+  id: CVF106-B1
+  severity: gate
+  files:
+    - tests/unit/cvf003_registry_test.cpp
+    - .ai/test-ownership.yaml
+  failing_tests:
+    - "119 - CVF-003 B2 negative: a second registration fails with algorithm_duplicate_key and keeps the original (tests/unit/cvf003_registry_test.cpp:182)"
+    - "120 - CVF-003 B2: register_compiled_algorithms publishes example.threshold on a fresh registry (tests/unit/cvf003_registry_test.cpp:161)"
+  root_cause: >-
+    The approved additive CVF-106 seam registers TemplateMatchAlgorithm in
+    register_compiled_algorithms() (src/algorithms/compiled_algorithms.cpp), so a
+    fresh registry has size 2. The two hash-pinned CVF-003 cases still assert
+    size() == 1u. The independent cvf106 tests require template.match to be
+    registered by that same function, so the production behaviour is correct and
+    the pinned expectation is stale. src/algorithms/compiled_algorithms.cpp was
+    already modified (registering template.match) at the start of this session
+    (git status showed it as modified before any edit here), so this session did
+    not introduce the count change.
+  why_developer_cannot_fix: >-
+    tests/unit/cvf003_registry_test.cpp is test-engineer-owned and pinned in
+    .ai/test-ownership.yaml (current sha256 d43c2ec1b75848e3bcfb8d2b7dc09cd67234f3a8072975bfc385fee8c2186937
+    matches the pinned value). Editing it, or updating the ownership hash, is
+    outside the developer scope and would be an independence violation.
+  requested_action: >-
+    A bounded test-owner amendment (like CVF-004 Amendment 4): update the two
+    CVF-003 count expectations to the new compiled-algorithm count (2) while
+    keeping the existing example.threshold assertions, and record the new hash in
+    .ai/test-ownership.yaml with amendment evidence. Alternatively assert
+    example.threshold is found and template.match is found without a brittle exact
+    count.
+  impact: >-
+    Blocks the "full ctest fully green" completion criterion only. All 24
+    independent CVF-106 cases and the developer suite pass in debug and ASan;
+    format-check, static-analysis and abi-check pass; the two failures are
+    orthogonal to the deliverables completed in this session.
+
+notes:
+  - "The shipped example recipe uses backend-independent catalog loading in the developer test; no global-config or runtime end-to-end claim is made for config/examples/cvforwin.json (it selects uvc, which is Windows-only)."
+  - "The example asset is a 12x8 grayscale PNG authored by this role; LICENSES/README.md records that it is project-authored and not a third-party component."
+  - "No Windows MSVC, Media Foundation, UVC hardware, or package-consumer evidence is claimed; only the portable WSL matrix was executed."
+
+portability_fix_2026_09_19:
+  change_id: CVF-106
+  phase: IMPLEMENTATION
+  author: developer
+  recorded_at: 2026-09-19
+  trigger: >-
+    Windows CI run 35409749859 (commit b102946) failed to compile in BOTH
+    windows-msvc jobs at src/recipes/recipe_catalog.cpp(72,47) with MSVC C2665:
+    'std::basic_string<wchar_t,...>::starts_with': no overloaded function could
+    convert all the argument types. WSL GCC compiled the same line because
+    path::native() is std::string there.
+  root_cause: >-
+    load_asset_bytes() detected an assets-root escape with
+    `relative.native().starts_with("..")`. On Windows path::native() is
+    std::wstring, so the member starts_with() expects wchar_t arguments and a
+    narrow ".." literal cannot convert. This is a real portability defect, not a
+    WSL-only artifact: the check silently relied on narrow-native path strings.
+  fix:
+    file: src/recipes/recipe_catalog.cpp
+    symbol: load_asset_bytes
+    description: >-
+      Replaced the native-string prefix test with a first-path-component
+      comparison: `const std::filesystem::path parent_component{".."}; if
+      (relative.empty() || *relative.begin() == parent_component)`. This is
+      correct for narrow- and wide-native platforms, uses only ASCII ".." (so it
+      can never throw on non-representable characters), and preserves the
+      rejection message and every other bound/behavior. It still rejects a
+      leading ".." component (including nested a/../.. lexically-normalized
+      paths) and still accepts legitimate relative and nested references.
+    intended_component_semantics: >-
+      Component equality (not a ".." string prefix) is the intended semantics.
+      A component that merely begins with dots but is not ".." (for example a
+      directory named "..data") does not escape the root and is now accepted;
+      the old prefix test rejected it. This is the correct reading of the
+      contract intent "reject any reference that escapes the assets root ...
+      and still accept legitimate nested references" and is exercised by a
+      dedicated developer case.
+  hazard_sweep:
+    commands:
+      - "rg -n '\\.native\\s*\\(' src"
+      - "rg -n 'starts_with|ends_with' src"
+      - "rg -n 'wstring|wchar_t|wstring_view' src"
+    result: >-
+      Exactly one .native() call existed in src/ (the fixed line); zero
+      starts_with/ends_with remain in src. The only other wide-character
+      production code is the Windows-only src/camera/uvc_windows/uvc_backend.cpp
+      wide_to_utf8() helper, which is outside CVF-106 and converts explicitly;
+      it is not a hazard. No equivalent wide-vs-narrow path-string comparison
+      remains. (path comparisons against narrow literals/string_views elsewhere
+      are portable because std::filesystem::path accepts char string types on
+      every platform; only the removed starts_with() member call was the
+      defect.)
+  developer_test:
+    path: tests/unit/test_recipe_asset_reference_developer.cpp
+    target: recipe_asset_reference_developer_tests
+    cmake_registration: >-
+      Registered under the existing if(CVFORWIN_BUILD_TESTS) block as
+      recipe_asset_reference_developer_tests; it needs no test backend, so it is
+      also compiled by the test-backends-OFF Windows release configuration.
+    cases:
+      - "a plain relative asset reference remains accepted (catalog loads and prepares)"
+      - "a legitimate nested asset reference remains accepted"
+      - "a parent-directory asset reference is rejected"
+      - "a nested parent-directory escape (a/../../x) is rejected"
+      - "an absolute asset reference is rejected"
+      - "a dot-prefixed component that is not parent (..data) is not an escape"
+      - "POSIX: a reference canonicalizing outside the assets root through a symlinked directory is rejected by the catalog containment check"
+    counts: "48 assertions in 7 test cases (exit 0)"
+    red_evidence: >-
+      Temporarily restoring the old `relative.native().starts_with("..")` line
+      and rebuilding the target produced 1 failed case (dot-prefixed component
+      not parent, REQUIRE(loaded.has_value()) false) with 46/47 assertions;
+      restoring the component comparison returned 48/48 in 7 cases, exit 0.
+      The POSIX symlink case is the only case that reaches the catalog
+      canonical-path containment directly; the "..", nested-escape and absolute
+      cases are also rejected earlier by the recipe reference validator, which
+      is the intended layered behavior.
+  verification_2026_09_19:
+    debug_configure:
+      command: "cmake --preset wsl-gcc-debug"
+      exit_code: 0
+    debug_build:
+      command: "cmake --build --preset wsl-gcc-debug --parallel"
+      exit_code: 0
+      result: "27/27 targets linked, including recipe_asset_reference_developer_tests"
+    debug_ctest:
+      command: "ctest --preset wsl-gcc-debug --output-on-failure"
+      exit_code: 0
+      result: "100% tests passed, 0 tests failed out of 454"
+      total: 454
+      passed: 454
+      failed: 0
+      note: "447 baseline + 7 new developer cases; fully green."
+    focused_test:
+      command: "build/wsl-gcc-debug/recipe_asset_reference_developer_tests"
+      exit_code: 0
+      result: "48 assertions in 7 test cases passed"
+    asan_configure:
+      command: "cmake --preset wsl-gcc-asan"
+      exit_code: 0
+    asan_build:
+      command: "cmake --build --preset wsl-gcc-asan --parallel"
+      exit_code: 0
+    asan_ctest:
+      command: "ctest --preset wsl-gcc-asan --output-on-failure"
+      exit_code: 0
+      result: "100% tests passed, 0 tests failed out of 454"
+      total: 454
+      passed: 454
+      failed: 0
+    format_check:
+      command: "cmake --build --preset wsl-gcc-debug --target format-check"
+      exit_code: 0
+      result: "format-check passed: 124 file(s) conform to .clang-format"
+    static_analysis_configure:
+      command: "cmake --preset wsl-clang-analysis"
+      exit_code: 0
+    static_analysis:
+      command: "cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+      exit_code: 0
+      result: "static-analysis passed: 26 file(s) clean under .clang-tidy"
+  changed_files_sha256:
+    - path: src/recipes/recipe_catalog.cpp
+      sha256: 69612f952640a2213e30d876ccf00fadebf2b626977c5b3dd6d28ce3436e48c9
+      note: "portable first-component escape check"
+    - path: tests/unit/test_recipe_asset_reference_developer.cpp
+      sha256: 20c056a952ac7f8a9c226e582b22ddb364af8ed6beef8754460b8add35ec6e2d
+      note: "new developer regression test"
+    - path: CMakeLists.txt
+      sha256: 0d8fde91c2e087b6e847cf30a9059f766d900f590d637300dbca0980aa850115
+      note: "registers recipe_asset_reference_developer_tests"
+  scope_confirmation:
+    not_touched:
+      - include/cvforwin/**
+      - src/c_api/**
+      - src/camera/**
+      - .ai/changes/**
+      - .ai/project-contract.yaml
+      - .ai/test-ownership.yaml
+      - tests/unit/cvf106_* (independent, hash-pinned)
+      - tests/unit/cvf003_* (independent, hash-pinned)
+    independent_cvf106_unchanged:
+      - path: tests/unit/cvf106_test.helpers.h
+        sha256: 059c4a4030cfe37517c07b7c272faa043a9fb203e28a5241d8d6d652471c53d6
+      - path: tests/unit/cvf106_prepare_test.cpp
+        sha256: c900a558877bebe3ed1d9e89201b6c79c25d7518a3f993019c8028ba327ed4ef
+      - path: tests/unit/cvf106_template_match_test.cpp
+        sha256: 3b302dd545e3cce1524e5d611c1aba38efa4481d668c613f0fb4d6b1df36eed3
+      - path: tests/unit/cvf106_lifecycle_test.cpp
+        sha256: 4c32847f8a1270d159982da170eb797efab3bf8afedb4df3610283301b2e0a57
+    test_ownership_manifest:
+      path: .ai/test-ownership.yaml
+      sha256: a91813e0f2bf13820f41bc8b31344051ee7f51cfe4ae4d30a28fe51231338089
+      note: >-
+        Not modified in this session. The current hash differs from the value in
+        the earlier section of this report because the test owner applied the
+        CVF-003 count-expectation amendment on 2026-09-19 (cvf003_registry_test.cpp
+        is now 72d058116187731df1aa85f844c7f5254a282ecea2fd39ed1ae9279bd76c4076).
+  windows_validation: >-
+    No Windows MSVC execution is claimed from this Linux host. The fix removes
+    the only wide/narrow path-string member call in the compilation unit and is
+    validated for portability by inspection plus the full WSL GCC/Clang matrix;
+    the next windows-msvc-tests CI run is the actual MSVC compile/run check.

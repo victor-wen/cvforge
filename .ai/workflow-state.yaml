@@ -1,526 +1,237 @@
 schema_version: 1
-program: cvforwin-implementation-1.0.0
+program: cvforwin-hardening-1.1.0
 baseline:
   path: .ai/project-contract.yaml
-  contract_version: 1.0.0
+  contract_version: 1.1.0
   status: APPROVED
-  gate: PASS
-risk: R2
-risk_justification: >-
-  Greenfield multi-module implementation inside approved boundaries. No public ABI,
-  dependency family, schema, module boundary, or invariant change is authorized; any
-  such need stops the pipeline for R3 escalation. Release review is required at the end.
-current_change: CVF-007
-stage: BLOCKED
-stage_note: "CI round 3 fixes complete and staged: package-symbols (developer, local Ninja probe 31/31 + negative control), consumer DLL-deploy fix (test-engineer, local cmake -E self-tests), vcpkg binary cache added to both jobs (actions/cache@v4 SHA verified live). Controller re-verify: WSL 263/263, probe PASS. Awaiting user push (round 4)."
-automated_loop:
-  requested_by: user
-  goal: "GitHub Actions (windows-ci) green; build fixes and re-publishes until pass."
-  design: >-
-    build orchestrates; publisher (subagent, narrow permissions) commits+pushes staged changes;
-    build monitors gh runs read-only, routes CI failures to the owning role, re-runs local gates,
-    re-stages, re-dispatches publisher. Safety cap: stop and report after 5 CI rounds without a
-    green run or on any non-CI blocker. build keeps git commit/push denied for itself.
-  protocol_for_fresh_session:
-    - "1. gh run list --repo victor-wen/cvforge --limit 3 -> latest run id; if success: update state, request release re-review."
-    - "2. If failure: gh run view <id> --log-failed > /tmp/opencode/ci-failed.log; grep MSVC errors/annotations."
-    - "3. Dispatch the owning role (developer for src/**, others by area) with the exact failing diagnostics; fix."
-    - "4. Local gates: configure/build/ctest (263+), format-check, static-analysis; stage (`git add -A`)."
-    - "5. Dispatch publisher: 'commit the staged changes with message <msg> and push'."
-    - "6. gh run watch <new-id> --exit-status (long timeout) or poll; go to 1. Max 5 rounds."
-  pending_user_config:
-    - "~/.config/opencode/agent/publisher.md: copy the updated draft (mode: subagent)"
-    - "~/.config/opencode/agent/build.md: task section add `publisher: allow`; role text allows delegated publication"
-  current_waiting: "user config edits + restart; then '继续 CI 修复循环' (or manual push of the staged MSVC C3668 fix)"
-ci:
-  repo: "github.com/victor-wen/cvforge"
-  run_1: >-
-    34950421705 failure (windows-ci, both jobs): MSVC error C3668 at
-    src/camera/uvc_windows/uvc_backend.cpp ReadCallback::~ReadCallback - override on a
-    non-overriding destructor. Local stub probe missed it (stub interface had a virtual
-    destructor); probe fidelity fixed with permanent negative controls. Developer fix
-    applied (cycle 1).
-  run_2: >-
-    34956274438 failure (windows-ci, both jobs, 11m57s): UVC compiles now. Four issues:
-    CI-2A C2397 narrowing at tests/unit/cvf006_test_support.h(124,125) -> test-engineer;
-    CI-2B C4996 fopen at tests/abi/cvf006_lifecycle.c(312,339) -> developer target define
-    _CRT_SECURE_NO_WARNINGS; CI-2C C4310 constant cast truncation at cvf006_lifecycle.c
-    (1299,1302) -> test-engineer; CI-2D Catch discovery 0xc0000135 - cvforwin.dll is at
-    build/<preset>/bin/Release while test exes are at build/<preset>/Release (targets
-    linking the shared lib: cvf_abi_* x3, cvf_unit_tests, cvf006_lifecycle) -> developer
-    CMake copy/output-dir fix.
-  run_3: >-
-    34960459232 failure (windows-ci, 12m1s): test-enabled job PASSED all 188 Windows tests
-    and package/verify; failed at the clean consumer step. Release job PASSED configure/
-    build/test/abi-check/package/package-verify (exports 5/5, deps KERNEL32/MF/OLE32 only);
-    failed only at package-symbols. LOCAL REPRODUCTIONS CONFIRMED: (a) consumer run used
-    'cmake -E env --modify PATH=prepend:...' - 'prepend' is not a valid op (path_list_prepend
-    is); env exits 1 before running the consumer -> test-engineer fix (prefer copying the
-    package DLL next to the consumer exe or use path_list_prepend; add a local syntax probe);
-    (b) package-symbols WORKING_DIRECTORY points at ${CMAKE_BINARY_DIR}/symbols created by
-    its own first command; Ninja probe reproduces 'cd: can't cd' -> developer fix (create the
-    dir at configure time or use absolute paths).
-  run_4: >-
-    34965200127 failure (windows-ci, 12m20s): test-enabled job FULLY GREEN (188/188 tests +
-    clean package consumer PASS). Release job green through package-verify; package-symbols
-    now fails copying the expected PDB because the file was never produced: verified in
-    /usr/share/cmake-3.28/Modules/Platform/Windows-MSVC.cmake that only Debug and
-    RelWithDebInfo link with /debug; Release links with /INCREMENTAL:NO only, while
-    CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=ProgramDatabase affects the compiler (/Zi) only.
-    Fix: link /debug for Release on the shared target + pin PDB_OUTPUT_DIRECTORY so the genex
-    and the linker agree; add a clear missing-PDB error. vcpkg cache steps ran successfully.
-  run_5: >-
-    34968127270 SUCCESS (windows-ci, 3m16s - vcpkg cache effective): both jobs green; package
-    + symbols uploaded. Controller artifact verification (downloaded from the run): package ZIP
-    cvforwin-1.0.0.zip contains bin/cvforwin.dll (PE32+ x64), lib/cvforwin.lib,
-    include/cvforwin/cvf_api.h, config/examples, docs, LICENSES; DLL export table has exactly
-    the five cvf_* symbols and imports only system DLLs (MFPlat/MF/MFReadWrite/ole32/KERNEL32);
-    symbols ZIP contains cvforwin.pdb (14.5MB). Portable cert + Windows CI evidence complete;
-    remaining external item: designated-station UVC hardware run.
-  run_5_manual: >-
-    Developer manual docs/development.md (588 lines, 13 sections) written by developer and
-    verified (19 presets, 43 paths, test-subset commands re-run); reviewer initial
-    REQUEST_CHANGES (F1 broken Catch2 filter example, F2 package-symbols portable wording),
-    fixed and re-approved (.ai/reviews/dev-manual-review.yaml). Staged for the user to push.attempts:
-  CVF-001: 1
-completed_gates:
-  - change: CVF-001
-    gate: test-red
-    status: PASS
-    evidence: .ai/reports/CVF-001-test-red.yaml
-    note: >-
-      4 independent test TUs + 2 isolation stubs authored under tests/abi/; RED = missing
-      public header (exit 1 x4 compile checks) plus missing CMakePresets.json; harness
-      self-check 52/52 green against a spec-derived mock; ownership hashes recorded in
-      .ai/test-ownership.yaml.
-  - change: CVF-001
-    gate: implementation
-    status: PASS
-    evidence: .ai/reports/CVF-001-implementation.yaml
-    note: >-
-      Real canonical evidence: configure 0, build 0, ctest 22/22 (18 Catch2 + 4 abi),
-      format-check 15 files, abi-check exactly 5 exports, nm cvf_* = 5, asan 22/22,
-      clang-tidy 6/6 clean, wsl-quality workflow 0. tests/abi hashes match manifest.
-      One rework item fixed inside the developer session (defective unit-test assertion).
-      Windows presets authored; Windows CI evidence still pending.
-  - change: CVF-001
-    gate: test-verify
-    status: PASS
-    evidence: .ai/reports/CVF-001-test-verify.yaml
-    note: >-
-      22/22 tests passed (4/4 cvf.abi independent, 0 skipped); 6/6 ownership hashes matched
-      before edits; test owner extended test_abi_runtime.c with 6 brief-derived edge-case
-      blocks (59 checks) and recorded the updated hash; no assertion weakened.
-  - change: CVF-001
-    gate: review
-    status: PASS
-    evidence: .ai/reviews/CVF-001.yaml
-    note: >-
-      Verdict APPROVE, 0 blocking findings; 9 non-blocking (F1-F9). F1/F2/F5/F7 routed to
-      amendment; F3/F4 deferred to CVF-007; F6 test-owner follow-up; F8 quality-gate evidence.
-  - change: CVF-001
-    gate: quality
-    status: PASS
-    evidence: .ai/reports/CVF-001-quality.yaml
-    note: >-
-      16 commands, 0 failures: configure 0; clean-first full build 0 (non-incremental);
-      ctest 25/25 with 0 skipped (4/4 cvf.abi ran); format-check 16 files; abi-check exactly
-      5 exports; static-analysis 6 TUs clean; asan 25/25; wsl-quality workflow 6/6; ownership
-      6/6 sha256 matches; nm export set == .def allowlist. Windows MSVC DLL/export/package/
-      clean-consumer evidence deferred to windows-2022 CI (recorded).
-  - change: CVF-002
-    gate: test-red
-    status: PASS
-    evidence: .ai/reports/CVF-002-test-red.yaml
-    note: >-
-      8 independent test files under tests/camera/; 6 TUs exit 1 with the expected missing
-      core/deadline.h diagnostic; 49 planned cases (B1-B12 + boundary/negative); manifest
-      extended to a changes: mapping with CVF-001 preserved byte-exact and CVF-002 hashes.
-  - change: CVF-002
-    gate: implementation
-    status: PASS
-    evidence: .ai/reports/CVF-002-implementation.yaml
-    note: >-
-      configure 0; build 0; ctest 86/86 (49 camera + 4 abi + 33 unit); format-check 30 files;
-      static-analysis 11 TUs clean; asan 86/86; abi-check 5 exports; option OFF/ON check
-      (37 tests without camera suite, 86 with); tests/camera hashes unchanged vs manifest.
-      Deviations flagged: windows-msvc-release defaults test-backends OFF so the camera
-      suite would not register on Windows MSVC -> resolve before CVF-008 per test policy.
-  - change: CVF-002
-    gate: test-verify
-    status: PASS
-    evidence: .ai/reports/CVF-002-test-verify.yaml
-    note: >-
-      Fresh session: ctest 86/86 (49/49 camera), 0 skipped; no SKIP/DISABLED/weakened cases in
-      tests/camera; all 8 CVF-002 ownership hashes byte-identical pre/post run.
-  - change: CVF-002
-    gate: review
-    status: PASS
-    evidence: .ai/reviews/CVF-002.yaml
-    note: >-
-      Verdict APPROVE, 0 blocking. F1 (non-blocking): windows-msvc-release preset would not
-      register the camera suite; fix via an explicit ON Windows test configuration before any
-      Windows camera evidence claim (owner: CVF-008/CMakePresets.json). 7 lower observations.
-  - change: CVF-002
-    gate: quality
-    status: PASS
-    evidence: .ai/reports/CVF-002-quality.yaml
-    note: >-
-      15 commands, 0 failures: configure 0; clean-first build 0; ctest 86/86 (49/49 camera,
-      0 skipped, 375 assertions); format 30 files; abi-check 5 exports; static-analysis 11 TUs
-      clean; asan 86/86; wsl-quality workflow 0; ownership 14/14 sha256 matches; export set
-      exact. Anomalies: QE-1 package-refusal quoting defect (CVF-008) and F1 Windows preset
-      gap; Windows DLL/package/consumer evidence deferred to windows-2022 CI.
-  - change: CVF-003
-    gate: implementation
-    status: PASS
-    evidence: .ai/reports/CVF-003-implementation.yaml
-    note: >-
-      configure 0; build 0; ctest 135/135 (86 pre-existing + 37 independent CVF-003 + 12
-      developer); format-check 43 files (no new exclusions); static-analysis 14 TUs clean
-      (fixed one branch-clone finding); asan 135/135; independent hashes 4/4 match. Noted:
-      dispatch uses a documented const_cast (const interface, non-const inspect).
-  - change: CVF-003
-    gate: test-verify
-    status: PASS
-    evidence: .ai/reports/CVF-003-test-verify.yaml
-    note: >-
-      Fresh session: configure/build/ctest exit 0; 135/135, 0 skipped; CVF-003 cases #95-#131
-      = 37 with 295 assertions; owned files format-clean; hashes 4/4 match pre and post run.
-  - change: CVF-003
-    gate: review
-    status: PASS
-    evidence: .ai/reviews/CVF-003.yaml
-    note: >-
-      Verdict APPROVE, 0 blocking; NF-1..NF-7 non-blocking. const_cast bridge accepted with a
-      documentation recommendation and a note to revisit inspect() const at the next interface
-      revision.
-  - change: CVF-003
-    gate: quality
-    status: PASS
-    evidence: .ai/reports/CVF-003-quality.yaml
-    note: >-
-      All canonical commands exit 0: clean-first build; ctest 135/135 (CVF-003 37/37, 295
-      assertions, 0 skipped); format 43 files; abi-check 5 exports; static-analysis clean;
-      asan 135/135; wsl-quality workflow 0; ownership 18/18 sha256; export set exact.
-      Deferrals: Windows DLL/ABI/package/consumer pending CI; anomaly QE-1 (CVF-008).
-  - change: CVF-004
-    gate: test-red
-    status: PASS
-    evidence: .ai/reports/CVF-004-test-red.yaml
-    note: >-
-      6 independent test files under tests/unit/cvf004_*; RED = missing src/recipes headers
-      (exit 1); manifest now has CVF-001..004 sections; author assumptions A1-A6 recorded.
-  - change: CVF-004
-    gate: implementation
-    status: PASS
-    post_fix: "TV-1 fixture anchor corrected by test owner; full ctest 203/203 (amendment: .ai/reports/CVF-004-test-red-amendment.yaml)."
-    evidence: .ai/reports/CVF-004-implementation.yaml
-    note: >-
-      Code + CMake complete; configure/build/format(56 files)/static-analysis(17 clean) green;
-      ctest 202/203 in debug and asan — sole failure TV-1 is a defect in the independent test
-      fixture (missing comma in a JSON template string), which fails inside the test helper
-      before production code runs. Routed to test-engineer (owner) for fixture fix + re-hash,
-      then fresh verify. SavePolicy spec aligned to std::string tokens in the change file.
-  - change: CVF-004
-    gate: test-verify
-    status: PASS
-    evidence: .ai/reports/CVF-004-test-verify.yaml
-    note: >-
-      Fresh session: configure/build/ctest exit 0; 204/204 (60 independent CVF-004 cases,
-      0 skipped); hashes 6/6 initially matched; owner extended two boundary cases
-      (frame_rate just above 0) with updated hashes and explained in the report; no
-      assertion weakened.
-failures:
-  - change: CVF-004
-    id: TV-2
-    artifact: tests/unit/cvf004_holder_test.cpp
-    observed: >-
-      Under wsl-gcc-asan full-suite run: CHECK(observations > 0) at line 112 failed once
-      (1 of 204); no ASan/UBSan report; "violations == 0" passed; repeat-until-fail:20 of the
-      single test passed. Intermittent liveness (writer finishes before readers scheduled).
-    route: test-engineer
-    cycle: 1
+  approved_at: 2026-09-18
+  sha256: 24411d0b9fb44815c39948bba1ad24a473c1b3775233d9ab4fc9413bb113c9a6
+prior_program:
+  name: cvforwin-implementation-1.0.0
+  state: archived
+  destination: .ai/archive/cvforwin-implementation-1.0.0/
+  archived_changes: 8
+  archived_test_briefs: 8
+  audit_preserved:
+    - .ai/reports/**
+    - .ai/reviews/**
+    - .ai/test-ownership.yaml
+    - .ai/validation/**
+  note: >-
+    Active .ai/changes and .ai/test-briefs are empty. Archived bytes are unchanged;
+    reports, reviews, test hashes, and validation logs remain immutable audit history.
+program_risk: R2
+program_risk_justification: >-
+  Bounded hardening inside the existing modules with no public ABI, status, schema-family,
+  dependency-family, or packaging-policy change. Preserves C ABI v1 and the five exports.
+current_change: CVF-107
+current_batch: batch-4-release
+stage: BATCH_COMPLETE
+implementation_owner: developer
+next_action: >-
+  Batch-4 (CVF-107 + CVF-108) is complete at candidate 2461959c1b1d5d27ca4f14d2f4014099349b22fd.
+  Release review verdict RELEASE_READY with 0 blocking (.ai/reviews/batch-4.yaml, copied from
+  .ai/reports/batch-4-release.yaml); windows-ci run 35449763555 succeeded on both jobs (363/363 release,
+  528/528 test-enabled including the clean package consumer); batch quality gate PASS at that SHA.
+  Segment A findings B4A-01..03 were fixed in 2461959 and re-verified on the physical station.
+  OPEN - DO NOT REPORT AS SATISFIED. The contract's hardware_uvc.production_release_requirement is NOT
+  YET SATISFIED: orientation and colour remain UNVERIFIED because the station has no CVF-ORIENT-1 and no
+  CVF-COLOR-1 physical target, and the suite itself now refuses to certify a 1000-cycle release run
+  without them (the final 1000-cycle run records valid=1000 invalid=0 but exits 1 for that reason).
+  To close it, one clean full release run is required on a station fitted with both targets:
+  CVF_HW_CYCLES=1000, CVF_HW_UNPLUG_TEST=1, CVF_HW_REQUIRE_ORIENTATION=1, CVF_HW_REQUIRE_COLOR=1, an exact
+  selector, and driver/firmware recorded, ending in RESULT: PASS / exit 0. FCT deployment must not proceed
+  on the current evidence.
+  Also open: (1) B4R-03 - the batch-3 release review was never run and .ai/reviews/batch-3.yaml does not
+  exist; batch-3 (CVF-106) is CI-green and its code is inside the batch-4 candidate, but the cross-task
+  review artifact is missing. (2) B4A-04 reconnect evidence was captured on the pre-fix binary at 20 cycles.
+  (3) B4A-05/B4A-06 carried. (4) CVF108-NBF-04 carried.
+  CVF-108 ownership manifest 42237619e7be676e9a4d7d1e709f0c3f1fb63838b19f990843ebaac7d2e1a349.
+gate_artifacts:
+  cvf102_test_brief: .ai/test-briefs/CVF-102.yaml
+  cvf102_test_red_report: .ai/reports/CVF-102-test-red.yaml
+  cvf102_independent_test: tests/windows/uvc/cvf102_uvc_worker_lifecycle_test.cpp
+  cvf102_independent_test_sha256: ce2cc80ee41e7cf5579dd4cf6c7a46f29eaa066179912ab46beb54e195562109
+  cvf102_ownership_manifest_sha256: 58041894a276dd7503576f1eeafd30f1c2340055282a311d7bdc32ece3b2e928
+  cvf102_independent_test_sha256_final: 81688985d11af7840e46e748bf489d0a7141c0d49d460fbc1fd535149e84203a
+  cvf102_review_report: .ai/reviews/CVF-102.yaml
+  cvf102_review_verdict: PASS_WITH_FINDINGS
+  cvf102_quality_plan: .ai/validation/CVF-102-quality-plan.yaml
+  cvf102_quality_report_json: .ai/reports/CVF-102-quality.json
+  cvf102_quality_review: .ai/reports/CVF-102-quality-review.yaml
+  cvf102_quality_verdict: PASS
+  cvf102_quality_test_counts: "284/284 ctest; 284/284 asan"
+  cvf102_ci_report: .ai/reports/CVF-102-ci.yaml
+  cvf102_ci_candidate_sha: 4c2c1d29eb3fc4f74d9d88ffb378379045b32f7d
+  cvf102_ci_conclusion: success
+  cvf102_ci_tests: "311/311 windows test-enabled incl. CVF-102 component suite"
+  cvf103_test_brief: .ai/test-briefs/CVF-103.yaml
+  cvf103_test_red_report: .ai/reports/CVF-103-test-red.yaml
+  cvf103_independent_test_portable: tests/unit/cvf103_stream_generation_test.cpp
+  cvf103_independent_test_portable_sha256: 589f82217fed240a13c447b2e705eb926959a104505bc81e49d3c87137e227be
+  cvf103_independent_test_windows: tests/windows/uvc/cvf103_uvc_callback_snapshot_test.cpp
+  cvf103_independent_test_windows_sha256: 32e4d7826794849e5f8aca95ba55d0a8459ae3285ec1e531e9abf58c58c2dedf
+  cvf103_ownership_manifest_sha256: a2acfa82cea70a8effc3c515728907eddcad6bef4a5bd12e8ab34e8a6b8d7af8
+  cvf103_ownership_manifest_sha256_final: cb7a6180cfb4b36464d2d2f60ab79be140ae6eb53dcde94b3261d2ebea745a21
+  cvf103_review: .ai/reviews/CVF-103.yaml
+  cvf103_review_sha256: 595f375b67bbba9901c766d3ed68c8b5ff264cce7d3f2634396de7c3819b1890
+  cvf103_review_verdict: PASS_WITH_FINDINGS
+  cvf103_quality_plan: .ai/validation/CVF-103-quality-plan.yaml
+  cvf103_quality_plan_sha256: ca942338e51ebca203e7e8f8e5e0eb7db52c5df36069b2d5bf03e965103e7b4b
+  cvf103_quality_json: .ai/reports/CVF-103-quality.json
+  cvf103_quality_json_sha256: d8f2ddf58e8cd2a19e9ad392d817cd93f3d2ea3fe6f6bca6edb0fd0b128023fb
+  cvf103_quality_verdict: PASS
+  cvf103_quality_review: .ai/reports/CVF-103-quality-review.yaml
+  cvf103_commit: a37673551bbb962d6dec4a2ca567325e6109c84a
+  cvf103_ci_run: "35326684044 success 351/351"
+  batch1_descriptor: .ai/changes/batch-1-uvc-correctness.yaml
+  batch1_candidate_sha: a37673551bbb962d6dec4a2ca567325e6109c84a
+  batch1_quality_report: .ai/reports/batch-1-quality.json
+  batch1_quality_report_sha256: 2a381d2a01c4c832f63ef682ec0c17ea74171d1b3a13fa8e570e17d97cc86113
+  batch1_release_review: .ai/reviews/batch-1.yaml
+  batch1_release_verdict: RELEASE_READY_WITH_FINDINGS
+  batch1_ci: .ai/reports/batch-1-ci.yaml
+  cvf104_test_brief: .ai/test-briefs/CVF-104.yaml
+  cvf104_test_red_report: .ai/reports/CVF-104-test-red.yaml
+  cvf104_ownership_manifest_sha256: 3a808f68516a0bef66207a60c9c4ad74d2cdf95441ef09fa82eb998ff0b1be42
+  cvf104_ownership_manifest_sha256_final: d370acb89d2b120f36bc0493036d67d789be0a0c8fa3de790d514a57516f10f1
+  cvf104_review_verdict: PASS_WITH_FINDINGS
+  cvf104_quality_verdict: PASS
+  cvf104_quality_plan_sha256: 284d745a342f8f33e5e210df4bec898c45d87d049e3149071ce8cb8df7c9901d
+  cvf104_commit: 8b96cb8
+  cvf104_dsv_attempts: 0
+  cvf104_ci_run: "35386486871 success 397/397 at de167ba"
+  cvf104_delivery_sha: de167ba1c84e3b9354a16aaf16ab7bed14316d2a
+  cvf105_test_brief: .ai/test-briefs/CVF-105.yaml
+  cvf105_test_red_report: .ai/reports/CVF-105-test-red.yaml
+  cvf105_ownership_manifest_sha256: 05ed76e55b93f9c075d66fdb5baa3313ceaceea67267a8f46a984226a060a51e
+  cvf105_hold_dir: /tmp/opencode/cvf105-hold
+  cvf105_review_verdict: PASS_WITH_FINDINGS
+  cvf105_review_sha256: 88acb2206c5a7deae3dc568bd728fd28c6342ecb3855c20fcbdba0fae34740c1
+  cvf105_quality_verdict: PASS
+  cvf105_quality_plan_sha256: 107d7321371eafade9399c41e9a715775730d6c1d86ce58ca299c41a95a4907f
+  cvf105_ownership_manifest_sha256_final: 26ad8d3c9445cec424532cd0b06a0421d951adc653ea54a3c8baaf621ff8b3c9
+  cvf105_commit: ab47119
+  batch2_candidate_sha: b4256e7e108e0631fb10622e08c9fe5e0823616c
+  batch2_fix_commit: b4256e7
+  batch2_quality_report_sha256: 83a098c8231f1c09a159564a6347bfd745fad11aafdeb88416a56a136352563f
+  batch2_ci_run: "35400487206 success 463/463 + 326/326 at b4256e7"
+  batch2_release_review: .ai/reviews/batch-2.yaml
+  batch2_release_verdict: RELEASE_READY_WITH_FINDINGS
+  cvf106_ownership_manifest_sha256_final: a91813e0f2bf13820f41bc8b31344051ee7f51cfe4ae4d30a28fe51231338089
+  cvf106_test_amendments:
+  - CVF-106 outcome_measurements flat-shape + B8 fixed-frame camera (test owner)
+  - CVF-003 registry exact registered set {example.threshold, template.match} for FR-029
+  cvf106_open_item: >-
+    src/runtime/context.cpp select_descriptor() now takes `overridden`; reviewer must confirm production
+    behaviour is unchanged when no camera_override is set.
+  cvf105_test_amendments:
+  - CVF-004 amended for FR-024 lowercase canonicalization (tests/unit/cvf004_config_test.cpp)
+  - CVF-105 abi_pairs whitespace case corrected to an algorithm-accepted key
+  - CVF-105 abi_validation kMissingRoot dangling-pointer ASan fix
+  open_findings:
+  - id: CVF105-NB-01
+    summary: >-
+      Legacy fragment-estimate guard at src/inspection/registry.cpp:118-123 (out of CVF-105 scope) still
+      pre-rejects some over-bound payloads as algorithm_error rather than buffer_too_small; controller/architect
+      follow-up.
+  - id: CVF105-NB-02
+    summary: >-
+      tests/unit/cvf105_abi_validation_test.cpp:317-335 relaxed the missing-root status to status != CVF_OK;
+      strict CONFIG_ERROR is independently pinned by tests/abi/cvf006_lifecycle.c:631-632. Test-quality gap.
+  - id: CVF105-NB-04
+    summary: Stale comment src/camera/camera_backend.h:33 says matching is case-sensitive; now canonical. Docs-only.
+  - id: CVF105-NB-03
+    summary: Duplicated canonicalization logic (camera_backend.cpp:20-37 vs recipes/config.cpp:350); divergence risk.
+  test_brief: .ai/test-briefs/CVF-101.yaml
+  test_red_report: .ai/reports/CVF-101-test-red.yaml
+  ownership_manifest: .ai/test-ownership.yaml
+  ownership_manifest_sha256: d7f345e3c193933a70dc401d581c3e70ed28a0873297f78129b34955de5bcb6f
+  independent_test_file: tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp
+  independent_test_sha256: 1c006a1d11b89b261943ba553ebfe85a6f74f877a17988e7f0aa25b61ded1595
+  red_evidence: "g++ -D_WIN32 -fsyntax-only test TU -> exit 1 (frozen seam header absent); portable ctest 263/263 green"
+  independent_verify_report: .ai/reports/CVF-101-test-verify.yaml
+  independent_verify_result: "20 cases / 752 assertions, 0 failed, exit 0; FIND-CVF101-01 closed"
+  ownership_manifest_sha256_final: 2441c3656db05141da50b13212a7863c2b904caae09e1f9bcd2ac0c0ca3edab9
+  review_report: .ai/reviews/CVF-101.yaml
+  review_verdict: APPROVE
+  quality_plan: .ai/validation/CVF-101-quality-plan.yaml
+  quality_report_json: .ai/reports/CVF-101-quality.json
+  quality_review: .ai/reports/CVF-101-quality-review.yaml
+  quality_verdict: PASS
+  quality_test_counts: "275/275 ctest; 275/275 asan"
+  ci_report: .ai/reports/CVF-101-ci.yaml
+  ci_candidate_sha: 55f595e07e4409f33648b01a8784218955c1516a
+  ci_conclusion: success
+  ci_tests: "windows 200/200 release; 289/289 test-enabled incl. CVF-101 component suite"
+  independent_test_sha256_final: ae8874a546bccca4b117202b5ee30bd22d999c933c53573d1f6b641a296c9537
+independence_incidents:
+  - id: IND-CVF101-01
+    summary: >-
+      codegraph_explore returned verbatim uvc_frame_convert.cpp source into the test-engineer
+      verify session while it was attempting to read only frozen headers. Must be recorded in the
+      verify report; the finding above was independently reproduced by the controller from source
+      semantics and a standalone OpenCV control, so it does not rest on that exposure.
+implementation_owner: developer
+completed_changes:
+  - {id: CVF-101, verdict: APPROVE, quality: PASS, notes: "i420/yv12 existing planar defect FIND-CVF101-01 found and fixed; FIND-CVF101-02 bounds-basis closed"}
+  - {id: CVF-102, verdict: PASS_WITH_FINDINGS, quality: PASS, notes: "MTA worker + COM/MF isolation; Windows CI 311/311; NB-1..NB-6 non-blocking for release-reviewer"}
+failed_dsv_attempts: 0
+unresolved_findings:
+  - id: FIND-CVF101-02
+    severity: low-medium
+    owner: reviewer
+    summary: >-
+      accessible_bytes semantics are documented as "reachable bytes from scanline0" but the math
+      (packed_row_region_offset/packed_row_fits) and production treat it as an extent measured from
+      the LOWEST ADDRESSED byte (== ppbBufferStart). Positive pitch: identical. Negative pitch:
+      differs, and production passes Lock2DSize's pcbBufferLength (measured from ppbBufferStart), so
+      production is self-consistent only because buffer_start equals the lowest addressed byte for a
+      full frame. A caller implementing the documented field meaning literally under negative pitch
+      would be under-permissive. Not demonstrated as a live production failure; requires reviewer
+      adjudication (clarify the header/spec wording or normalize the semantics).
+    status: awaiting_review
+  - id: FIND-CVF101-01
+    severity: high
+    owner: developer
+    summary: >-
+      decode_planar_420 allocates a cv::Mat with (luma_rows + chroma_rows) rows but writes the V
+      plane at row luma_rows + chroma_rows + row, which is out of bounds; OpenCV ptr() throws
+      (-215) and the seam maps it to camera_io/capture_failed. i420 (7) and yv12 (8) with positive
+      pitch therefore always fail. Pre-existing in HEAD copy_planar_rows (not introduced by CVF-101),
+      masked previously because no test exercised i420/yv12.
+    evidence:
+      - ".ai/reports/CVF-101-test-verify.yaml (pending) and controller repro"
+      - "repro: planar cv::Mat rows=6 but memcpy to ptr(6+row) throws mat.inl.hpp:701 (-215)"
+    status: closed
     resolution: >-
-      Owner fixed tests/unit/cvf004_holder_test.cpp with deterministic reader-readiness
-      synchronization; debug and asan 204/204; 50x asan repeat green; hash + amendment 2
-      recorded (.ai/reports/CVF-004-test-red-amendment-2.yaml).
-    status: resolved
-  - change: CVF-005
-    id: TV-3
-    artifact: tests/unit/cvf005_test_support.h
-    observed: >-
-      save_request() helper moves std::string temporaries into the frozen std::string_view
-      fields of CaptureSaveRequest, leaving dangling views (UB) for capture-store tests.
-    route: test-engineer
-    cycle: 1
-    resolution: "Owner introduced SaveRequestHolder (owning storage; rvalue request() deleted); 7/7 TUs compile against real headers; hashes + amendment recorded."
-    status: resolved
-  - change: CVF-005
-    id: TD-1
-    artifact: tests/unit/cvf005_diagnostics_logging_test.cpp
-    observed: >-
-      B4 calls Diagnostics::create with max_file_bytes=128 expecting success, contradicting the
-      frozen minimum of 1024 (and the suite's own B1 rejection of 1023).
-    route: test-engineer
-    cycle: 1
-    resolution: "Owner switched B4 to the valid 1024 minimum with a 40x96-byte rotation workload; bounds and assertions unchanged; hash + amendment 2 recorded."
-    status: resolved
-  - change: CVF-005
-    id: TD-2
-    artifact: tests/unit/cvf005_capture_store_test.cpp
-    observed: >-
-      Both-empty identifier filename expectation uses a double underscore ("_unnamed__unnamed_")
-      while the frozen single-underscore grammar yields "_unnamed_unnamed_".
-    route: test-engineer
-    cycle: 1
-    resolution: "Owner pinned \"_unnamed_unnamed_0.png\" and kept rejecting the impossible double-underscore form; hash + amendment 2 recorded."
-    status: resolved
-  - change: CVF-006
-    id: TV-4
-    artifact: tests/abi/cvf006_lifecycle.c
-    observed: >-
-      B13 passthrough case used kFailParameters (threshold 255, min_pass_ratio 1.0) on an
-      all-white frame, yielding FAIL->PASS under the frozen inverted-mask semantics, while the
-      case documents and asserts PASS->FAIL. Self-inconsistent recipe selection.
-    route: test-engineer
-    cycle: 1
-    resolution: "Owner introduced kFlipParameters {threshold 128, min_pass_ratio 0.5} for that case only; assertions unchanged; hash + amendment recorded."
-    status: resolved
-  - change: CVF-004
-    gate: quality
-    status: PASS
-    evidence: .ai/reports/CVF-004-quality.yaml
-    note: >-
-      21 commands, 0 failures on the frozen post-TV-2 state: debug 204/204 (0 skipped; 60
-      independent CVF-004 cases), clean-flavor canonical runs, format 56 files, static-analysis
-      17/17, asan 204/204 plus 3 repeats, wsl-quality workflow 0, ownership 24/24 sha256,
-      exports exact. NB-1..NB-4 confirmed. Deferrals: Windows evidence pending CI; QE-1
-      carry-over for CVF-008.
-  - change: CVF-005
-    gate: test-red
-    status: PASS
-    evidence: .ai/reports/CVF-005-test-red.yaml
-    note: >-
-      7 independent test files (34 cases, B1-B14); RED = missing core/warnings.h,
-      src/diagnostics, src/artifacts and 17xx/18xx error codes (7/7 exit 1); manifest now
-      has CVF-001..005 sections; author assumptions A1..A16 recorded.
-  - change: CVF-005
-    gate: test-verify
-    status: PASS
-    evidence: .ai/reports/CVF-005-test-verify.yaml
-    note: >-
-      Fresh session: 242/242 (0 skipped; CVF-005 38/38 = 34 independent + 4 developer);
-      format-check 69 files; 10x repeat of CVF-005 green; hashes 7/7 match; no weakened tests.
-  - change: CVF-005
-    gate: review
-    status: PASS
-    evidence: .ai/reviews/CVF-005.yaml
-    note: >-
-      Verdict APPROVE, 0 blocking; NB-1..NB-6 non-blocking (runtime link hardening, unchecked
-      remove(), final-state canonical evidence -> quality gate, spdlog max_files-1 documented,
-      contract note vs 1024 bound, POSIX-only symlink coverage).
-  - change: CVF-005
-    gate: quality
-    status: PASS
-    evidence: .ai/reports/CVF-005-quality.yaml
-    note: >-
-      20 commands, 0 failures on the frozen state: debug 242/242 and asan 242/242 (0 skipped;
-      CVF-005 38/38), clean-first builds, format 69 files, static-analysis 19, wsl-quality
-      workflow 6/6, ownership 31/31 sha256, export set exact, frozen digest unchanged.
-      NB-3 evidence persisted; QE-1 carry-over for CVF-008.
-  - change: CVF-006
-    gate: implementation
-    status: PASS
-    evidence: .ai/reports/CVF-006-implementation.yaml
-    note: >-
-      configure/build 0; ctest 262/262 debug and asan (242 pre-existing + 20 CVF-006); lifecycle
-      checks 178/0; format 79 files; static-analysis 20 TUs; abi-check 5 exports; 41/41 pinned
-      test files match. Frozen deviations: TimeoutMs dual-assignable timeout, nlohmann::json
-      output_json dumped at the C ABI, shared_ptr camera_override; test target uses
-      -Wno-narrowing for the read-only support pattern (reviewer attention).
-  - change: CVF-006
-    gate: test-verify
-    status: PASS
-    evidence: .ai/reports/CVF-006-test-verify.yaml
-    note: >-
-      Fresh session: 262/262 (0 skipped; CVF-006 20/20 = 15 independent C++ + 1 C lifecycle +
-      4 developer); direct lifecycle 186 checks 0 failures; ASan 20/20; hashes 10/10 initially
-      and after the owner's boundary addition (pass_ratio == min_pass_ratio).
-  - change: CVF-006
-    gate: review
-    status: PASS
-    evidence: .ai/reviews/CVF-006.yaml
-    note: >-
-      Verdict APPROVE, 0 blocking; non-blocking notes (input_json parse before Deadline, C API
-      duplicates abi_validation, context-before-struct ordering, stale-pointer second shutdown
-      UB, hash claims -> quality). Quality discharged the hash recomputation.
-  - change: CVF-006
-    gate: quality
-    status: PASS
-    evidence: .ai/reports/CVF-006-quality.yaml
-    note: >-
-      23 commands, 0 failures on the frozen state: debug+asan 262/262 (0 skipped), CVF-006
-      20/20, lifecycle 186 checks, format 79, static-analysis 20, ownership 41/41 sha256,
-      exports exact, wsl-quality workflow 6/6. Deferrals: Windows/UVC evidence -> CVF-007/008 CI.
-  - change: CVF-007
-    gate: test-red
-    status: PASS
-    evidence: .ai/reports/CVF-007-test-red.yaml
-    note: >-
-      tests/hardware/uvc_smoke.cpp authored (H1-H6 + negatives, env-gated manual replug, no
-      first-device fallback); structural RED deferred honestly (WSL host, implementation
-      absent); manifest CVF-007 section added.
-  - change: CVF-007
-    gate: implementation
-    status: PASS
-    evidence: .ai/reports/CVF-007-implementation.yaml
-    note: >-
-      WSL non-regression: configure/build 0; ctest 263/263 (262 pre-existing + 1 developer case;
-      hardware suite unregistered, option default OFF); format 82 files; static-analysis 21;
-      asan 263/263; 42 pinned test files match. Windows MSVC compile/link/ABI and the opt-in
-      hardware suite are contract-deferred to windows-2022 CI + designated station; forced
-      -D_WIN32 stub syntax probes done (explicitly non-evidence).
-  - change: CVF-007
-    gate: test-verify
-    status: PASS
-    evidence: .ai/reports/CVF-007-test-verify.yaml
-    note: >-
-      WSL executed evidence only: 263/263 (0 skipped; hardware suite not registered, option
-      OFF default confirmed); hash 1/1 match; hash-pinned file unmodified. Windows/hardware
-      execution explicitly DEFERRED (not PASS), listed in the verify report.
-  - change: CVF-007
-    gate: review
-    status: PASS
-    evidence: .ai/reviews/CVF-007.yaml
-    note: >-
-      Initial verdict REQUEST_CHANGES (F1 NUL-contaminated identity strings, F2 I420/YV12 chroma
-      stride OOB); developer amended uvc_backend.cpp (+5 non-blocking notes); focused re-review
-      APPROVE with F1/F2 resolved. Windows/hardware evidence remains deferred by design; MSVC
-      narrowing residual and station-run checklist recorded in the review.
-  - change: CVF-008
-    gate: test-red
-    status: PASS
-    evidence: .ai/reports/CVF-008-test-red.yaml
-    note: >-
-      Package-consumer kit authored (consumer CMake project + C11 main, package checks script,
-      config/recipes); 5 files hashed; 47/47 manifest hashes match; execution deferred honestly
-      to windows-2022 CI (no WSL execution claimed).
-  - change: CVF-008
-    gate: implementation
-    status: PASS
-    evidence: .ai/reports/CVF-008-implementation.yaml
-    note: >-
-      WSL real evidence: configure/build 0; ctest 263/263 (no delta); format 83 files;
-      static-analysis 21; C host example ran exit 0 (PASS verdict, JSON + capture path);
-      package/package-verify refusals exit 1 with clean messages; package-script harness 17/17
-      (simulated dumpbin); asan 263/263 + example 0. Fixes F3/F4/QE-1 implemented; F1 preset
-      split (release OFF / tests ON). Windows CI execution deferred.
-  - change: CVF-008
-    gate: test-verify
-    status: PASS
-    evidence: .ai/reports/CVF-008-test-verify.yaml
-    note: >-
-      Fresh session: portable suite 263/263 (0 skipped); CVF-008 hashes 5/5, full manifest 47/47;
-      package kit execution explicitly deferred to windows-2022 CI (not PASS).
-  - change: CVF-008
-    gate: review
-    status: PASS
-    evidence: .ai/reviews/CVF-008.yaml
-    note: >-
-      Verdict APPROVE, 0 blocking; 5 non-blocking (allowlist "mf" prefix, export regex,
-      inert CVFORWIN_BUILD_SHARED doc, "no work to do" build log, PDB symbols deferred).
-      Action SHAs verified against GitHub API as real v4 commits.
-  - change: CVF-008
-    gate: quality
-    status: PASS
-    evidence: .ai/reports/CVF-008-quality.yaml
-    note: >-
-      15 commands, 0 failures on frozen state: debug+asan 263/263 (0 skipped), format 83,
-      abi 5/5, static-analysis 21 (Windows-TU gap recorded), C host example exit 0 PASS in
-      debug and asan, ownership 47/47, exports 5/5, package refusal clean (QE-1 resolved),
-      wsl-quality workflow 6/6. Windows CI/package/consumer/symbols evidence deferred.
-  - change: cvforwin-1.0.0
-    gate: release
-    status: BLOCKED_EXTERNAL
-    evidence: .ai/reports/cvforwin-1.0.0-release.yaml
-    note: >-
-      Release verdict BLOCKED-pending-external-evidence with 0 blocking findings. Portable
-      scope fully certified (architecture, correctness, testing, security all PASS). Deferred
-      external evidence: windows-2022 workflow (release package/ABI/verify + clean consumer +
-      symbols) and the opt-in UVC hardware suite on a designated station. No local rework.
-final_verification:
-  by: build (controller)
-  result: >-
-    configure+build+ctest exit 0 (263/263, 0 failed, 0 skipped); nm -D exactly the five cvf_*
-    exports matching cvforwin.def; ownership manifest 47/47 sha256 matches, 0 mismatches;
-    C host example exit 0 with PASS verdict and real capture path.
-  recorded_at: 2026-09-15
-  - change: CVF-007
-    id: F1
-    artifact: src/camera/uvc_windows/uvc_backend.cpp
-    observed: "attribute_string passes GetAllocatedString's NUL-inclusive length into wide_to_utf8, so device_path/friendly_name carry an embedded trailing NUL."
-    route: developer
-    cycle: 1
-  - change: CVF-007
-    id: F2
-    artifact: src/camera/uvc_windows/uvc_backend.cpp
-    observed: "copy_planar_rows uses the luma stride for I420/YV12 chroma and validates only the packed minimum, risking reads past the locked sample buffer on padded-stride devices."
-    route: developer
-    cycle: 1
-    resolution: >-
-      Developer rewrote wide_to_utf8 NUL handling and the planar 4:2:0 stride/extent validation
-      (exact required_extent_bytes, canonical I420 reorder, zero-length/odd-stride rejection);
-      focused re-review verdict APPROVE (F1/F2 resolved); WSL 263/263 unchanged.
-    status: resolved
+      Fixed in src/camera/uvc_windows/uvc_frame_convert.cpp decode_planar_420 (canonical 3H/2
+      planar buffer with half-width packed chroma). Independently re-verified 752/752 assertions.
+batches:
+  - id: batch-1-uvc-correctness
+    changes: [CVF-101, CVF-102, CVF-103]
+    gate: release-review after batch
+    windows_evidence_required: true
+  - id: batch-2-runtime-artifacts
+    changes: [CVF-104, CVF-105]
+    gate: release-review after batch
+  - id: batch-3-algorithms
+    changes: [CVF-106]
+    gate: release-review after batch
+  - id: batch-4-release
+    changes: [CVF-107, CVF-108]
+    gate: release-review at release
+queue:
+  - {id: CVF-101, state: ready, title: "UVC 2D buffer signed-pitch + accessible-bounds conversion"}
+  - {id: CVF-102, state: planned, title: "UVC MTA worker thread + COM/MF lifetime isolation"}
+  - {id: CVF-103, state: planned, title: "Per-stream callback generation + stale callback rejection"}
+  - {id: CVF-104, state: planned, title: "End-to-end deadline + finalization + artifact save worker + background retention"}
+  - {id: CVF-105, state: planned, title: "VID/PID normalization + ABI pointer-length pairs + diagnostics atomics + single final JSON payload"}
+  - {id: CVF-106, state: planned, title: "Algorithm preparation/asset lifecycle + template.match + cv2 porting docs"}
+  - {id: CVF-107, state: planned, title: "UVC hardware stress suite (1000 cycles, orientation, color)"}
+  - {id: CVF-108, state: planned, title: "Release 1.1.0 version/package/doc synchronization"}
 environment:
   wsl_gcc: "ok (gcc 13.3, cmake 3.28.3, ninja, clang-format 18, clang 18)"
-  vcpkg: "installed at /home/administrator/vcpkg; pinned builtin-baseline a1cae005c39be7b18ba319fced856b68d7276271; export VCPKG_ROOT=$HOME/vcpkg"
-  clang_tidy: "ok (Ubuntu LLVM 18.1.3, installed by user)"
-  network: "ok"
-  hardware_note: "No local Windows host; Windows ABI/package evidence must come from the windows-2022 CI workflow."
-queue:
-  - id: CVF-001
-    state: complete_dev
-    title: "Canonical build bootstrap + public C ABI v1 header + core types + validating C API shell (all gates PASS; release review at program end)"
-  - id: CVF-002
-    state: next
-    title: "Camera contract + test backends (file/synthetic/fault) + deadline/Result core additions"
-  - id: CVF-003
-    state: planned
-    title: "Inspection contract and registry + deterministic example algorithm"
-  - id: CVF-004
-    state: planned
-    title: "Recipe store: strict global config + versioned recipes + atomic snapshot reload"
-  - id: CVF-005
-    state: planned
-    title: "Diagnostics and artifacts: rolling logs, C callback, capture persistence, retention"
-  - id: CVF-006
-    state: planned
-    title: "Runtime orchestrator + full C API lifecycle + native C host example"
-  - id: CVF-007
-    state: planned
-    title: "UVC Windows backend (code-complete; Windows CI verification)"
-  - id: CVF-008
-    state: planned
-    title: "Packaging, LICENSES/notices, schema docs, package-consumer tests, CI workflow (F3/F4 + quoting fix)"
-next_action: >-
-  User-side closing steps: (1) commit + push to GitHub (repo cvforge, public; 211 files staged,
-  branch main; push triggers windows-ci); (2) run the opt-in UVC hardware suite on a designated
-  Windows 10/11 station (tests/hardware/uvc_smoke.cpp; see docs/packaging.md). After both record
-  PASS, request a short release re-review to certify production release.
-repo_handoff:
-  local_repo: "initialized (git init -b main), 211 files staged, 2.1MB, no commits yet"
-  excluded_locally: ".ai/validation/** (37MB harness logs + 31MB probe binary) via .git/info/exclude"
-  target: "github.com/victor-wen/cvforge (public); push performed by the user - git commit/push are denied to build by role boundary and harness config"
-  ci_trigger: "push event -> windows-ci (two jobs); first run 30-90 min (Windows OpenCV build)"
-blockers: []
-carry_over:
-  - "CVF-007/008: resolved F3/F4/QE-1/F1 in CVF-008."
-  - "Test-owner follow-up: pin sizeof/offsetof of the v1 structs in independent tests (review F6, optional)."
-  - "Static-analysis Windows-TU coverage gap for src/camera/uvc_windows/uvc_backend.cpp (Linux compile DB) — covered by Windows CI build."
-  - "User-side: initialize git repo + remote and run windows-2022 CI; run the opt-in UVC hardware suite on a designated station before FCT deployment."
-  - "Test-owner follow-up: pin sizeof/offsetof of the v1 structs in independent tests (review F6)."
-  - "Quality gate: preserve fresh full-run evidence incl. verbose checks=59 and non-incremental build (review F8)."
-resolved:
-  - "clang-tidy installed by user (18.1.3); wsl_static_analysis gate unblocked."
+  vcpkg: "installed at /home/administrator/vcpkg; export VCPKG_ROOT=$HOME/vcpkg"
+  network: ok
+  hardware_note: "No local Windows host; Windows/UVC evidence must come from windows-2022 CI or the designated station."

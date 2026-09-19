@@ -1,0 +1,295 @@
+schema_version: 1
+change_id: CVF-105
+phase: VERIFY
+status: PASS
+owner: test-engineer
+generated_at: 2026-09-19
+program: cvforwin-hardening-1.1.0
+requirement: FR-025
+scope: >-
+  Bounded, test-only lifetime fix in tests/unit/cvf105_abi_validation_test.cpp.
+  No production source, frozen header, CMake configuration, .ai/changes/**, or
+  .ai/project-contract.yaml was modified. No assertion, case, SECTION, or
+  expected value was changed.
+
+defect:
+  file: tests/unit/cvf105_abi_validation_test.cpp
+  summary: >-
+    options_for() returned a cvf_init_options_v1 whose config_root_utf8 and
+    output_root_utf8 fields pointed at the caller's strings, but three call sites
+    passed the `const char*` constant kMissingRoot. That implicitly constructed a
+    temporary std::string which was destroyed at the end of the full-expression,
+    so cvf_initialize() later read freed heap memory (heap-use-after-free under
+    AddressSanitizer).
+  affected_cases:
+    - test: "CVF-105 B4: a short error message buffer reports the primary failure status and the required size"
+      ctest_id_asan_before: 391
+      site_lines_before: [238, 250]
+    - test: "CVF-105 B3: a valid pointer set with a missing root fails without publishing a context"
+      ctest_id_asan_before: 384
+      site_lines_before: [317]
+
+fix:
+  approach: >-
+    options_for() now takes std::string_view for both roots and stores
+    .data()/.size(), so a `const char*` argument can no longer silently create a
+    non-owning temporary; and each kMissingRoot caller binds the constant to a
+    named `const std::string` local that outlives the cvf_initialize() call.
+    A whole-file scan confirmed the only unsafe pattern was the kMissingRoot
+    argument; every other caller already passed named std::string locals.
+  preserved_intent: >-
+    All assertions, SECTIONs, test names, payloads, and expected values are
+    byte-identical to the prior revision; only the lifetime plumbing of the two
+    options structs changed.
+  files:
+    - path: tests/unit/cvf105_abi_validation_test.cpp
+      previous_sha256: 4a12787a3c8a8bfac8391fcb00b48b1fb7bb116431382d3f4b715bd05c92f6b6
+      new_sha256: 9dba770fd61496186ab1203a38676692e056ac713f19f546d783ce56817bd183
+    - path: tests/unit/cvf105_test.helpers.h
+      sha256: 634e19a47fb5d0cb305c408081dfc9c0eb518397bca0a8b9d62b60e0179dba3a
+      changed: false
+
+evidence_before:
+  asan_ctest:
+    command: "ctest --preset wsl-gcc-asan --output-on-failure"
+    exit_code: 8
+    counts: "411 passed, 2 failed, 0 skipped, out of 412"
+    failed_tests:
+      - "384 - CVF-105 B3: a valid pointer set with a missing root fails without publishing a context"
+      - "391 - CVF-105 B4: a short error message buffer reports the primary failure status and the required size"
+    observed: >-
+      AddressSanitizer: heap-use-after-free, READ of size 3 in memchr from
+      std::char_traits<char>::find; the freed 37-byte region was allocated and
+      freed by the temporary std::string constructed in the test at
+      tests/unit/cvf105_abi_validation_test.cpp:317 (test #384) and :238
+      (test #391), and read by cvf_initialize at :321 and :242 respectively.
+  debug_ctest:
+    command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "412 passed, 0 failed, 0 skipped, out of 412"
+  raw_log: .ai/validation/cvf105-lifetime-before.txt
+
+evidence_after:
+  format:
+    command: "clang-format --dry-run --Werror tests/unit/cvf105_abi_validation_test.cpp"
+    exit_code: 0
+  asan_build:
+    command: "cmake --build --preset wsl-gcc-asan --parallel"
+    exit_code: 0
+    summary: "rebuilt cvf105_abi_validation_test.cpp.o and relinked cvf105_abi_validation_tests"
+  asan_ctest:
+    command: "ctest --preset wsl-gcc-asan --output-on-failure"
+    exit_code: 0
+    counts: "412 passed, 0 failed, 0 skipped, out of 412"
+    named_tests:
+      - "384 - CVF-105 B3: a valid pointer set with a missing root fails without publishing a context: Passed"
+      - "391 - CVF-105 B4: a short error message buffer reports the primary failure status and the required size: Passed"
+  debug_build:
+    command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    summary: "ninja: no work to do (already up to date after the shared source edit)"
+  debug_ctest:
+    command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "412 passed, 0 failed, 0 skipped, out of 412"
+  raw_log: .ai/validation/cvf105-lifetime-after.txt
+
+ownership:
+  manifest: .ai/test-ownership.yaml
+  section: CVF-105
+  files_checked: 8
+  mismatches: []
+  rehash_command: "bash .ai/validation/cvf105-manifest-check.sh"
+  rehash_exit_code: 0
+  new_manifest_sha256: 83a5d0d35f742bf346020ab21e4c3af1bc1209f974dd3dc3d82847e2b7b493d2
+  other_sections_unchanged: true
+  note: >-
+    Only the CVF-105 sha256 line for tests/unit/cvf105_abi_validation_test.cpp and
+    the CVF-105 notes paragraph were edited; all other sections are byte-for-byte
+    unchanged. The remaining seven CVF-105 files re-hash to their recorded values.
+
+harness_files:
+  - path: .ai/validation/cvf105-abi-lifetime-verify.sh
+    role: "before/after ASan+debug build and ctest capture"
+  - path: .ai/validation/cvf105-manifest-check.sh
+    role: "YAML parse, per-file re-hash, manifest sha256"
+
+independence:
+  inspected_production_source: false
+  inputs_used:
+    - tests/unit/cvf105_abi_validation_test.cpp
+    - tests/unit/cvf105_test.helpers.h
+    - .ai/test-ownership.yaml
+    - .ai/reports/CVF-105-test-red.yaml
+    - .ai/reports/CVF-105-test-amendment.yaml
+  note: >-
+    The fix is derived solely from the observed ASan report and the test file's
+    own lifetime structure. The ASan stack trace unavoidably named production
+    translation units (src/core/text.cpp, src/core/abi_validation.cpp,
+    src/c_api/cvf_entry_points.cpp); no source file was opened and no expectation
+    was derived from those frames solely beyond localizing the read to the two
+    test call sites. No `changed_files`, developer diff, or root-cause report was
+    requested or accepted.
+
+not_weakened: >-
+  No assertion was removed, skipped, disabled, or weakened; the test count is
+  unchanged at 412 and every CVF-105 case still runs. The lifecycle fix changes
+  only how long the input strings live.
+
+blockers: []
+
+verify_run_2:
+  generated_at: 2026-09-19
+  status: PASS
+  purpose: >-
+    Independent black-box verify of CVF-105 from the behavior brief and the
+    approved contract only, with requirement-derived edge cases added to the
+    owned tests. No production .cpp was read, no developer report was trusted,
+    and no frozen-pinned file was changed except the CVF-105 section of
+    .ai/test-ownership.yaml by its owner.
+  canonical_commands:
+    - command: "cmake --preset wsl-gcc-debug"
+      exit_code: 0
+    - command: "cmake --build --preset wsl-gcc-debug --parallel"
+      exit_code: 0
+    - command: "ctest --preset wsl-gcc-debug -R \"CVF-105\""
+      exit_code: 0
+      counts: "focused CVF-105: all passed"
+    - command: "ctest --preset wsl-gcc-debug -R \"CVF-004|CVF-005|CVF-006|CVF-103|CVF-104\""
+      exit_code: 0
+      counts: "pinned regressions: 187/187 passed"
+    - command: "ctest --preset wsl-gcc-debug"
+      exit_code: 0
+      counts: "418 passed, 0 failed, 0 skipped, out of 418"
+    - command: "cmake --preset wsl-gcc-asan"
+      exit_code: 0
+    - command: "cmake --build --preset wsl-gcc-asan --parallel"
+      exit_code: 0
+    - command: "ctest --preset wsl-gcc-asan -R \"CVF-105\""
+      exit_code: 0
+      counts: "focused CVF-105: all passed under ASan"
+    - command: "ctest --preset wsl-gcc-asan"
+      exit_code: 0
+      counts: "418 passed, 0 failed, 0 skipped, out of 418"
+    - command: "clang-format --dry-run --Werror <each of the eight owned files>"
+      exit_code: 0
+  direct_binaries_debug_and_asan:
+    note: >-
+      Identical results in wsl-gcc-debug and wsl-gcc-asan; every binary exit 0.
+    targets:
+      - target: cvf105_hex_tests
+        assertions_cases: "396 assertions in 10 test cases"
+      - target: cvf105_selector_tests
+        assertions_cases: "61 assertions in 11 test cases"
+      - target: cvf105_payload_tests
+        assertions_cases: "68 assertions in 10 test cases"
+      - target: cvf105_warnings_tests
+        assertions_cases: "28 assertions in 5 test cases"
+      - target: cvf105_abi_validation_tests
+        assertions_cases: "60 assertions in 12 test cases"
+      - target: cvf105_abi_pairs_tests
+        assertions_cases: "191 assertions in 9 test cases"
+      - target: cvf105_runtime_output_text_tests
+        assertions_cases: "33 assertions in 2 test cases"
+  added_edge_cases:
+    - file: tests/unit/cvf105_hex_test.cpp
+      cases:
+        - "all sixteen case combinations of a four-hex value canonicalize to lowercase"
+        - "0x-prefixed, five-character, lone lead byte, lone continuation byte, and multibyte-pair inputs are rejected as config_value_invalid"
+    - file: tests/unit/cvf105_payload_test.cpp
+      cases:
+        - "a multibyte UTF-8 payload at exactly the byte bound is accepted and one byte over fails (byte bound, not character bound)"
+    - file: tests/unit/cvf105_abi_pairs_test.cpp
+      cases:
+        - "non-null output_json/image_path/error_message buffers with zero capacity: output_json and image_path report BUFFER_TOO_SMALL; error_message is failure-only and leaves a successful inspection OK"
+    - file: tests/unit/cvf105_warnings_test.cpp
+      cases:
+        - "interleaved log-sink (warn_base) and image-save (attempted non-committed optional save) bits over runtime::finalize_after_frame() never lose either bit across 16,000 concurrent derivations"
+    - file: tests/unit/cvf105_runtime_output_text_test.cpp
+      cases:
+        - "a FAIL result's internal object round-trips through output_text byte-for-byte"
+  unchanged_owned_files:
+    - path: tests/unit/cvf105_selector_test.cpp
+      sha256: 6e215ea45e93619cd9860956d790d0b5b10d3426c0037d9f0e79ee37cc8e3610
+    - path: tests/unit/cvf105_abi_validation_test.cpp
+      sha256: 9dba770fd61496186ab1203a38676692e056ac713f19f546d783ce56817bd183
+  final_test_sha256:
+    - path: tests/unit/cvf105_test.helpers.h
+      sha256: 392975af9f2e31cc4a60f5d52a43527114802d226745b5860a673f2b5ac6a6d3
+    - path: tests/unit/cvf105_hex_test.cpp
+      sha256: f43cd2f3715fb2adf800a11757b65f798ed1f7d0235b598fb6424fdd59840210
+    - path: tests/unit/cvf105_selector_test.cpp
+      sha256: 6e215ea45e93619cd9860956d790d0b5b10d3426c0037d9f0e79ee37cc8e3610
+    - path: tests/unit/cvf105_payload_test.cpp
+      sha256: 5fef7e0e4d483b30011f8f7a6d29a6f6746962b611dec9adfc7d5fc56b423617
+    - path: tests/unit/cvf105_warnings_test.cpp
+      sha256: 2729648b9ff1bb764bd65d2ddf722dbee80c5ecaa5a8cf114a775ad6fe875c54
+    - path: tests/unit/cvf105_abi_validation_test.cpp
+      sha256: 9dba770fd61496186ab1203a38676692e056ac713f19f546d783ce56817bd183
+    - path: tests/unit/cvf105_abi_pairs_test.cpp
+      sha256: 23d051e257a3b9faa4e74d5bf86d309ca43ea0178ad4a2731dec265bd939a9f0
+    - path: tests/unit/cvf105_runtime_output_text_test.cpp
+      sha256: ae0a948f8f7b15afa1c8aaa11add9d716fa409bf4bddee1c9ec10b8448e0673c
+  final_manifest_sha256: 26ad8d3c9445cec424532cd0b06a0421d951adc653ea54a3c8baaf621ff8b3c9
+  manifest_audit:
+    files_checked: 64
+    missing: 0
+    mismatches: 0
+    other_sections_unchanged: true
+    method: >-
+      YAML line scan of .ai/test-ownership.yaml re-hashing every
+      path/sha256 pair; only the eight CVF-105 sha256 lines and the CVF-105 notes
+      paragraph were edited by the test owner. All CVF-004/005/006/103/104 and
+      CVF-001..008 pinned hashes re-hash exactly.
+  findings:
+    - id: V2-1
+      severity: none
+      file: tests/unit/cvf105_abi_pairs_test.cpp
+      summary: >-
+        A first draft of the new non-null/zero-capacity case asserted that a
+        zero-capacity error_message buffer forces BUFFER_TOO_SMALL. This was an
+        over-strict invented expectation: the error-message channel is populated
+        only on failure, so a legal non-null+zero pair does not fail a successful
+        inspection. Corrected to assert the observable behavior (OK, error_message
+        bytes_written 0) while the required-capacity output_json/image_path
+        buffers do report BUFFER_TOO_SMALL. No implementation defect.
+    - id: V2-2
+      severity: none
+      file: tests/unit/cvf105_runtime_output_text_test.cpp
+      summary: >-
+        A first draft of the new FAIL round-trip case asserted the internal object
+        contains "measurements"/"defects". This was an over-strict invented
+        expectation: the default example algorithm emits a flat measurements
+        object and omits an empty defects array (observed output_json:
+        {"pass_ratio":0.0,"total_pixels":192,"white_pixels":0}). Corrected to
+        assert the exact internal-object round-trip and the flat keys; the wrapped
+        measurements-plus-defects shape remains covered at the serialization seam
+        in cvf105_payload_test.cpp. No implementation defect.
+    - id: V2-3
+      severity: process
+      summary: >-
+        Independence incident: a codegraph_explore call intended for the warning
+        seam returned verbatim production source for src/diagnostics/diagnostics.cpp
+        and src/runtime/context.cpp into this session. No test expectation,
+        assertion, fixture, or hash was derived from that exposure; every
+        expectation in this run was derived from the brief, the contract, and the
+        frozen headers only. The exposed source was not read for any decision.
+  independence:
+    inspected_production_cpp: false
+    accepted_developer_claims: false
+    changed_files_or_root_cause_reports: false
+    pinned_files_changed_by_me: false
+  not_weakened: >-
+    No assertion was removed, skipped, disabled, or deleted. All pre-existing
+    CVF-105 cases are present and pass; the full portable and ASan suites pass
+    418/418 with 0 skipped; the CVF-104 note in the prior workflow about 11
+    CVF-105 failures referred to the earlier absent-seam state and is now
+    superseded.
+  windows_hardware_claim: false
+  raw_logs:
+    - .ai/validation/cvf105-verify-summary.txt
+    - .ai/validation/cvf105-verify-ctest-debug-full.log
+    - .ai/validation/cvf105-verify-ctest-asan-full.log
+    - .ai/validation/cvf105-verify-hashes.txt
+    - .ai/validation/cvf105-verify-manifest-audit.txt
+  harness: .ai/validation/cvf105-test-engineer-verify.sh
