@@ -1,0 +1,268 @@
+change_id: CVF-102
+# Role schema verdict: APPROVE. Equivalent task classification is PASS_WITH_FINDINGS:
+# zero blocking findings; all recorded findings below are non-blocking.
+verdict: APPROVE
+verdict_classification: PASS_WITH_FINDINGS
+reviewed_artifacts:
+  - .ai/changes/CVF-102.yaml
+  - .ai/project-contract.yaml
+  - .ai/test-briefs/CVF-102.yaml
+  - .ai/reports/CVF-102-implementation.yaml
+  - .ai/reports/CVF-102-test-red.yaml
+  - .ai/reports/CVF-102-test-verify.yaml
+  - .ai/test-ownership.yaml
+  - .ai/workflow-state.yaml
+  - src/camera/uvc_windows/uvc_command_worker.h
+  - src/camera/uvc_windows/uvc_backend.h
+  - src/camera/uvc_windows/uvc_backend.cpp
+  - src/camera/uvc_windows/uvc_frame_math.h
+  - src/camera/camera_backend.h
+  - src/camera/camera_backend.cpp
+  - src/core/deadline.h
+  - src/core/deadline.cpp
+  - src/core/result.h
+  - src/core/error.h
+  - src/core/error.cpp
+  - src/core/status.h
+  - src/runtime/context.cpp
+  - tests/unit/uvc_command_worker_test.cpp
+  - tests/unit/uvc_worker_snapshot_test.cpp
+  - tests/windows/uvc/cvf102_uvc_worker_lifecycle_test.cpp
+  - CMakeLists.txt
+  - CMakePresets.json
+  - src/c_api/cvforwin.def
+  - include/cvforwin/cvf_api.h
+review_note: >-
+  Read-only source review. No shell is available to this reviewer, so sha256 values were not
+  recomputed; hash statements below are the recorded test-owner/developer values, and the
+  mechanical recomputation is deferred to the deterministic quality gate.
+
+summary: >-
+  CVF-102 implements the uvc_worker_lifecycle_v1 isolation correctly. UvcCameraBackend::Impl
+  starts one application-created worker in its constructor (uvc_backend.cpp:797-800), and that
+  worker runs CoInitializeEx(nullptr, COINIT_MULTITHREADED) then MFStartup(MF_VERSION,
+  MFSTARTUP_LITE) in startup_worker() (uvc_backend.cpp:999-1016). Every backend-held
+  IMFActivate/IMFMediaSource/IMFSourceReader and every media-buffer access occurs inside command
+  lambdas submitted to CommandWorker or in the worker teardown hook: enumerate_devices
+  (uvc_backend.cpp:1072-1125), activate/start_stream (1127-1224), capture_or_failure/convert_sample
+  (1373-1450, 1491-1550), and teardown_stream/callback_.reset (1061-1070, 1023-1039). The caller
+  thread performs only record_caller(), atomic reads, and a bounded wait; no MF pointer crosses
+  the worker boundary and no host COM call exists anywhere in the module. Teardown order is
+  reader/source -> callback -> MFShutdown -> CoUninitialize -> join (uvc_backend.cpp:1023-1039,
+  uvc_command_worker.h:249-261), close() is idempotent (uvc_backend.cpp:954-958,
+  uvc_command_worker.h:167-188), failed startup joins the thread and balances the counters
+  (uvc_backend.cpp:1002-1012, 1028-1037; uvc_command_worker.h:129-143), and the lifecycle_/mutex_
+  ordering plus queue draining makes submit/stop deadlock-free. All four deadline-bearing
+  operations short-circuit an expired deadline before submitting (uvc_backend.cpp:816-819,
+  847-850, 886-889, 910-913) and wait only on deadline.remaining() (uvc_command_worker.h:114-136).
+  The eight UvcWorkerSnapshot fields are populated from worker-owned atomics
+  (uvc_backend.cpp:960-972), are balanced after close including the failed-startup branches by
+  inspection, and the frozen accessor is internal and ABI-free (uvc_backend.h:42-51, 105; absent
+  from camera_backend.h:48-59, src/c_api, include/**, and install). The independent suite at its
+  recorded amended hash covers B1-B6, no-COM and STA callers, all four operations, boundaries, and
+  negatives with no skip/disable/weaken macros, and the Windows target is registered only under
+  WIN32 + CVFORWIN_BUILD_TESTS + CVFORWIN_BUILD_TEST_BACKENDS (CMakeLists.txt:997-1017). Windows
+  MSVC execution is honestly deferred to windows-tests-quality and is not claimed here. The
+  non-blocking findings below are coverage/records observations, not demonstrated defects.
+
+judgments:
+  worker_isolation:
+    result: PASS
+    statement: >-
+      Confined to one application-created worker thread. The constructor starts the thread and
+      the COM/MF init hooks run on it (uvc_backend.cpp:797-800, 999-1016); enumerate/open/capture/
+      reconnect marshal through CommandWorker::submit (uvc_backend.cpp:821, 852, 891, 916);
+      IMFActivate/IMFMediaSource/IMFSourceReader creation/use/release all happen inside those
+      command lambdas or in teardown_worker on the worker (uvc_backend.cpp:1061-1070, 1072-1125,
+      1127-1224, 1491-1550); the callback performs only refcount/AddRef plus mutex-guarded state
+      (uvc_backend.cpp:665-715, 756-780). Caller threads touch only GetCurrentThreadId
+      (uvc_backend.cpp:993-996), atomics, and the bounded wait; no CoInitializeEx/CoCreateInstance
+      exists on any caller path (grep of src shows COM/MF calls only at 1002, 1008, 1029, 1034).
+  teardown_idempotency_and_deadlock:
+    result: PASS
+    statement: >-
+      teardown_worker runs teardown_stream() (reader then source), then callback_.reset(), then
+      MFShutdown, then CoUninitialize, all on the worker before the join
+      (uvc_backend.cpp:1023-1039; uvc_command_worker.h:248-261). stop_and_join is idempotent, safe
+      on a never-started worker, discards the queue, and waits for the one running command
+      (uvc_command_worker.h:167-188); close() is idempotent and the destructor calls it
+      (uvc_backend.cpp:802-805, 954-958). Failed startup sets state failed, skips the loop, still
+      runs the teardown hook exactly once, and start() joins before returning false
+      (uvc_command_worker.h:88-105, 214-219; uvc_backend.cpp:999-1016). lifecycle_ serializes
+      start/stop and is always taken before mutex_; worker_main never holds mutex_ while running a
+      command; submit only holds mutex_ while waiting on the condition variable. No lock-order
+      inversion or self-join path was found; close's wait is bounded by the in-flight command's own
+      deadline plus the bounded flush budget (uvc_backend.cpp:1465-1489).
+  deadline_bounded_commands:
+    result: PASS
+    statement: >-
+      Each of enumerate/open/capture/reconnect checks deadline.expired() before submit and returns
+      timeout immediately (uvc_backend.cpp:816-819, 847-850, 886-889, 910-913); capture uses
+      capture_timed_out, the others deadline_expired, matching the frozen header documentation and
+      the independent B6 assertions. submit enqueues nothing on an expired deadline and waits only
+      deadline.remaining() (uvc_command_worker.h:120-128). Inside the worker, the open and reconnect
+      commands re-check expiry before activation (uvc_backend.cpp:855-859, 925-929), activate and
+      format negotiation re-check between stages (1139-1142, 1187-1190, 1235-1238, 1269-1272,
+      1277-1280, 1306-1309, 1339-1342), capture re-checks and bounds its wait and flush
+      (1378-1381, 1400-1410, 1450-1453, 1476-1488). close() has no deadline in ICameraBackend and
+      the required-field text bounds only the four operations; its join is bounded by the running
+      command.
+  snapshot_counters:
+    result: PASS
+    statement: >-
+      All eight frozen fields are real and populated from worker-owned state (uvc_backend.h:42-51;
+      uvc_backend.cpp:960-972). com_init_count increments only after a successful CoInitializeEx
+      and com_uninit_count only when com_initialized_ was set; mf_startup_count increments only
+      after a successful MFStartup and mf_shutdown_count only when mf_started_ was set
+      (uvc_backend.cpp:1002-1014, 1028-1037), so both failure branches (COM failure and MF failure
+      after COM success) remain balanced by construction. commands_marshalled counts commands
+      dequeued and executed on the worker (uvc_backend.cpp:967; uvc_command_worker.h:234), and
+      worker_running/worker_thread_id/last_caller_thread_id are atomics cleared or set on the
+      correct threads (uvc_backend.cpp:1001, 1038, 995). The independent assertions are not
+      tautological: B1/B2 require a successful enumerate (so startup succeeded) plus
+      commands_marshalled > 0 and worker_thread_id != last_caller_thread_id. Residual limitation
+      NB-1: the failed-startup branch itself cannot be forced by the hardware-free suite.
+  error_mapping_identity_reconnect:
+    result: PASS
+    statement: >-
+      Identity resolution is the untouched exactly-one contract (camera_backend.cpp:27-52) invoked
+      on the worker (uvc_backend.cpp:1144-1166); no first-device fallback exists, and the ambiguous
+      outcome preserves camera_identity_ambiguous while zero-match maps to camera_not_found
+      (uvc_backend.cpp:1147-1159). Failed startup/unavailable worker maps to camera_io
+      (uvc_backend.cpp:988-991, 1041-1053), satisfying the contract's startup-failure mapping.
+      Reconnect performs one bounded re-enumeration/activation and reports camera_disconnected on
+      recovery failure; the one-reconnect/one-recapture bound stays in the unchanged
+      capture_with_one_retry (camera_backend.cpp:54-83, used at context.cpp:331). Pre-submit
+      timeouts keep their documented codes, so deadline semantics are preserved.
+  seam_and_abi:
+    result: PASS
+    statement: >-
+      UvcWorkerSnapshot and worker_snapshot() exist only on UvcCameraBackend in the internal
+      _WIN32-guarded header (uvc_backend.h:42-51, 105) and match the change contract's frozen seam
+      fields and signature exactly. ICameraBackend has no such member (camera_backend.h:48-59);
+      grep finds no reference in include/**, src/c_api/**, or cvforwin.def (which still lists
+      exactly five exports); install rules install only include/cvforwin plus cvforwin/cvforwin_core
+      (CMakeLists.txt:467-473), so no public header or export changed.
+  independent_suite:
+    result: PASS
+    statement: >-
+      The single Windows TU includes only frozen headers, uses `auto` for the frozen snapshot
+      fields, and drives the real backend. B1 exercises enumerate/open/capture/reconnect/close from
+      a thread that never called CoInitializeEx (test lines 139-194); B2 does the same from an STA
+      thread (200-224); B3 pins camera_not_found/camera_identity_ambiguous/selector_empty with no
+      fallback (230-285); B4 covers idempotent close and destruction without close (291-321); B5
+      covers a failing open plus balanced close (327-346); B6 pins an already-expired deadline for
+      all four operations and elapsed < 2 s (352-392); the marshalling case pins strictly
+      increasing commands_marshalled across all four operations with worker_thread_id !=
+      last_caller_thread_id (398-429); boundary zero-device and negative capture/reconnect-before-
+      open cases are present (435-474). A grep for SKIP/DISABLED/MAYFAIL/WARN shows no skips,
+      disables, or weakened assertions. Limitations NB-1 and NB-3 are recorded below.
+  scope_and_windows_gating:
+    result: PASS
+    statement: >-
+      The recorded change set stays inside the allowed files: production only
+      src/camera/uvc_windows/**, developer tests only tests/unit/uvc_command_worker_test.cpp and
+      tests/unit/uvc_worker_snapshot_test.cpp (non-cvf1* names, allowed), the test-owner file under
+      tests/windows/uvc/**, and CMakeLists.txt. The component target is registered only under
+      WIN32 AND CVFORWIN_BUILD_TESTS AND CVFORWIN_BUILD_TEST_BACKENDS (CMakeLists.txt:997-1017);
+      windows-msvc-release keeps TEST_BACKENDS=OFF (CMakePresets.json:72-74) so it never enters the
+      release/no-camera jobs, and windows-msvc-tests sets both ON (93-95) with windows-tests-quality
+      running it (313-341). Caveat: no shell/diff was available, so scope rests on direct source
+      inspection plus the recorded changed-file lists and ownership manifest.
+
+blocking_findings: []
+
+non_blocking_findings:
+  - id: NB-1
+    severity: low
+    file: tests/windows/uvc/cvf102_uvc_worker_lifecycle_test.cpp
+    location: lines 327-346 (B5) vs src/camera/uvc_windows/uvc_backend.cpp:999-1016 (startup_worker)
+    issue: >-
+      B5 is named "a failed startup ..." but on a hardware-free host the reachable failure is a
+      failed open/identity resolve, not a failed worker startup; the case accepts
+      camera_not_found or camera_io, so the contract's "startup fails -> camera_io" mapping and
+      the COM/MF counter balance on the startup-failure branch are not pinned by an independent
+      assertion. They are correct by source inspection and covered at the worker level only by the
+      portable developer test.
+    required_action: >-
+      test_owner/release-reviewer: record this residual limitation (the verify report already notes
+      the zero-device environment) and confirm at the batch gate that the symmetric-flag accounting
+      in startup_worker/teardown_worker is accepted without a hardware-free fault seam; no
+      production change is required for CVF-102.
+  - id: NB-2
+    severity: info
+    file: tests/unit/uvc_worker_snapshot_test.cpp
+    location: lines 121-129
+    issue: >-
+      Off Windows the developer TU is intentionally empty, so it defines one placeholder case
+      asserting CHECK(true). It is honestly labeled and is not acceptance evidence, but it is a
+      tautological assertion if read as coverage.
+    required_action: >-
+      developer: keep the explicit "not exercised on portable builds" label; no change required.
+  - id: NB-3
+    severity: info
+    file: tests/windows/uvc/cvf102_uvc_worker_lifecycle_test.cpp
+    location: lines 187 and 217 (CHECK(probe.enumerate_empty))
+    issue: >-
+      B1/B2 require enumerate to return zero descriptors, which holds only on the hosted
+      no-camera runner. Running this suite on a station with a camera attached would fail those
+      checks even though apartment independence is unaffected.
+    required_action: >-
+      test_owner: keep the cvf102 suite on hosted no-camera runners (windows-tests-quality), or
+      relax the empty-host assertion if the suite is ever registered where hardware may be present;
+      the intended CI environment is already documented in the verify report.
+  - id: NB-4
+    severity: info
+    file: .ai/reports/CVF-102-implementation.yaml
+    location: frozen_files_untouched (lines 84-97) and .ai/workflow-state.yaml:37-38
+    issue: >-
+      The developer report records the independent test at ce2cc80e... "before and after" its
+      session, while the final test-owner amendment (verify phase) and .ai/test-ownership.yaml:487
+      record 81688985...; workflow-state still holds the pre-amendment ownership hash e69e0c62...
+      This is consistent with the developer session preceding the test-owner amendment, but the
+      records do not line up byte-for-byte.
+    required_action: >-
+      controller/quality_owner: have the deterministic quality gate recompute the on-disk test and
+      manifest hashes and refresh the workflow-state gate values; no independence violation is
+      indicated because the amendment is recorded by the test owner with an explicit transition.
+  - id: NB-5
+    severity: info
+    file: src/camera/uvc_windows/uvc_backend.cpp
+    location: lines 1192-1194 (callback reuse in start_stream) and 1023-1031 (teardown order)
+    issue: >-
+      A single ReadCallback instance is still reused across replacement SourceReaders and no
+      stream-generation retirement exists yet (FR-021 / CVF-103 scope). CVF-102's own teardown
+      order is correct, but the batch release must not treat the callback/stale-event path as
+      complete.
+    required_action: >-
+      release-reviewer: track CVF-103 at the batch gate to confirm the per-reader callback and
+      generation retirement replace this reuse before release; no CVF-102 change.
+  - id: NB-6
+    severity: info
+    file: src/camera/uvc_windows/uvc_command_worker.h
+    location: lines 74-78
+    issue: >-
+      The `state_ == State::starting` branch of start() is unreachable because lifecycle_ is held
+      for the entire start()/stop_and_join() body, so no second starter can observe starting.
+      Harmless defensive code, but it is dead as written.
+    required_action: >-
+      developer: remove or document the defensive branch at the next touch of the module;
+      non-blocking.
+
+independence_notes: >-
+  Test-set integrity: the on-disk independent file (476 lines, 11 TEST_CASEs, 8 SECTIONs, only
+  frozen headers included, `auto` for snapshot fields) is consistent with the test-owner amended
+  record 81688985d11af7840e46e748bf489d0a7141c0d49d460fbc1fd535149e84203a
+  (.ai/test-ownership.yaml:487, .ai/reports/CVF-102-test-verify.yaml:179) and with the
+  verify-phase amendment that added open/capture/reconnect coverage without removing or weakening
+  anything. No skip/disable/MAYFAIL/WARN macro exists in the file. The developer tests are new
+  non-cvf1*_* files under tests/unit/** (inside scope) and do not modify test-owner artifacts; the
+  CMake wiring only builds and registers the owner's source. The independent suite does not
+  include uvc_command_worker.h and therefore does not depend on internal implementation details
+  beyond the contract-frozen snapshot field names. The developer report's observed ce2cc80e...
+  hash corresponds to the pre-amendment author-phase file pinned in
+  .ai/reports/CVF-102-test-red.yaml:20, and the verify report records the transition; no
+  production-role edit of the independent file is evidenced. Because this reviewer has no shell,
+  no digest was recomputed here: the deterministic quality gate must confirm the final on-disk
+  hash and manifest equality before the release gate, and the controller should reconcile the
+  stale workflow-state gate hash (NB-4).

@@ -1,0 +1,200 @@
+schema_version: 1
+change_id: CVF-102
+phase: AUTHOR
+author: test-engineer
+recorded_at: 2026-09-18
+host: Linux (WSL); Windows suite authored-but-not-executed on this host
+
+summary: >-
+  Independent black-box Windows component tests were authored for the frozen UVC
+  worker / COM+Media Foundation lifetime seam before the seam accessor or its
+  implementation exists. RED is honest and structural: the frozen accessor
+  UvcCameraBackend::worker_snapshot() is absent from the frozen header, so the
+  test translation unit cannot compile against the real include tree (fatal
+  errors, exit 1). No Windows execution output is fabricated or claimed. The
+  portable canonical commands stay green and are explicitly not evidence for
+  this Windows-only change.
+
+authored_files:
+  - path: tests/windows/uvc/cvf102_uvc_worker_lifecycle_test.cpp
+    sha256: ce2cc80ee41e7cf5579dd4cf6c7a46f29eaa066179912ab46beb54e195562109
+    windows_only: true
+    guard: "#if defined(_WIN32)"
+    includes_production_surface: >-
+      frozen headers only: src/camera/camera_backend.h,
+      src/camera/uvc_windows/uvc_backend.h, src/core/{status,error,result,deadline}.h
+    synthetic_only: true
+  - path: CMakeLists.txt
+    change: >-
+      added WIN32 + CVFORWIN_BUILD_TESTS + CVFORWIN_BUILD_TEST_BACKENDS gated
+      target cvf102_windows_uvc_tests, registered via catch_discover_tests
+      (add_test), immediately after the CVF-101 block
+    sha256_after_change: ca6c065b9f0be743c140f05cf6e5dc7bff9790ca16a6cccee45ddd90504b3b34
+    lines_added: 38
+    lines_removed: 0
+
+seam_selection:
+  header: src/camera/uvc_windows/uvc_backend.h
+  declaration_used: >-
+    cvforwin::camera::UvcCameraBackend::worker_snapshot() -> UvcWorkerSnapshot,
+    with the brief-frozen fields com_init_count, com_uninit_count,
+    mf_startup_count, mf_shutdown_count, commands_marshalled, worker_thread_id,
+    last_caller_thread_id, worker_running.
+  note: >-
+    The seam accessor is frozen by the CVF-102 change contract
+    (.ai/changes/CVF-102.yaml frozen_test_seam). The snapshot fields are read
+    through `auto`, so the test does not depend on any non-frozen snapshot type
+    spelling. The test file includes frozen headers only; no production .cpp was
+    read.
+
+cases:
+  acceptance:
+    - id: B1
+      name: "CVF-102 B1: a no-COM caller thread completes enumerate and close without apartment failure"
+      observable: >-
+        construct + enumerate(default 5000ms) + close on a std::thread that never
+        called CoInitializeEx: enumerate succeeds and is empty; close leaves
+        worker_running false and com/mf counts balanced; commands_marshalled > 0
+        and worker_thread_id != last_caller_thread_id.
+    - id: B2
+      name: "CVF-102 B2: an STA caller thread completes enumerate and close without apartment failure"
+      observable: >-
+        same sequence on a thread that called CoInitializeEx(COINIT_APARTMENTTHREADED)
+        and CoUninitialize afterwards: enumerate succeeds empty, worker is owned
+        and marshalled, close balances and stops the worker.
+    - id: B3
+      name: "CVF-102 B3: open with an identity that resolves nothing fails camera_not_found with no fallback"
+      observable: >-
+        backend.open(absent descriptor) fails with status camera_not_found and
+        code camera_not_found; never a first-device fallback.
+    - id: B3
+      name: "CVF-102 B3: identity resolution is exact and never falls back to the first candidate"
+      observable: >-
+        resolve_identity: one match resolves that descriptor; zero match ->
+        camera_not_found; two matches (shared VID/PID) -> camera_identity_ambiguous
+        and never the first; empty selector -> selector_empty.
+    - id: B4
+      name: "CVF-102 B4: close before any open and repeated close are idempotent and balanced"
+      observable: >-
+        close on a never-opened backend leaves worker_running false and com/mf
+        counts balanced; repeated close calls keep both.
+    - id: B4
+      name: "CVF-102 B4: an open followed by destruction without close leaves no observable worker"
+      observable: >-
+        construct + failing open, then destruct without close; a subsequent fresh
+        backend still reaches a stopped and balanced state.
+    - id: B5
+      name: "CVF-102 B5: a failed startup leaves no running worker and balances COM/MF lifetime"
+      observable: >-
+        failing open reports a documented camera failure (camera_not_found with
+        zero devices, or camera_io for a startup failure); close afterwards leaves
+        worker_running false and com/mf counts balanced.
+    - id: B6
+      name: "CVF-102 B6: an already-expired deadline fails immediately for every operation"
+      observable: >-
+        Deadline::immediate for enumerate/open/capture/reconnect: each returns a
+        timeout failure immediately (elapsed < 2 s); capture uses
+        code capture_timed_out.
+  marshalling:
+    - name: "CVF-102: every command is marshalled to the owned worker thread"
+      observable: >-
+        commands_marshalled strictly increases across enumerate and
+        worker_thread_id != last_caller_thread_id.
+  boundary:
+    - name: "zero enumerable devices: enumerate succeeds empty and open fails camera_not_found"
+    - name: "close before any open; repeated close"
+    - name: "open followed immediately by destruction without an explicit close"
+  negative:
+    - name: "capture before open fails with a documented camera failure, no crash"
+    - name: "reconnect before open fails with a documented camera failure, no crash"
+
+expected_red:
+  reason: >-
+    The frozen accessor UvcCameraBackend::worker_snapshot() and the
+    UvcWorkerSnapshot type do not exist yet, so the test TU cannot compile against
+    the real frozen header. This is the honest RED for a pre-implementation author
+    phase.
+  windows_suite_execution: "authored-but-not-executed on this Linux host; not claimed as passing"
+  portable_suite: "unaffected: the TU is empty off Windows and the target is not configured on Linux"
+
+commands:
+  - command: >-
+      g++ -D_WIN32 -std=c++20 -Wall -Wextra -Werror -fsyntax-only -isystem <scratch Win OS stubs>
+      -I<src> -I<include> -isystem <opencv4> -isystem <vcpkg include>
+      tests/windows/uvc/cvf102_uvc_worker_lifecycle_test.cpp
+    exit_code: 1
+    result: RED
+    observed: |
+      tests/windows/uvc/cvf102_uvc_worker_lifecycle_test.cpp:102:35: error: 'class cvforwin::camera::UvcCameraBackend' has no member named 'worker_snapshot'
+      tests/windows/uvc/cvf102_uvc_worker_lifecycle_test.cpp:108:35: error: 'class cvforwin::camera::UvcCameraBackend' has no member named 'worker_snapshot'
+      tests/windows/uvc/cvf102_uvc_worker_lifecycle_test.cpp:115:35: error: 'class cvforwin::camera::UvcCameraBackend' has no member named 'worker_snapshot'
+      tests/windows/uvc/cvf102_uvc_worker_lifecycle_test.cpp:374:33: error: 'class cvforwin::camera::UvcCameraBackend' has no member named 'worker_snapshot'
+      tests/windows/uvc/cvf102_uvc_worker_lifecycle_test.cpp:379:32: error: 'class cvforwin::camera::UvcCameraBackend' has no member named 'worker_snapshot'
+    interpretation: "missing frozen seam accessor; the test cannot compile against an unimplemented seam"
+    note: >-
+      The Linux scratch stubs under /tmp/opencode/cvf102-te/win_stub provide only
+      HRESULT and CoInitializeEx/CoUninitialize so the platform-SDK absence does
+      not mask the seam failure. They are not production or test artifacts and are
+      never used by the CMake target.
+  - command: "clang-format --style=file:<repo>/.clang-format --dry-run --Werror tests/windows/uvc/cvf102_uvc_worker_lifecycle_test.cpp"
+    exit_code: 0
+    result: PASS
+    observed: "no formatting violations; file is format-clean"
+  - command: "g++ -std=c++20 -Wall -Wextra -Werror -fsyntax-only (portable, no -D_WIN32)"
+    exit_code: 0
+    result: PASS
+    observed: "empty TU off Windows; portable build unaffected"
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    result: GREEN
+    observed: "Configuring done; Generating done; build files written to build/wsl-gcc-debug"
+    note: "portable; not evidence for the Windows-only change"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    result: GREEN
+    observed: "ninja: no work to do (the Windows target is gated out on Linux)"
+    note: "portable; not evidence for the Windows-only change"
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    result: GREEN
+    observed: "100% tests passed, 0 tests failed out of 275"
+    note: "portable; not evidence for the Windows-only change"
+
+assumptions:
+  - >-
+    The frozen seam is a public member UvcCameraBackend::worker_snapshot() visible
+    from src/camera/uvc_windows/uvc_backend.h on _WIN32; the CVF-102 change
+    contract is the authority and was not readable through this session's
+    read policy, so the brief's named accessor and field list are taken verbatim.
+  - >-
+    worker_thread_id and last_caller_thread_id are comparable values (thread ids);
+    the marshalling assertion only requires inequality while a command executes.
+  - >-
+    An already-expired deadline yields the broad timeout status for
+    enumerate/open/capture/reconnect, and capture_timed_out for capture, matching
+    the frozen uvc_backend.h documentation.
+  - >-
+    capture/reconnect before open on the UVC backend fail with a documented camera
+    failure (camera_not_found or camera_io); the case asserts a documented failure
+    and no crash rather than one particular code.
+
+ownership:
+  manifest: .ai/test-ownership.yaml
+  manifest_sha256_after_update: e69e0c62602e318765fa86ccd68897315d211e12126695e01f7734706f68ff79
+  update: "CVF-102 section appended"
+  existing_sections_removed_lines: 0
+  diff_stat: ".ai/test-ownership.yaml 121 insertions(+), 0 deletions; CMakeLists.txt 38 insertions(+), 0 deletions"
+  files_checked:
+    - path: tests/windows/uvc/cvf102_uvc_worker_lifecycle_test.cpp
+      sha256: ce2cc80ee41e7cf5579dd4cf6c7a46f29eaa066179912ab46beb54e195562109
+  mismatches: []
+
+blockers: []
+notes:
+  - "Windows execution result is deferred to the windows-tests-quality workflow / windows-msvc-tests preset; no output from that run is claimed here."
+  - "Author harness scripts live under .ai/validation/cvf102-test-engineer-*.sh and are not production or test artifacts."
+  - >-
+    The seam and its exact UvcWorkerSnapshot field types could not be read from
+    .ai/changes/CVF-102.yaml because that path is denied by this session's read
+    policy; the test deliberately uses `auto` and the brief's verbatim field names
+    so no guessed type spelling is needed.

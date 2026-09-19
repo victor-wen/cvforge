@@ -1,0 +1,36 @@
+format: 1
+change_id: CVF-107
+script_report: /home/administrator/c_cpp_project/cvforwin/.ai/reports/CVF-107-quality.json
+script_verdict: PASS
+script_exit_code: 0
+candidate_sha: 74b3b3f055ddd2408e8ea002b2f645ba4dfff812
+plan_sha256: 9487c50a06f84f08cd9cd7ba1f66d16c0619dc3bb78e1442651e55bf0a838b1b
+commands_checked: 6
+test_counts:
+  passed: 916
+  failed: 0
+  skipped: 0
+failed_command_ids: []
+analysis: >-
+  Deterministic gate PASS at HEAD 74b3b3f055ddd2408e8ea002b2f645ba4dfff812 (the CVF-106 delivery commit; the
+  CVF-107 worktree is the uncommitted change under test). All six canonical WSL commands passed: configure,
+  build, ctest (458/458), format, clang static analysis, and the sanitizer suite (458/458) - 916 passed /
+  0 failed / 0 skipped aggregate. The ownership manifest
+  3dbfd80925c4d3a8b5ef7a97bb7c726fec534ee6ca5977048fe8b58e6d646e39 reconciles with zero mismatches for the
+  independent CVF-107 file (tests/hardware/uvc_smoke.cpp, sha256
+  5737fb74e5e8d61a3d2e47ae714b968a3d3cbd39cfb9fe927e0a42f20e0d413f), and the developer build-wiring test is
+  disjoint from it so there is no developer/independent overlap. The plan pins the approved 1.1.0 contract, the
+  amended CVF-107 change contract, the ownership manifest, workflow state, the hardware evidence report
+  (82e16cf91d4a38ec50764a1e89a281e1ef4b996fe8fe1c9ac6df7215b122a806), and the reviewer verdict
+  37d937076a882fe5602048acd82d1771d0ae6cf8b9dcd3aaf5537cf196ffa623 (PASS_WITH_FINDINGS, zero blocking).
+  This gate covers only portable evidence by construction. The hardware evidence is separate and is NOT
+  certified here: it lives in .ai/reports/CVF-107-hardware.yaml plus raw logs under
+  .ai/validation/cvf107-hardware-evidence/, and the orientation and colour checks are recorded there as
+  UNVERIFIED because the station had no CVF-ORIENT-1 or CVF-COLOR-1 physical target. No environment flag was
+  used to convert a mandatory hardware check into a skip.
+next_action: >-
+  Commit only the CVF-107 scope files (tests/hardware/uvc_smoke.cpp, tests/unit/test_cvf107_hardware_wiring_developer.cpp,
+  docs/hardware-uvc.md, the CMakeLists.txt gating/define/registration changes, config/examples if touched),
+  push to main, and wait for the windows-2022 CI jobs to succeed at the new SHA. Then freeze the batch-4
+  candidate (CVF-107 + CVF-108) and dispatch release-reviewer. The unresolved NFR-019 orientation and colour
+  hardware checks must be reported to release review as UNVERIFIED, not as passed.

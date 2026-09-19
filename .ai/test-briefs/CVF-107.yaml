@@ -1,0 +1,57 @@
+schema_version: 1
+change_id: CVF-107
+program: cvforwin-hardening-1.1.0
+target: "Opt-in UVC hardware stress suite: cycles, orientation, color, timeout, reconnect"
+in_scope:
+  - Long-run capture stress, orientation, color, timeout, and reconnect checks on real hardware.
+out_of_scope:
+  - Production implementation changes; hosted no-camera CI execution.
+constraints:
+  - "Windows-only; never registered with CTest; never added to a hosted CI job."
+  - "Requires an explicit exact selector; must never fall back to the first device."
+  - "Orientation must not be validated with a vertically symmetric target."
+  - "A skipped orientation/color/timeout check in stress mode is a failure, not a pass."
+interface_reference:
+  - "cvforwin::camera::ICameraBackend / UvcCameraBackend contract"
+  - "documented environment variables in tests/hardware/uvc_smoke.cpp header and docs/hardware-uvc.md"
+observable_behaviors:
+  - id: B1
+    behavior: "With at least 1000 configured cycles, every capture returns a valid BGR8 owned frame with configured dimensions and a strictly increasing sequence."
+  - id: B2
+    behavior: "With the asymmetric TOP/BOTTOM target present, the orientation check passes; with the target inverted, it fails."
+  - id: B3
+    behavior: "The color check passes within documented tolerances for the documented target and fails outside them."
+  - id: B4
+    behavior: "The forced timeout check reports pass or fail explicitly and is not silently skipped in stress mode."
+  - id: B5
+    behavior: "The bounded reconnect check recovers after the documented manual unplug/replug and attempts at most one retry."
+  - id: B6
+    behavior: "A missing selector is a configuration failure, not a first-device fallback."
+boundary_cases:
+  - "Zero-device station run asserts empty enumeration and camera_not_found resolution."
+  - "Cycle count exactly at the configured minimum."
+negative_cases:
+  - "Stale descriptor open fails with camera_not_found and no crash."
+acceptance_criteria:
+  - "Portable suite remains green with the suite excluded; hardware execution evidence is recorded honestly (PASS on station or BLOCKED/UNVERIFIED)."
+allowed_context:
+  - .ai/project-contract.yaml
+  - .ai/changes/CVF-107.yaml
+  - .ai/test-briefs/CVF-107.yaml
+  - tests/hardware/**
+  - docs/**
+  - CMakeLists.txt, CMakePresets.json
+  - "frozen headers (may #include, must not open .cpp files): src/camera/camera_backend.h, src/camera/captured_frame.h, src/camera/uvc_windows/uvc_backend.h, src/core/**"
+forbidden_context:
+  - "any src/** .cpp implementation file"
+  - .ai/changes/** (other than CVF-107.yaml), .ai/reports/**, .ai/reviews/**
+  - "any diff, changed-file list, developer note, or root-cause description"
+allowed_test_paths:
+  - tests/hardware/**
+ownership_manifest: .ai/test-ownership.yaml
+evidence:
+  red_report: .ai/reports/CVF-107-test-red.yaml
+  verify_report: .ai/reports/CVF-107-test-verify.yaml
+notes: >-
+  No Windows station is available in this workspace. Record structural RED honestly and mark
+  execution BLOCKED until a designated station runs the stress command.

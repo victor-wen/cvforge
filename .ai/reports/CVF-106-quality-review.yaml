@@ -1,0 +1,27 @@
+format: 1
+change_id: CVF-106
+script_report: /home/administrator/c_cpp_project/cvforwin/.ai/reports/CVF-106-quality.json
+script_verdict: PASS
+script_exit_code: 0
+candidate_sha: b4256e7e108e0631fb10622e08c9fe5e0823616c
+plan_sha256: 810a7c678509cd51ca3b897b41c676df0467a8ef372dd2a2bcca5b85eb933f71
+commands_checked: 6
+test_counts:
+  passed: 894
+  failed: 0
+  skipped: 0
+failed_command_ids: []
+analysis: >-
+  Deterministic gate PASS at HEAD b4256e7e108e0631fb10622e08c9fe5e0823616c (batch-2 delivery; the CVF-106 changes
+  are the uncommitted worktree under test). All six canonical WSL commands passed: configure, build, ctest
+  (447/447), format (123 files), clang static analysis (26 files), sanitizer suite (447/447) - 894 passed /
+  0 failed / 0 skipped aggregate. The ownership manifest
+  a91813e0f2bf13820f41bc8b31344051ee7f51cfe4ae4d30a28fe51231338089 reconciles with zero mismatches across the four
+  independent CVF-106 files. The plan pins the approved 1.1.0 contract, the CVF-106 change contract (additive
+  prepare()/IPreparedAlgorithm/asset-bundle seam plus template.match), the ownership manifest, workflow state,
+  and the reviewer verdict 985992ef93b4526efeaf57aeedeac604d3052d59a58a13baeb5601eee9a33727
+  (PASS_WITH_FINDINGS, zero blocking; the reviewer explicitly confirmed that the injected camera_override
+  descriptor-selection change leaves the non-override production path identical to resolve_identity()).
+next_action: >-
+  Commit only the CVF-106 source/test/config/docs/LICENSE/build files at this scope, push to main, and wait for
+  the windows-2022 CI jobs to succeed at the new SHA. Then run the batch-3 quality gate and release review.

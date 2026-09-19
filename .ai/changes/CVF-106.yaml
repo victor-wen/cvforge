@@ -1,0 +1,147 @@
+schema_version: 1
+change_id: CVF-106
+program: cvforwin-hardening-1.1.0
+title: "Algorithm preparation/asset lifecycle, template.match, and cv2 porting guidance"
+risk: R2
+risk_justification: >-
+  Adds an internal preparation lifecycle, recipe asset loading, and one new compiled algorithm
+  with versioned recipes. No public ABI, status value, or dependency-family change; OpenCV
+  imgcodecs is already linked to the artifact module and approved components are unchanged.
+intent: >-
+  Give algorithms an immutable recipe-time preparation seam so template resources are decoded
+  and cached once, then ship a production-shaped template.match reference algorithm and
+  document how Python cv2/NumPy inspection code is ported to OpenCV C++.
+scope:
+  allowed_files:
+    production:
+      - src/inspection/**
+      - src/algorithms/**
+      - src/recipes/**
+      - src/runtime/**
+    examples_and_docs:
+      - config/examples/**
+      - docs/**
+    developer_tests:
+      - tests/unit/** (files not matching cvf1*_* independent names)
+    evidence_harness:
+      - .ai/validation/**
+    build:
+      - CMakeLists.txt
+      - LICENSES/**
+  out_of_scope:
+    - include/cvforwin/**
+    - src/c_api/**
+    - src/camera/**
+    - .ai/project-contract.yaml
+interface_v1:
+  authority_note: >-
+    The algorithm extension contract gains a preparation operation returning an immutable
+    prepared object; no public C ABI change. The existing example.threshold behavior must keep
+    working through the new lifecycle.
+  frozen_test_seam:
+    note: >-
+      The seam is strictly ADDITIVE: the existing IInspectionAlgorithm pure virtuals and the
+      dispatch(IInspectionAlgorithm&, AlgorithmRequest&) overload stay unchanged so the
+      hash-pinned CVF-003 StubAlgorithm and example.threshold cases keep compiling. The new
+      prepare() has a default implementation.
+    algorithm_header: src/inspection/algorithm.h
+    algorithm_declaration: |
+      namespace cvforwin::inspection {
+
+      /* Immutable, bounded asset content owned by the candidate recipe snapshot. */
+      struct AlgorithmAsset {
+          std::string key;                                        /* logical assets key */
+          std::string reference;                                  /* validated normalized relative ref (diagnostics only) */
+          std::shared_ptr<const std::vector<std::uint8_t>> bytes;  /* immutable bounded content */
+      };
+      using AlgorithmAssetBundle = std::vector<AlgorithmAsset>;
+
+      /* Immutable per-recipe prepared state; never mutated during inspect. */
+      class IPreparedAlgorithm {
+      public:
+          virtual ~IPreparedAlgorithm() = default;
+          virtual core::Result<AlgorithmResult> inspect(const AlgorithmRequest& request) = 0;
+      };
+
+      class IInspectionAlgorithm {
+      public:
+          virtual ~IInspectionAlgorithm() = default;
+          virtual std::string_view key() const noexcept = 0;
+          virtual core::Result<void> validate_parameters(const nlohmann::json& parameters) const = 0;
+          virtual core::Result<AlgorithmResult> inspect(const AlgorithmRequest& request) = 0;
+
+          /*
+           * Prepares immutable per-recipe state from immutable parameters and a bounded
+           * asset bundle. The default implementation validates the parameters, rejects a
+           * non-empty bundle for algorithms that declare no assets, and returns a forwarding
+           * prepared object, so existing algorithms need no change.
+           */
+          virtual core::Result<std::unique_ptr<IPreparedAlgorithm>> prepare(
+              const nlohmann::json& parameters, const AlgorithmAssetBundle& assets) const;
+      };
+
+      }  // namespace cvforwin::inspection
+    registry_header: src/inspection/registry.h
+    registry_declaration: |
+      namespace cvforwin::inspection {
+
+      /* Dispatches one prepared recipe against a frame; contains escaped exceptions and
+         enforces the deadline and the result-size bound exactly as the algorithm overload. */
+      core::Result<AlgorithmResult> dispatch(const IPreparedAlgorithm& prepared,
+                                             const AlgorithmRequest& request);
+
+      }  // namespace cvforwin::inspection
+    recipe_assets:
+      source: src/recipes/**
+      note: >-
+        RecipeJson gains an optional "assets" object (logical key -> relative reference under
+        config_root/assets). Bounds: at most 16 assets, 16 MiB each, 64 MiB total, 512-byte
+        reference, no absolute path, no backslash, no "..", no link/reparse escape. The
+        candidate RecipeCatalog loads the bytes and calls prepare() for every recipe before
+        the atomic snapshot publish; any failure rejects the whole candidate and leaves the
+        previous snapshot and its prepared objects alive for in-flight inspections.
+    template_match:
+      header: src/algorithms/template_match.h
+      note: >-
+        TemplateMatchAlgorithm : public IInspectionAlgorithm with key "template.match"; it
+        overrides prepare() to resolve template_asset from the bundle, decode .png/.jpg/.jpeg
+        once with cv::imdecode, convert to grayscale, validate non-empty/not-oversized/
+        not-larger-than-ROI/non-zero-variance, and store the decoded template plus validated
+        scalars in an immutable prepared object. inspect() performs no disk I/O, checks the
+        deadline before preprocessing, before matchTemplate, and before returning, and returns
+        measurements {score,x,y,width,height} with global-frame coordinates; verdict PASS iff
+        score >= threshold, else FAIL with a deterministic template_mismatch defect.
+    behavior:
+    - "Inspection contract: add a factory/prepare seam that receives immutable parameters plus a bounded in-memory asset bundle and returns an immutable per-recipe prepared object; dispatch uses the prepared object plus frame/input_json/deadline."
+    - "Recipe store: parse optional assets mapping (logical key -> relative reference under config_root/assets), enforce bounds (16 assets; 16 MiB each; 64 MiB total; 512-byte reference; no escape/backslash/link), load bytes, and invoke preparation before publishing the candidate catalog."
+    - "Reload is all-or-nothing across JSON, assets, and preparation; the old immutable snapshot and its prepared objects stay valid for an in-flight inspect."
+    - "template.match parameters: template_asset, roi [x,y,w,h] global coordinates, method ccoeff_normed, threshold in [0,1]. Reject unknown keys, non-finite numbers, out-of-frame ROI, zero-variance/oversized/larger-than-ROI templates."
+    - "template.match preparation: decode .png/.jpg/.jpeg once with OpenCV imgcodecs, convert to grayscale, store decoded template; inspect performs no disk I/O."
+    - "template.match result: measurements {score,x,y,width,height} with global-frame x/y; verdict PASS iff score >= threshold else FAIL; deterministic template_mismatch defect on FAIL; deadline checked before preprocessing, before matchTemplate, and before return."
+    - "example.threshold continues to load and inspect through the new lifecycle with unchanged observable output."
+    - "Add config/examples/recipes/template.match.json and a small license-cleared asymmetric template asset."
+    - "Docs: extend docs/development.md (or a new section) with a cv2/NumPy -> OpenCV C++/cv::Mat mapping guide and an explicit statement that production Python source requires hand porting with representative images and tolerances; no Python runtime is packaged."
+invariants:
+  - "No inspect-time file I/O or lazy asset loading."
+  - "No global mutable cache; prepared state is per recipe and immutable after publication."
+  - "No camera/ABI coupling in algorithms."
+  - "Bounded, strict parameter validation with algorithm_parameters_invalid on rejection."
+verification:
+  portable_wsl:
+    - "cmake --preset wsl-gcc-debug && cmake --build --preset wsl-gcc-debug --parallel"
+    - "ctest --preset wsl-gcc-debug --output-on-failure"
+    - "cmake --build --preset wsl-gcc-debug --target format-check"
+    - "cmake --preset wsl-gcc-asan && cmake --build --preset wsl-gcc-asan --parallel && ctest --preset wsl-gcc-asan --output-on-failure"
+    - "cmake --preset wsl-clang-analysis && cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+  windows:
+    - "windows-msvc-tests ctest plus clean package consumer including the template.match example."
+acceptance_reference: >-
+  Contract FR-028/FR-029, algorithm_extension_contract, algorithm_asset_bundle_v1,
+  template_match_algorithm_v1, and the template/cv2 acceptance checks.
+rollback: "Remove the preparation seam additions and template.match; revert recipe asset parsing and docs."
+reporting:
+  developer_report: .ai/reports/CVF-106-implementation.yaml
+  test_red_report: .ai/reports/CVF-106-test-red.yaml
+  test_verify_report: .ai/reports/CVF-106-test-verify.yaml
+  review_report: .ai/reviews/CVF-106.yaml
+  quality_report: .ai/reports/CVF-106-quality.yaml

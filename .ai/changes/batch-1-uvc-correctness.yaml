@@ -1,0 +1,48 @@
+change_id: batch-1-uvc-correctness
+title: Batch 1 UVC correctness (CVF-101 signed-pitch, CVF-102 worker lifetime, CVF-103 callback generations)
+risk: R2
+batch: batch-1-uvc-correctness
+member_changes:
+- id: CVF-101
+  commit: 55f595e07e4409f33648b01a8784218955c1516a
+  scope: Windows UVC 2D buffer signed-pitch / scanline0 conversion, i420/yv12 planar fix
+- id: CVF-102
+  commit: 4c2c1d29eb3fc4f74d9d88ffb378379045b32f7d
+  scope: Media Foundation / COM lifetime isolation on an owned MTA worker thread
+- id: CVF-103
+  commit: a37673551bbb962d6dec4a2ca567325e6109c84a
+  scope: Per-stream read-callback generations with stale-completion rejection
+candidate_sha: a37673551bbb962d6dec4a2ca567325e6109c84a
+scope:
+  allowed_files:
+    production:
+    - src/camera/uvc_windows/**
+    developer_tests:
+    - tests/unit/uvc_frame_math_test.cpp
+    - tests/unit/uvc_command_worker_test.cpp
+    - tests/unit/uvc_worker_snapshot_test.cpp
+    - tests/unit/uvc_stream_generation_test.cpp
+    - tests/unit/uvc_callback_snapshot_test.cpp
+    windows_component_tests:
+    - tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp
+    - tests/windows/uvc/cvf102_uvc_worker_lifecycle_test.cpp
+    - tests/windows/uvc/cvf103_uvc_callback_snapshot_test.cpp
+    build_files:
+    - CMakeLists.txt
+  out_of_scope:
+  - include/cvforwin/**
+  - src/c_api/**
+invariants:
+- No public C symbol, status value, struct layout, calling convention, or export changes.
+- Camera identity is explicit; no first-device fallback.
+- At most one reconnect/recapture per inspection.
+- ICameraBackend observable contract and deadline semantics unchanged.
+acceptance: >-
+  All three member changes are committed, each task reviewer verdict consumed, the deterministic quality gate
+  PASS at the candidate SHA, and the windows-2022 CI jobs (windows-ci and windows-tests-quality) succeed at that
+  same SHA. Windows-only Media Foundation execution is verified natively in windows-tests-quality; portable logic
+  is verified on the WSL host. The independent cvf103_windows_uvc_tests suite builds and runs in CI.
+verification:
+  canonical_gate: .ai/validation/batch-1-quality-plan.yaml -> .ai/reports/batch-1-quality.json
+  independent_manifest: .ai/test-ownership.yaml
+  release_review: .ai/reviews/batch-1.yaml

@@ -1,0 +1,22 @@
+schema_version: 1
+change_id: CVF-102
+kind: ci_evidence
+candidate_sha: 4c2c1d29eb3fc4f74d9d88ffb378379045b32f7d
+workflow: windows-ci
+run_id: 35314496637
+url: https://github.com/victor-wen/cvforge/actions/runs/35314496637
+status: completed
+conclusion: success
+jobs:
+  - name: Release build, tests, abi-check, package
+    conclusion: success
+  - name: Test-enabled suite and clean package consumer
+    conclusion: success
+    tests: "100% tests passed, 0 failed out of 311"
+key_evidence:
+  - "uvc_command_worker.h / uvc_backend.cpp compiled and linked by MSVC v143 x64."
+  - "cvf102_windows_uvc_tests.exe built and executed on Windows; every CVF-102 case (B1-B6, boundary, negative, marshalling) reported Passed."
+  - "windows-tests-quality total 311/311 passed, 0 failed."
+notes: >-
+  Closes the CVF-102 Windows evidence gap. The Linux -D_WIN32/syntax work was a proxy only;
+  this MSVC run is the authoritative Windows evidence.

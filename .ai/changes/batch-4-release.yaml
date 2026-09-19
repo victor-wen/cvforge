@@ -1,0 +1,59 @@
+change_id: batch-4-release
+title: Batch 4 release evidence and 1.1.0 delivery (CVF-107, CVF-108)
+risk: R2
+batch: batch-4-release
+member_changes:
+- id: CVF-107
+  delivery_sha: 0e07e21d2c834ed7600292ef47d2f25a7a8d1c5e
+  scope: >-
+    Opt-in Windows-only UVC hardware stress suite (1000-cycle stress, forced timeout, orientation, colour,
+    interactive unplug/replug), its documentation, a target-scoped MSVC compile definition, and a developer
+    build-wiring regression test.
+  residual:
+  - 'NFR-019 orientation and colour remain UNVERIFIED: the station had no CVF-ORIENT-1 or CVF-COLOR-1
+    physical target. They are recorded as unverified and were never counted as passes.'
+- id: CVF-108
+  delivery_sha: 04b3b3bbed9c9e8ad9b043c5711a3733278609b8
+  superseded_sha: 7d3e3fe6d6c1aef4416418ffb6f89abd7f86dfe6
+  scope: >-
+    Release 1.1.0 synchronization across build metadata, package and archive names, CI artifact names,
+    dependency manifest, documentation, and licence notices, with the public C ABI held at version 1 and the
+    export set at exactly five symbols.
+  residual:
+  - 'CVF108-NBF-04: the package carries no version-bearing metadata artifact, so a consumer infers 1.1.0
+    only from the directory or archive name. Carried for release-reviewer adjudication.'
+candidate_sha: 04b3b3bbed9c9e8ad9b043c5711a3733278609b8
+scope:
+  allowed_files:
+    hardware_and_release_evidence:
+    - tests/hardware/**
+    - docs/**
+    - CMakeLists.txt
+    - CMakePresets.json
+    - cmake/**
+    - vcpkg.json
+    - .github/workflows/**
+    - LICENSES/**
+    - config/examples/**
+    - examples/c_host/**
+    - tests/unit/**
+    evidence_harness:
+    - .ai/validation/**
+  out_of_scope:
+  - include/cvforwin/**
+  - src/**
+  - .ai/project-contract.yaml
+invariants:
+- 'Public C ABI stays version 1 and exports stay exactly five; abi-check passes at the candidate SHA.'
+- 'The hardware target stays WIN32 + opt-in, is never registered with CTest, and never joins a hosted CI job.'
+- 'No production behavior change is masked as a version bump or as test-only work.'
+- 'Hardware evidence, portable evidence, and Windows CI evidence remain distinct; none substitutes for another.'
+acceptance: >-
+  Both member changes are committed, their task reviewers and deterministic quality gates are consumed, and the
+  windows-2022 CI jobs succeed at the frozen candidate SHA. Portable and Windows-CI behavior is verified;
+  hardware evidence is recorded but explicitly incomplete for orientation and colour.
+verification:
+  canonical_gate: .ai/validation/batch-4-quality-plan.yaml -> .ai/reports/batch-4-quality.json
+  independent_manifest: .ai/test-ownership.yaml
+  hardware_evidence: .ai/reports/CVF-107-hardware.yaml
+  release_review: .ai/reviews/batch-4.yaml

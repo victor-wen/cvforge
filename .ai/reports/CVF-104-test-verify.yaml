@@ -1,0 +1,303 @@
+schema_version: 1
+change_id: CVF-104
+phase: VERIFY
+author: test-engineer
+recorded_at: 2026-09-19
+host: Linux (WSL) GCC 13.3.0, Catch2 v3.16.0
+
+summary: >-
+  Independent black-box verification of CVF-104 (end-to-end absolute deadline,
+  post-frame finalization, deadline-bounded artifact save with optional/required
+  precedence, and background retention). A fresh verify session used only the
+  behavior-only brief, the approved contract, the frozen seams, and the
+  test-engineer-owned test files; no production .cpp was read and the developer
+  implementation report was not consulted. All five owned files matched their
+  recorded sha256 at session start. Requirement-derived edge cases were added to
+  three owned files (the three seams) without removing, weakening, disabling, or
+  skipping any existing assertion; tests/unit/cvf104_end_to_end_test.cpp and
+  tests/unit/cvf104_test_support.h are unchanged. Every canonical portable
+  command, both direct debug binaries, the AddressSanitizer suite, the format
+  check, and static analysis pass with recorded zero exit codes. The
+  hash-pinned CVF-005/CVF-006 regression files still match their recorded
+  hashes and their focused suite passes. No implementation defect was found by
+  observable black-box behavior.
+
+independence:
+  owned_files_at_session_start:
+    - path: tests/unit/cvf104_test_support.h
+      sha256: 517759e9db6c6eeb729a2866f8fbcb2f786d3000837619171ce90ec6f72a5775
+      matched_manifest: true
+    - path: tests/unit/cvf104_finalization_test.cpp
+      sha256: de21b13ae4d1d9e8619d92374523b188668a30d00d65d948cf7e1768e0ad5f5c
+      matched_manifest: true
+    - path: tests/unit/cvf104_save_worker_test.cpp
+      sha256: 057b7f77c1e2b6aeb4ac8ed00a8d66f53c31cf3981d3f2082a6abd094b5ac296
+      matched_manifest: true
+    - path: tests/unit/cvf104_retention_scheduler_test.cpp
+      sha256: 9059c09b1d36f840a87ffb5df91599b49a1f98d3f3b2b668ca72d1603caab953
+      matched_manifest: true
+    - path: tests/unit/cvf104_end_to_end_test.cpp
+      sha256: 74f4b4f64351ddc83d3a0f5db3b8177652a8dda0d0856f73d7cc5f4b8c39f999
+      matched_manifest: true
+  manifest_sha256_at_session_start: 3a808f68516a0bef66207a60c9c4ad74d2cdf95441ef09fa82eb998ff0b1be42
+  mismatches: []
+  production_cpp_read: false
+  developer_report_consumed: false
+
+added_edge_cases:
+  rationale: >-
+    Requirement-derived cases from the CVF-104 brief boundary_cases/negative_cases
+    and the contract's artifact_finalization_v1 precedence rules. No existing
+    assertion was removed, weakened, disabled, or skipped.
+  tests_unit_cvf104_finalization_test_cpp:
+    - "required save that failed at an already-expired deadline is TIMEOUT, never REQUIRED_ARTIFACT_ERROR; NOT_EVALUATED; no publish; no image-save warning; injected warn_base preserved"
+    - "committed required save exactly at the expiry boundary succeeds (OK, verdict preserved, image_path published)"
+    - "committed optional save at the expiry boundary publishes and keeps the verdict"
+    - "no frame_valid makes no save attempt and claims no image warning for optional; the required variant still reports the engine error, not a required-artifact error"
+  tests_unit_cvf104_save_worker_test_cpp:
+    - "wait_until with an already-expired deadline (Deadline::immediate) returns promptly without completing a blocked save and without publishing a path"
+    - "cancel_pending with nothing queued is a safe no-op and does not wedge the worker"
+    - "drain called twice is idempotent and leaves no temporary or queued work"
+  tests_unit_cvf104_retention_scheduler_test_cpp:
+    - "explicit 99th/100th committed-capture trigger boundary (99 -> not fired, count 99; 100 -> fired, count 100)"
+    - "due() is false one millisecond before 60s and true exactly at 60s"
+  tests_unit_cvf104_end_to_end_test_cpp: []
+  tests_unit_cvf104_test_support_h: []
+
+correction_during_verify:
+  file: tests/unit/cvf104_retention_scheduler_test.cpp
+  description: >-
+    A first draft of the 99/100 boundary case asserted
+    RetentionScheduler::due() became true on the 100th committed capture. The
+    frozen observable (already pinned by the pre-existing
+    "whichever trigger comes first fires" case) is that the capture trigger is
+    the boolean returned by on_capture_committed while due() is the independent
+    time trigger, so due() is false after 100 captures when 60s has not elapsed.
+    The single self-invented expectation was corrected to match the contract;
+    it was not weakened and no existing assertion changed. No implementation
+    defect was involved. This is recorded for transparency, per the
+    never-guess-an-expected-value rule.
+
+commands:
+  - command: "clang-format --dry-run --Werror tests/unit/cvf104_test_support.h tests/unit/cvf104_finalization_test.cpp tests/unit/cvf104_save_worker_test.cpp tests/unit/cvf104_retention_scheduler_test.cpp tests/unit/cvf104_end_to_end_test.cpp"
+    exit_code: 0
+    counts: "0 violations"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    counts: "n/a"
+  - command: "build/wsl-gcc-debug/cvf104_finalization_tests"
+    exit_code: 0
+    counts: "passed=129 assertions, failed=0, skipped=0, test cases=15"
+  - command: "build/wsl-gcc-debug/cvf104_worker_tests"
+    exit_code: 0
+    counts: "passed=74 assertions, failed=0, skipped=0, test cases=9"
+  - command: "build/wsl-gcc-debug/cvf104_retention_tests"
+    exit_code: 0
+    counts: "passed=339 assertions, failed=0, skipped=0, test cases=10"
+  - command: "build/wsl-gcc-debug/cvf104_end_to_end_tests"
+    exit_code: 0
+    counts: "passed=336 assertions, failed=0, skipped=0, test cases=5"
+  - command: "ctest --preset wsl-gcc-debug -R 'CVF-104' --output-on-failure"
+    exit_code: 0
+    counts: "44/44 passed (39 independent CVF-104 + 5 developer CVF-104), failed=0, skipped=0"
+  - command: "ctest --preset wsl-gcc-debug -R 'cvf005|CVF-005|cvf006|CVF-006' --output-on-failure"
+    exit_code: 0
+    counts: "58/58 passed, failed=0, skipped=0"
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "351/351 passed, failed=0, skipped=0/no Not Run"
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    counts: "106 files conform to .clang-format"
+  - command: "cmake --preset wsl-gcc-asan"
+    exit_code: 0
+    counts: "n/a"
+  - command: "cmake --build --preset wsl-gcc-asan --parallel"
+    exit_code: 0
+    counts: "n/a"
+  - command: "ctest --preset wsl-gcc-asan --output-on-failure"
+    exit_code: 0
+    counts: "351/351 passed, failed=0, skipped=0"
+  - command: "cmake --preset wsl-clang-analysis && cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+    exit_code: 0
+    counts: "24 project source files clean under .clang-tidy, 0 warnings/errors"
+
+regression_confirmation:
+  cvf005_cvf006_hashes:
+    result: "all recorded hash-pinned CVF-005 and CVF-006 test/fixture files match their manifest hashes (17/17 OK, 0 DIFF)"
+    focused_ctest: "58/58 passed (exit 0)"
+  assertion_integrity:
+    removed: []
+    weakened: []
+    disabled: []
+    deleted: []
+    skipped: []
+    note: >-
+      ctest full output contained no "Not Run" or "skipped" entries; direct
+      Catch2 binaries reported all-passed with zero failures.
+
+final_sha256:
+  tests/unit/cvf104_test_support.h: 517759e9db6c6eeb729a2866f8fbcb2f786d3000837619171ce90ec6f72a5775
+  tests/unit/cvf104_finalization_test.cpp: 9e92d7e6446af3daa315568f0ef8784704e52edb5af869baff6d4882a648da67
+  tests/unit/cvf104_save_worker_test.cpp: 11ce2d4363fb2ccecf41e200057d865334b08bd836ee39733dfbb6d5af885aef
+  tests/unit/cvf104_retention_scheduler_test.cpp: 92c47273564683e1184121ad05b1899fece3cf9f0428da3fbef4c63718ade784
+  tests/unit/cvf104_end_to_end_test.cpp: 74f4b4f64351ddc83d3a0f5db3b8177652a8dda0d0856f73d7cc5f4b8c39f999
+  .ai/test-ownership.yaml: d370acb89d2b120f36bc0493036d67d789be0a0c8fa3de790d514a57516f10f1
+
+ownership_update:
+  manifest: .ai/test-ownership.yaml
+  section: CVF-104
+  updated_files:
+    - tests/unit/cvf104_finalization_test.cpp
+    - tests/unit/cvf104_save_worker_test.cpp
+    - tests/unit/cvf104_retention_scheduler_test.cpp
+  unchanged_files:
+    - tests/unit/cvf104_test_support.h
+    - tests/unit/cvf104_end_to_end_test.cpp
+  other_sections_preserved: true
+  audit: >-
+    YAML parse of the whole manifest succeeded; every file listed in every
+    section (CVF-001..008, CVF-101..104) hash-matches its recorded value
+    (0 mismatches). Only the three CVF-104 test hashes and the CVF-104 notes were
+    edited.
+
+findings:
+  defects: []
+  observations:
+    - id: OBS-CVF104-01
+      severity: informational
+      summary: >-
+        RetentionScheduler::due() is the time-trigger query only; the
+        committed-capture trigger is observed as the boolean return of
+        on_capture_committed(). This is consistent with the frozen contract
+        ("requested after 60 seconds ... or 100 committed captures") and the
+        pre-existing pinning case, but the two trigger channels are distinct and
+        must not be conflated by callers. Not a defect.
+  blockers: []
+
+independent_harnesses:
+  scripts:
+    - .ai/validation/cvf104-verify-recon.sh
+    - .ai/validation/cvf104-verify-baseline.sh
+    - .ai/validation/cvf104-verify-extended.sh
+    - .ai/validation/cvf104-verify-hash-asan.sh
+    - .ai/validation/cvf104-verify-manifest.sh
+    - .ai/validation/cvf104-verify-final.sh
+    - .ai/validation/cvf104-verify-static.sh
+  note: >-
+    Read-only/verification harnesses written by the test engineer to run the
+    canonical commands under the session's command allowlist. They do not modify
+    production code or owned test artifacts.
+
+windows_fix_2026_09_19:
+  trigger: >-
+    windows-tests-quality CI run 35383859693 (native MSVC, commit 8b96cb8)
+    failed exactly three CVF-104 independent CHECKs, all from one root cause.
+  failing_checks:
+    - file: tests/unit/cvf104_save_worker_test.cpp
+      line: 93
+      observed: "CHECK(path_within(sink->root(), outcome.path)) -> false"
+    - file: tests/unit/cvf104_end_to_end_test.cpp
+      line: 87
+      observed: "CHECK(path_within(sink->root(), file)) -> false"
+    - file: tests/unit/cvf104_end_to_end_test.cpp
+      line: 191
+      observed: "CHECK(path_within(managed_root, outcome.image_path)) -> false"
+  root_cause: >-
+    tests/unit/cvf104_test_support.h path_within() compared
+    root.lexically_normal().string() with child.lexically_normal().string() as a
+    raw prefix and then required child_text[root_text.size()] == '/'. On Windows
+    lexically_normal().string() uses '\\', so the boundary test always failed
+    there while passing on Linux (307+ portable cases).
+  fix:
+    file: tests/unit/cvf104_test_support.h
+    summary: >-
+      path_within() now decomposes root and child into native
+      std::filesystem::path components (via lexically_normal()), additionally
+      splits every component on both '/' and '\\', and returns true exactly when
+      root's component list is a prefix of the child's (equal length means child
+      == root). Added #include <algorithm> for std::equal.
+    intent_preserved: >-
+      A sibling that only extends root's final component name ("<root>_x/...")
+      or an escape ("root/../outside") still returns false; root itself and any
+      real descendant return true on both separator spellings.
+  regression_guard:
+    file: tests/unit/cvf104_save_worker_test.cpp
+    case: "CVF-104 support: path_within is separator-agnostic and still rejects siblings and escapes"
+    coverage: >-
+      root itself; native '/' descendants; a backslash-joined child
+      (root.string() + "\\frame.png") simulating Windows separators on Linux; a
+      Windows drive-style pair "C:\\root\\captures" /
+      "C:\\root\\captures\\frame.png"; a "<root>_x" sibling; a
+      "C:\\root\\captures_x" sibling; a different subtree; and a ".." escape.
+      9 assertions. cvf104_save_worker_test.cpp grew 74 -> 83 assertions and
+      9 -> 10 test cases; no assertion was removed, weakened, disabled, or
+      skipped.
+  changed_files_sha256:
+    tests/unit/cvf104_test_support.h: d8bd5191bd3aa3bbd0ce79443422a51b2d617e436bbdd47a70e385f2776224ce
+    tests/unit/cvf104_save_worker_test.cpp: 5cc3c1bedd9a69ee95e9325dc56ecfff1c1c109122becd709fccb3b276c21ea4
+    .ai/test-ownership.yaml: 05ed76e55b93f9c075d66fdb5baa3313ceaceea67267a8f46a984226a060a51e
+  manifest_audit:
+    cvf104_section_updated: true
+    other_sections_preserved: true
+    global_hash_mismatches: []
+  commands:
+    - command: "clang-format --dry-run --Werror tests/unit/cvf104_test_support.h tests/unit/cvf104_save_worker_test.cpp"
+      exit_code: 0
+      counts: "0 violations"
+    - command: "cmake --preset wsl-gcc-debug"
+      exit_code: 0
+      counts: "configure done"
+    - command: "cmake --build --preset wsl-gcc-debug --parallel"
+      exit_code: 1
+      counts: >-
+        Pre-existing and unrelated: stopped on untracked CVF-105 test TUs
+        (cvf105_hex_test.cpp: canonicalize_hex4 missing;
+        cvf105_runtime_output_text_test.cpp: InspectionOutcome::output_text and
+        rt::k_max_result_payload_bytes missing). No CVF-104 error.
+    - command: "cmake --build --preset wsl-gcc-debug --target cvf104_finalization_tests cvf104_worker_tests cvf104_retention_tests cvf104_end_to_end_tests --parallel"
+      exit_code: 0
+      counts: "4/4 CVF-104 targets built and linked"
+    - command: "build/wsl-gcc-debug/cvf104_finalization_tests"
+      exit_code: 0
+      counts: "passed=129 assertions, failed=0, test cases=15"
+    - command: "build/wsl-gcc-debug/cvf104_worker_tests"
+      exit_code: 0
+      counts: "passed=83 assertions, failed=0, test cases=10"
+    - command: "build/wsl-gcc-debug/cvf104_retention_tests"
+      exit_code: 0
+      counts: "passed=339 assertions, failed=0, test cases=10"
+    - command: "build/wsl-gcc-debug/cvf104_end_to_end_tests"
+      exit_code: 0
+      counts: "passed=336 assertions, failed=0, test cases=5"
+    - command: "ctest --preset wsl-gcc-debug -R 'CVF-104' --output-on-failure"
+      exit_code: 0
+      counts: "46/46 passed, failed=0"
+    - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+      exit_code: 8
+      counts: "391 tests: 380 passed, 11 failed; all 11 failures are CVF-105, 0 CVF-104"
+  full_suite_note: >-
+    This working tree contains 391 portable tests, not the 351 of the prior
+    verify, because the CVF-105 test files were added concurrently (still
+    untracked) while CVF-105's production seams are absent. All 11 full-suite
+    failures are CVF-105 (3 NOT_BUILT/Not Run + 8 runtime Failed); zero CVF-104
+    tests fail and no failing test includes any CVF-104 file. The bounded fix
+    itself is green: all four CVF-104 binaries and the focused CVF-104 ctest
+    pass. Full-suite green is blocked only by the unrelated, pre-existing
+    CVF-105 work and is reported, not worked around.
+  non_cvf104_changes: >-
+    None. Only tests/unit/cvf104_test_support.h,
+    tests/unit/cvf104_save_worker_test.cpp, .ai/test-ownership.yaml, this
+    report, and new .ai/validation/cvf104-windowsfix-*.sh harnesses were
+    written; git status shows no change under src/.
+  windows_execution: >-
+    Not claimed. The fix is platform-correct by construction (native path
+    components plus both separator spellings) and regression-guarded on Linux;
+    native MSVC validation is deferred to the next windows-tests-quality CI run.
+  harnesses:
+    - .ai/validation/cvf104-windowsfix-patch.sh
+    - .ai/validation/cvf104-windowsfix-format.sh
+    - .ai/validation/cvf104-windowsfix-rehearse.sh
+    - .ai/validation/cvf104-windowsfix-rehearse2.sh
+    - .ai/validation/cvf104-windowsfix-census.sh
+    - .ai/validation/cvf104-windowsfix-final.sh

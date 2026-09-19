@@ -1,0 +1,29 @@
+format: 1
+change_id: CVF-104
+script_report: /home/administrator/c_cpp_project/cvforwin/.ai/reports/CVF-104-quality.json
+script_verdict: PASS
+script_exit_code: 0
+candidate_sha: de167ba1c84e3b9354a16aaf16ab7bed14316d2a
+plan_sha256: 9bc7b57b53de7383e15035a28892dc402ae2308624f23879eba044985fa0c14f
+commands_checked: 6
+test_counts:
+  passed: 706
+  failed: 0
+  skipped: 0
+failed_command_ids: []
+analysis: >-
+  Deterministic gate PASS at HEAD de167ba1c84e3b9354a16aaf16ab7bed14316d2a (CVF-104 production plus the
+  Windows separator fix to the independent test helper). All six canonical WSL commands passed: configure, build, ctest (353/353),
+  format (106 files), clang static analysis (24 files), sanitizer suite (353/353) - 706 passed / 0 failed /
+  0 skipped aggregate (one additional independent helper regression case was added to fix a Windows-only separator defect in the CVF-104 path_within helper; authoring integrity unaffected). The ownership manifest sha256
+  05ed76e55b93f9c075d66fdb5baa3313ceaceea67267a8f46a984226a060a51e reconciles with zero mismatches across the five
+  independent CVF-104 files. The reviewer's blocking finding B-1 (a timed-out executing save could still publish
+  a late final file) was fixed in src/artifacts/save_worker.{h,cpp} with a deterministic regression test, and the
+  re-review recorded PASS_WITH_FINDINGS with B-1 resolved. The plan pins the approved 1.1.0 contract, the CVF-104
+  change contract (with the frozen finalization/save-worker/retention-scheduler seams), the ownership manifest,
+  workflow state, and the reviewer verdict 2813f9abef26d3e85a64f16b058fe9cff37e0a28bebf8ed78de54b19adb0c226, and the CVF-104 build-wiring scope update (NB-2).
+  CVF-104 touches only portable runtime/artifact code; no Windows-specific behavior is claimed here.
+next_action: >-
+  Commit only the CVF-104 source/test/build files at this scope, push to main, and wait for the windows-2022 CI
+  jobs to succeed at the new SHA. Then proceed to CVF-105, after which the batch-2 candidate is frozen for the
+  batch-level quality gate and release review.

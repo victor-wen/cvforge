@@ -1,0 +1,236 @@
+schema_version: 1
+change_id: CVF-102
+phase: IMPLEMENTATION
+author: developer
+recorded_at: 2026-09-18
+host: Linux (WSL), gcc/clang portable build only; Windows MSVC not executable here
+status: COMPLETE
+
+summary: >-
+  Re-ran the canonical CVF-102 evidence on the implementation already on disk (no redesign, no
+  production or developer-test change was needed). The UVC backend now owns one DLL worker thread
+  that initializes COM as MTA and balances one MFStartup/MFShutdown lifetime; every backend
+  operation (enumerate/open/capture/reconnect/close) is marshalled onto that worker and completed
+  synchronously, bounded by the caller's absolute deadline. All portable gates are green with real
+  exit code 0: configure, build, ctest 284/284, format-check 90 files, static-analysis 22 files,
+  ASAN build + ctest 284/284, and the developer unit binaries (149 assertions in 8 cases plus 1
+  assertion in 1 Windows-gated case). The frozen independent test
+  tests/windows/uvc/cvf102_uvc_worker_lifecycle_test.cpp was observed at sha256
+  ce2cc80ee41e7cf5579dd4cf6c7a46f29eaa066179912ab46beb54e195562109, exactly the pinned value, both
+  before and after the run. Windows MSVC compilation/execution of cvf102_windows_uvc_tests is NOT
+  verifiable on this Linux host and is explicitly deferred to the windows-tests-quality CI; the
+  Linux portable run is not Windows evidence and is not claimed as such.
+
+no_change_statement: >-
+  No production, developer-test, or build file was added or modified this session. The contract's
+  stated deliverable set is present and passes; the observed frozen independent-test hash matched
+  the pinned value, so there was no red state to fix. The files listed below are the current
+  deliverable set with live sha256 values.
+
+changed_files:
+  note: >-
+    Current CVF-102 deliverable set (unchanged by the developer during this re-verification
+    session). No file in this list was edited in this session.
+  production:
+    - path: src/camera/uvc_windows/uvc_command_worker.h
+      sha256: 0fd9351d24f899b5e4abbe8a4167805c14cff196747bb02d8ff8a5867c91ada4
+      role: >-
+        Portable single-thread command marshaller (CommandWorker). Owns the worker thread, runs the
+        caller startup hook on it, completes each command synchronously under the caller deadline,
+        and runs teardown exactly once after the loop ends (including after a failed startup). No
+        Windows/MF/OpenCV dependency.
+      changed_this_session: false
+    - path: src/camera/uvc_windows/uvc_backend.h
+      sha256: 60cd5de53470bf30c0c2b7a662fcabfc567d1e71d2a91acaff7eafcb042c1c80
+      role: >-
+        Adds the Windows-only internal observability struct UvcWorkerSnapshot and the non-ABI
+        accessor UvcCameraBackend::worker_snapshot() const noexcept. No existing ICameraBackend
+        signature changed.
+      changed_this_session: false
+    - path: src/camera/uvc_windows/uvc_backend.cpp
+      sha256: 4342bb67a568e79e839a2fd3d9be2d468e92c82aec99969b2d1f92be2fda195a
+      role: >-
+        Worker-marshalled Media Foundation lifetime: startup_worker() runs
+        CoInitializeEx(nullptr, COINIT_MULTITHREADED) then MFStartup(MF_VERSION, MFSTARTUP_LITE) on
+        the worker; teardown_worker() releases stream/callback then MFShutdown then CoUninitialize
+        on the worker before join. enumerate/open/capture/reconnect submit std::function commands
+        to worker_ and finalize() maps completed/timeout/unavailable to the frozen result contract.
+        worker_snapshot() reports the counters.
+      changed_this_session: false
+  developer_tests:
+    - path: tests/unit/uvc_command_worker_test.cpp
+      sha256: 408516ac7ef8e6a757dc9f23e10235cde97477dfdf603d7a5d0a8630690ee858
+      role: >-
+        Developer-owned portable test for CommandWorker: startup/teardown on the owned worker,
+        in-order execution, teardown once on failed startup, restart after stop, idempotent
+        stop_and_join, expired-deadline no-op, timeout-that-still-completes, concurrent submissions.
+      changed_this_session: false
+    - path: tests/unit/uvc_worker_snapshot_test.cpp
+      sha256: 450290f00a23c5e3f4c33bb770d0c3332d1565ba5e223e665b51fbab8f45bb73
+      role: >-
+        Developer-owned Windows-gated test for the UvcCameraBackend::worker_snapshot() seam; empty
+        TU off Windows (portable build observes the "not exercised on portable builds" case).
+      changed_this_session: false
+  build:
+    - path: CMakeLists.txt
+      sha256: f718bee3909450d747878f51f7ee2cc78f95d27847537be257c33792eca83d73
+      role: >-
+        Registers developer targets uvc_command_worker_developer_tests and
+        uvc_worker_snapshot_developer_tests (catch_discover_tests) and the test-owner-authored
+        cvf102_windows_uvc_tests under the WIN32 + CVFORWIN_BUILD_TESTS +
+        CVFORWIN_BUILD_TEST_BACKENDS gate.
+      changed_this_session: false
+
+frozen_files_untouched:
+  - path: tests/windows/uvc/cvf102_uvc_worker_lifecycle_test.cpp
+    expected_sha256: ce2cc80ee41e7cf5579dd4cf6c7a46f29eaa066179912ab46beb54e195562109
+    observed_sha256_before: ce2cc80ee41e7cf5579dd4cf6c7a46f29eaa066179912ab46beb54e195562109
+    observed_sha256_after: ce2cc80ee41e7cf5579dd4cf6c7a46f29eaa066179912ab46beb54e195562109
+    sha_match: true
+    status: untouched
+  - path: .ai/test-ownership.yaml
+    observed_sha256_before: e69e0c62602e318765fa86ccd68897315d211e12126695e01f7734706f68ff79
+    observed_sha256_after: e69e0c62602e318765fa86ccd68897315d211e12126695e01f7734706f68ff79
+    status: untouched
+    note: >-
+      The CVF-102 ownership entry (lines 480-512) pins tests/windows/uvc/
+      cvf102_uvc_worker_lifecycle_test.cpp at ce2cc80e...; the observed hash matches it.
+  - path: .ai/changes/**
+    status: untouched by developer
+  - path: include/cvforwin/**
+    status: untouched by developer
+  - path: src/c_api/**
+    status: untouched by developer
+
+commands:
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    result: PASS
+    observed: "Configuring done (17.5s); Generating done (0.0s); build files written to build/wsl-gcc-debug"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    result: PASS
+    observed: "[0/2] Re-checking globbed directories; ninja: no work to do."
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    result: PASS
+    observed: "100% tests passed, 0 tests failed out of 284 (Total Test time real 8.24 sec)"
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    result: PASS
+    observed: "-- format-check passed: 90 file(s) conform to .clang-format"
+  - command: "cmake --preset wsl-clang-analysis"
+    exit_code: 0
+    result: PASS
+    observed: "Configuring done; Generating done; build files written to build/wsl-clang-analysis"
+  - command: "cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+    exit_code: 0
+    result: PASS
+    observed: "-- static-analysis passed: 22 file(s) clean under .clang-tidy"
+  - command: "cmake --preset wsl-gcc-asan"
+    exit_code: 0
+    result: PASS
+    observed: "Configuring done; Generating done; build files written to build/wsl-gcc-asan"
+  - command: "cmake --build --preset wsl-gcc-asan --parallel"
+    exit_code: 0
+    result: PASS
+    observed: "[1/2] Building CXX object .../uvc_command_worker_developer_tests.dir/tests/unit/uvc_command_worker_test.cpp.o; [2/2] Linking CXX executable uvc_command_worker_developer_tests"
+  - command: "ctest --preset wsl-gcc-asan --output-on-failure"
+    exit_code: 0
+    result: PASS
+    observed: "100% tests passed, 0 tests failed out of 284 (Total Test time real 16.76 sec)"
+  - command: "build/wsl-gcc-debug/uvc_command_worker_developer_tests"
+    exit_code: 0
+    result: PASS
+    observed: "All tests passed (149 assertions in 8 test cases)"
+  - command: "build/wsl-gcc-debug/uvc_worker_snapshot_developer_tests"
+    exit_code: 0
+    result: PASS
+    observed: "All tests passed (1 assertion in 1 test case)"
+  - command: "build/wsl-gcc-asan/uvc_command_worker_developer_tests"
+    exit_code: 0
+    result: PASS
+    observed: "All tests passed (149 assertions in 8 test cases)"
+  - command: "build/wsl-gcc-asan/uvc_worker_snapshot_developer_tests"
+    exit_code: 0
+    result: PASS
+    observed: "All tests passed (1 assertion in 1 test case)"
+
+developer_tests:
+  portable:
+    target: uvc_command_worker_developer_tests
+    binary: build/wsl-gcc-debug/uvc_command_worker_developer_tests
+    result: PASS
+    test_cases: 8
+    assertions: 149
+    ctest_cases: 8
+    names:
+      - "CommandWorker runs startup and teardown on the owned worker"
+      - "CommandWorker executes submitted commands in order on the worker thread"
+      - "CommandWorker runs teardown exactly once even when startup fails"
+      - "CommandWorker can be started again after a stop"
+      - "CommandWorker stop_and_join is idempotent and rejects commands afterwards"
+      - "CommandWorker reports an expired deadline without executing the command"
+      - "CommandWorker times out a command that exceeds the deadline but still completes it"
+      - "CommandWorker accepts concurrent submissions without losing work"
+  windows_gated:
+    target: uvc_worker_snapshot_developer_tests
+    binary: build/wsl-gcc-debug/uvc_worker_snapshot_developer_tests
+    result: PASS
+    host_behavior: >-
+      Off Windows the TU is empty, so the binary reports exactly one case; on Windows it drives the
+      real UvcCameraBackend::worker_snapshot() seam.
+    test_cases: 1
+    assertions: 1
+    names:
+      - "UVC developer: Windows-only worker seam is not exercised on portable builds"
+
+independent_windows_component_test:
+  path: tests/windows/uvc/cvf102_uvc_worker_lifecycle_test.cpp
+  sha256: ce2cc80ee41e7cf5579dd4cf6c7a46f29eaa066179912ab46beb54e195562109
+  owner: test-engineer
+  ctest_target: cvf102_windows_uvc_tests
+  registration_gate: "WIN32 AND CVFORWIN_BUILD_TESTS AND CVFORWIN_BUILD_TEST_BACKENDS"
+  registered_by_developer: >-
+    The developer added only the add_executable/add_test wiring in CMakeLists.txt; the test source
+    itself was authored and hash-pinned by the test owner and was not modified.
+  status_on_this_host: >-
+    NOT BUILT and NOT EXECUTED here — the translation unit is entirely guarded by
+    #if defined(_WIN32), so it is an empty TU on this Linux host and the portable presets do not
+    run it. No Windows result is claimed.
+
+windows_msvc_status:
+  verifiable_on_this_host: false
+  statement: >-
+    Windows MSVC compilation and execution of cvf102_windows_uvc_tests are NOT verifiable on this
+    Linux host and were NOT fabricated. No MinGW/Windows SDK toolchain is installed here. The
+    successful Linux portable and ASAN runs exercise the portable CommandWorker and the frozen
+    seam's portable TU only; they are not Windows evidence and must not be reported as such. The
+    Windows MSVC build/run of the component suite is explicitly deferred to the
+    windows-tests-quality CI, where cvf102_windows_uvc_tests is registered under the
+    WIN32 + CVFORWIN_BUILD_TESTS + CVFORWIN_BUILD_TEST_BACKENDS gate and is never registered in the
+    release or hosted no-camera presets. Real-device multi-thread host behavior is deferred to the
+    designated station (CVF-107).
+
+contract_conformance:
+  behavior:
+    - "Worker lifecycle: start -> CoInitializeEx(MTA) -> MFStartup(MF_VERSION, MFSTARTUP_LITE) -> command loop -> MFShutdown -> CoUninitialize -> join (verified in uvc_backend.cpp startup_worker/teardown_worker and CommandWorker::worker_main)."
+    - "Commands marshalled to the worker and completed synchronously; each wait bounded by the caller deadline (CommandWorker::submit wait_for deadline.remaining())."
+    - "All backend-held MF objects and buffer access occur on the worker (stream/reader/callback referenced by the worker; owned BGR8 frames cross back by value via shared_ptr<Result<T>>)."
+    - "Host COM state is not consulted; enumerate/open/capture/reconnect/close only touch CommandWorker."
+    - "One balanced startup/shutdown per backend lifetime; failed startup returns camera_io and the worker is joined in start() (no leak)."
+    - "close() is idempotent, drains the worker and joins (CommandWorker::stop_and_join is idempotent and safe on a never-started worker)."
+  invariants:
+    - "No host CoInitializeEx requirement is introduced."
+    - "No Media Foundation interface pointer escapes the worker; public ABI and ICameraBackend signatures are unchanged."
+    - "Teardown order is teardown_stream()/callback_.reset() before MFShutdown before CoUninitialize."
+    - "Portable builds are unaffected (Windows sources compile only under if(WIN32); CommandWorker is portable and tested)."
+  interface_freeze: >-
+    UvcCameraBackend::worker_snapshot() and UvcWorkerSnapshot match the frozen seam declaration in
+    .ai/changes/CVF-102.yaml interface_v1.frozen_test_seam. No include/cvforwin or src/c_api change.
+
+notes:
+  - "No code change was required this session: the implementation, developer tests, and CMake wiring already on disk pass every contract verification command."
+  - "All portable gates plus both developer binaries pass with real exit code 0; ctest is 284/284 in both debug and ASAN."
+  - "Frozen independent test and .ai/test-ownership.yaml hashes observed unchanged before and after the run."
+  - "Windows MSVC evidence remains unverifiable here and is explicitly deferred to windows-tests-quality CI (and real-device behavior to CVF-107); no Windows result is claimed."

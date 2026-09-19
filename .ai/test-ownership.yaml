@@ -73,7 +73,7 @@ changes:
       - path: tests/unit/cvf003_test_support.h
         sha256: db9b17fcbf1f36abeff72e2be3976fa694b0d5f1eb82045bda6889bff0ec0485
       - path: tests/unit/cvf003_registry_test.cpp
-        sha256: d43c2ec1b75848e3bcfb8d2b7dc09cd67234f3a8072975bfc385fee8c2186937
+        sha256: 72d058116187731df1aa85f844c7f5254a282ecea2fd39ed1ae9279bd76c4076
       - path: tests/unit/cvf003_dispatch_test.cpp
         sha256: 9ffd09e1d22a1e0b385ec5b4cda092d5311e719415caa18ddfe54f858301f306
       - path: tests/unit/cvf003_example_threshold_test.cpp
@@ -86,6 +86,25 @@ changes:
       run time and no binary fixtures are checked in. Hashes are not to be updated by
       anyone other than the test owner; a mismatch at verify time is an independence
       violation.
+      Amendment (2026-09-19, owner: test-engineer; report
+      .ai/reports/CVF-003-test-amendment.yaml): FR-029 adds the compiled
+      template.match algorithm, so a successful register_compiled_algorithms()
+      publishes two keys, not one. The two hash-pinned B2 registry cases in
+      tests/unit/cvf003_registry_test.cpp asserted a hard-coded registry.size() == 1u
+      (lines 161 and 182) and therefore contradicted FR-029; they now assert the exact
+      registered set: registry.size() == 2, the order-independent keys() set
+      {example.threshold, template.match}, and find() on each key returning a non-null
+      instance whose key() equals that key. The second-registration negative case keeps
+      its duplicate-key failure and original-pointer retention assertions and now also
+      pins the two-key set. No case was deleted and no assertion was removed, skipped,
+      disabled, or weakened; the assertions are strictly stronger than the old
+      hard-coded count (they pin the exact set rather than a count). Its previous
+      sha256 was d43c2ec1b75848e3bcfb8d2b7dc09cd67234f3a8072975bfc385fee8c2186937; the
+      new sha256 is recorded above. Fresh evidence: clang-format --dry-run --Werror
+      exit 0; wsl-gcc-debug configure/build exit 0 and ctest 447/447 passed (exit 0);
+      wsl-gcc-asan configure/build exit 0 and ctest 447/447 passed (exit 0); focused
+      ctest -R CVF-003 37/37 passed (exit 0). The other three CVF-003 files re-hash to
+      their recorded manifest values.
   CVF-004:
     change_id: CVF-004
     owner: test-engineer
@@ -97,7 +116,7 @@ changes:
       - path: tests/unit/cvf004_error_codes_test.cpp
         sha256: 50ac8771a36a305051ed24d69ce23546ee7ed4d164d149e7201fd516fa6aa53b
       - path: tests/unit/cvf004_config_test.cpp
-        sha256: 3cd3f957b5887b7dfbede112384c52e7befa67f25f5c9df5fb43077436750335
+        sha256: a4d46eaad3b2414c7f5ad4adf4c2f6fb60fc7c16b9018b493527d07e30cf2b93
       - path: tests/unit/cvf004_recipe_test.cpp
         sha256: 62f9cf148db65f25db7dbdcf4c8a09dc6b11a2b614b28d9f48baadac4c377c1e
       - path: tests/unit/cvf004_catalog_test.cpp
@@ -156,6 +175,19 @@ changes:
       --dry-run --Werror exit 0; syntax-only compile exit 0 in both modes; wsl-gcc-debug
       build exit 0; ctest -R CVF-004 69/69 passed (exit 0). Amendment evidence:
       .ai/reports/CVF-004-test-red-amendment-3.yaml.
+      Amendment 4 (2026-09-19, owner: test-engineer): FR-024 VID/PID canonicalization. The
+      B1 valid-config case and the B2 VID/PID-pair section asserted uppercase preservation
+      ("1A2B"/"0C3D"); contract FR-024 and global_configuration_v1.normalization require
+      configured and enumerated VID/PID to be stored as exactly four lowercase ASCII hex
+      digits before identity comparison, so those three expectations now assert
+      "1a2b"/"0c3d" for the same uppercase JSON fixture input. The lowercase-acceptance
+      section (B2) and the invalid-value rejection cases (~line 289) are untouched. No
+      assertion was removed, skipped, disabled, or weakened; the cases still prove
+      case-insensitive acceptance and lowercase canonicalization. Its previous sha256 was
+      3cd3f957b5887b7dfbede112384c52e7befa67f25f5c9df5fb43077436750335; the new sha256 is
+      a4d46eaad3b2414c7f5ad4adf4c2f6fb60fc7c16b9018b493527d07e30cf2b93. CVF-105 is the
+      implementing change. Amendment evidence:
+      .ai/reports/CVF-004-test-amendment.yaml.
       Hashes are not to be updated by anyone other than the test owner; a mismatch at
       verify time is an independence violation.
   CVF-005:
@@ -322,7 +354,7 @@ changes:
     algorithm: sha256
     files:
       - path: tests/hardware/uvc_smoke.cpp
-        sha256: 02141468189556cae2f71985f65a6009b63d37aeb148c2faf3eeb3feeb5ff69c
+        sha256: f72263aa0eaba72004aeabc610a0bd2b9f869c4aa9dbc44b515906af3d941f30
     notes: >-
       Independent opt-in UVC hardware smoke suite authored by test-engineer for CVF-007
       before any Windows implementation existed. The entire translation unit is inside
@@ -335,6 +367,130 @@ changes:
       backend_key() == "uvc"); it is listed with the other assumptions in the RED report
       and must be coordinated there before verify. Hashes are not to be updated by anyone
       other than the test owner; a mismatch at verify time is an independence violation.
+      CVF-107 update (2026-09-19, owner: test-engineer; report
+      .ai/reports/CVF-107-test-red.yaml): the SAME test-owner file was hardened for
+      CVF-107 (stress >= 1000 consecutive captures with dimensions/BGR8/continuity/
+      strictly-increasing-sequence validation, orientation on the asymmetric
+      CVF-ORIENT-1 target with a mandatory-check requirement and an explicit
+      symmetric negative control, color on the CVF-COLOR-1 target with documented
+      dominance/level/neutral/reference tolerances, a deterministic forced-timeout
+      path, bounded reconnect, a delimited release-evidence record with exit code,
+      and the CVF_HW_STRESS / CVF_HW_REQUIRE_ORIENTATION / CVF_HW_REQUIRE_COLOR /
+      CVF_HW_REQUIRE_TIMEOUT variables). The previous sha256 was
+      02141468189556cae2f71985f65a6009b63d37aeb148c2faf3eeb3feeb5ff69c; the new
+      value is recorded above. No assertion was removed, weakened, disabled, or
+      skipped. Fresh evidence: clang-format --dry-run --Werror exit 0; wsl-gcc-debug
+      configure/build exit 0; full portable ctest 454/454 passed (exit 0);
+      format-check exit 0 (124 files); forced -D_WIN32 g++ -fsyntax-only with
+      throwaway windows/MF/COM stubs exit 0 (syntax check only, not Windows
+      execution); the hardware target remains unregistered with CTest. Hashes are
+      not to be updated by anyone other than the test owner; a mismatch at verify
+      time is an independence violation.
+      Amendment (2026-09-19, owner: test-engineer): the CVF-107 H3 amendment recast
+      the same-instance reopen check as a fresh-instance reopen, changing this file
+      to d2df883641ceb6d9738a189226bd9373345b3f6718f090a07279355c0a3d2867. The value
+      above is kept in sync with the CVF-107 entry, which carries the full rationale;
+      see .ai/reports/CVF-107-test-amendment.yaml.
+  CVF-107:
+    change_id: CVF-107
+    owner: test-engineer
+    recorded_at: 2026-09-19
+    algorithm: sha256
+    files:
+      - path: tests/hardware/uvc_smoke.cpp
+        sha256: f72263aa0eaba72004aeabc610a0bd2b9f869c4aa9dbc44b515906af3d941f30
+    notes: >-
+      Independent opt-in UVC hardware stress suite (owner: test-engineer), the same
+      Windows-only translation unit hardened by CVF-107 over the CVF-007 baseline.
+      Covers brief B1-B6: B1 stress of at least 1000 consecutive captures with
+      per-capture dimensions, BGR8 type (CV_8UC3), buffer continuity, and strictly
+      increasing sequence; B2 orientation on the documented asymmetric TOP/BOTTOM
+      target with an explicit vertically-symmetric negative control that must be
+      rejected as orientation evidence; B3 color against the documented target with
+      documented dominance/level/neutral/reference tolerances (pass inside, fail
+      outside); B4 a deterministic forced-timeout path that reports explicit
+      pass/fail and is mandatory (never silently skipped) in stress mode; B5 a
+      bounded reconnect (at most one retry) plus the environment-gated manual
+      unplug/replug step; B6 an explicit exact selector (device_path or VID/PID or
+      name) with a missing selector as a configuration failure and no first-device
+      fallback. Acceptance records device identity, cycle count, Windows version,
+      camera driver/firmware (best effort), and the process exit code in a delimited
+      release-evidence block, optionally written to CVF_HW_EVIDENCE_FILE. The whole
+      TU is inside #if defined(_WIN32), so it is an empty TU on WSL and the portable
+      suite is unaffected; the target cvf_hw_uvc_smoke is opt-in
+      (CVFORWIN_BUILD_HARDWARE_TESTS, WIN32 only), never registered with CTest, and
+      never added to a hosted CI job. Author-phase evidence:
+      .ai/reports/CVF-107-test-red.yaml. RED is honest and structural: the suite is
+      authored and the CVF-107 behaviors are absent from the built artifact because
+      it cannot be compiled or executed on this Linux host; Windows execution
+      evidence is deferred to a designated Windows 10/11 x64 station and is
+      UNVERIFIED here. The supporting operator manual is docs/hardware-uvc.md
+      (sha256 42276204b8583ef05f357f92594ce2ad1a54bb3f3361d19af3d41898e6b6a987),
+      documented but intentionally not hash-pinned as a test file. Hashes are not to be
+      updated by anyone other than the test owner; a mismatch at verify time is an
+      independence violation.
+      Amendment (2026-09-19, owner: test-engineer; report
+      .ai/reports/CVF-107-test-amendment.yaml): the H3 check asserted same-instance
+      reuse after close() ("the backend can reopen the same descriptor after close"),
+      which neither the camera contract nor the CVF-107 brief requires; a closed
+      instance is single-use and in-session re-activation is reconnect()'s job. H3 now
+      opens the same descriptor with a FRESH backend instance and captures from it,
+      named "H3 a fresh backend instance can reopen the same descriptor after close"
+      and "H3 a capture from the fresh backend instance succeeds (descriptor stays
+      usable)", with a comment recording the single-use/reconnect contract. The
+      open, 3-capture, frame-ownership, idempotent-close, and capture-after-close
+      checks are unchanged; no assertion was weakened, skipped, disabled, or deleted.
+      Previous sha256 was 7a62b1c8a45f7db1782f303c1be4c79b3ffa87593137c1d15e6c3ce83f8a689c;
+      the new value is recorded above. The CVF-007 entry for the same file is kept in
+      sync.       Fresh WSL evidence: configure/build exit 0, full portable ctest green
+      (exit 0), clang-format --dry-run --Werror exit 0.
+      Review-fix amendment (2026-09-19, owner: test-engineer; report
+      .ai/reports/CVF-107-review-fixes.yaml): NBF-01 closed an integrity hole in the
+      mandatory orientation-check machinery. Previously setting
+      CVF_HW_ORIENTATION_SYMMETRIC_CONTROL ran only the negative control and returned,
+      so the positive asymmetric-target checks never ran even when
+      CVF_HW_ORIENTATION_TEST=1 was also set, and a required check could be satisfied
+      by the symmetric control. Now a required orientation check (stress mode or
+      CVF_HW_REQUIRE_ORIENTATION=1) FAILS when CVF_HW_ORIENTATION_TEST is unset
+      regardless of the control; when both flags are set the positive asymmetric
+      checks run first and the negative control is added afterwards with no early
+      return; and the control is commented as not a substitute for the positive
+      target. No assertion was removed, weakened, disabled, or skipped; the
+      mandatory-orientation failure branch and the additive ordering are strictly
+      stronger. NBF-02 corrected the operator manual to state that on this Windows
+      backend VID/PID never match (empty enumerated vendor_id/product_id) and that
+      CVF_HW_UVC_DEVICE_PATH and CVF_HW_UVC_NAME are the working selectors; NBF-03
+      aligned the reconnect wording with the CVF_HW_UNPLUG_TEST=1 gate; NBF-04 made
+      the documented build use the canonical windows-msvc-tests preset (vcpkg
+      toolchain included). The doc hash reference above was updated. No production
+      file (src/**, include/**, .github/**, .ai/project-contract.yaml,
+      CMakeLists.txt) was touched. Fresh WSL evidence (configure/build/ctest,
+       clang-format, manifest audit) is in the review-fixes verify harness output.
+      Batch-4 release-review fixes (2026-09-19, owner: test-engineer; report
+      .ai/reports/CVF-107-batch4-hardware-fixes.yaml): B4A-01 closed the colour
+      mandatory-check bypass so a required colour check fails closed when the
+      neutral spread control is requested (CVF_HW_COLOR_EXPECT=neutral) or when
+      CVF_HW_COLOR_TEST is unset, and the neutral control can never satisfy the
+      positive saturated CVF-COLOR-1 target. B4A-02 removed the orientation
+      positive/control same-frame contradiction: the positive asymmetric checks
+      consume the positive-target capture and the symmetric negative control
+      consumes its own separately captured control frame, each evaluated
+      independently, and docs/hardware-uvc.md documents the control as a
+      separate non-required check needing its own run with a vertically
+      symmetric card. B4A-03 recorded the orientation/colour requirement and
+      control flags (and thresholds) in the release-evidence block and made both
+      mandatory-check failure messages name the specific CVF_HW_* flags in
+      effect. No assertion was removed, weakened, disabled, or skipped; the
+      changes are strictly stronger. New test-file sha256:
+      f72263aa0eaba72004aeabc610a0bd2b9f869c4aa9dbc44b515906af3d941f30; new
+      docs/hardware-uvc.md sha256:
+      42276204b8583ef05f357f92594ce2ad1a54bb3f3361d19af3d41898e6b6a987. Previous
+      test-file sha256 was
+      5737fb74e5e8d61a3d2e47ae714b968a3d3cbd39cfb9fe927e0a42f20e0d413f. Fresh
+      WSL evidence: clang-format --dry-run --Werror exit 0; forced -D_WIN32
+      g++ -fsyntax-only with throwaway stubs exit 0; wsl-gcc-debug
+      configure/build exit 0; full portable ctest green (exit 0); format-check
+      exit 0; the hardware target remains unregistered with CTest.
   CVF-008:
     change_id: CVF-008
     owner: test-engineer
@@ -389,3 +545,662 @@ changes:
       The real Windows consumer run remains deferred to CI (not claimed). Harness
       sha256: author 7858ef83dbe99f1b6734e7e547b4d926ba67e1e982bcb00b340a81c338f08bfc,
       verify 3bd8a82d462677704410a8035c11784ba6ed52dbdc3a1fa035ee8fc7d750d510.
+  CVF-101:
+    change_id: CVF-101
+    owner: test-engineer
+    recorded_at: 2026-09-18
+    algorithm: sha256
+    files:
+      - path: tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp
+        sha256: ae8874a546bccca4b117202b5ee30bd22d999c933c53573d1f6b641a296c9537
+    notes: >-
+      Independent black-box Windows component tests authored by test-engineer for
+      CVF-101 (UVC 2D-buffer signed-pitch conversion and accessible-bounds
+      validation) before the frozen seam header or its implementation existed.
+      The single translation unit includes only the frozen seam header
+      src/camera/uvc_windows/uvc_frame_convert.h and drives
+      cvforwin::camera::uvc::decode_locked_buffer_to_bgr8() with synthetic
+      in-memory locked buffers (scanline0, signed pitch, width, height, native
+      format, accessible byte count); no camera, Media Foundation object, device,
+      checked-in binary fixture, or production .cpp is used. It covers brief
+      observable behaviors B1-B6, the boundary_cases, and the negative_cases. The
+      whole TU is guarded by #if defined(_WIN32), so it is an empty TU on the
+      portable host and the portable suite is unaffected; the Windows target
+      cvf101_windows_uvc_tests is registered with CTest (catch_discover_tests) in
+      the test-enabled Windows configuration only (WIN32 + CVFORWIN_BUILD_TESTS +
+      CVFORWIN_BUILD_TEST_BACKENDS), never in the release or hosted no-camera
+      presets, so windows-tests-quality runs it. Author-phase evidence:
+      .ai/reports/CVF-101-test-red.yaml. RED is honest and structural: the frozen
+      seam header is absent, so compiling the TU against the real include tree
+      fails with "camera/uvc_windows/uvc_frame_convert.h: No such file or
+      directory" (exit 1); the Windows suite is authored-but-not-executed on this
+      Linux host and is not claimed as passing.
+      Correction (2026-09-18, owner: test-engineer; report
+      .ai/reports/CVF-101-test-red.yaml correction section): the rgb24 helper had
+      encoded R,G,B memory order, which contradicted the change contract's
+      fixed Media Foundation native memory semantics (rgb24/rgb32 = B,G,R;
+      argb32 = B,G,R,A; output always BGR8). The packers now write B,G,R memory
+      bytes and the expected BGR triples match with no channel swap; a dedicated
+      channel-order case asserts distinct B,G,R values for rgb24, rgb32, and
+      argb32 (top-down and bottom-up), which fails if the decoder swaps channels.
+      YUV cases assert only orientation, structural neutrality (equal BGR
+      channels for U=V=128), and monotonic ordering (dark row before bright row)
+      rather than a pinned limited-versus-full range. All orientation, padding,
+      boundary, and negative cases are retained unchanged.
+      Previous sha256 was 1c006a1d11b89b261943ba553ebfe85a6f74f877a17988e7f0aa25b61ded1595;
+      the new sha256 is recorded above. Fresh evidence: clang-format --dry-run
+      --Werror exit 0. No assertion was removed, skipped, disabled, or weakened.
+      Correction 2 (2026-09-18, owner: test-engineer; report
+      .ai/reports/CVF-101-test-red.yaml correction_2_2026_09_18 section): the
+      first correction re-parameterized the rgb24 packer to B,G,R memory order
+      but left four call sites (B1, B2, and the two rgb24 1x1 boundary SECTIONs)
+      passing the old R,G,B-style literals while still expecting the kBgr*
+      constants, so those cases were internally contradictory and could not pass
+      with any decoder. Every call site now passes kBgrA/kBgrMid/kBgrB channel
+      values in (blue, green, red) order, which is byte-identical to the B,G,R
+      memory those constants represent, so arguments and expectations agree.
+      The three asymmetric rows, both pitch signs, the 1x1 edges, and the
+      distinct-RGB channel-order case are preserved with the same intent; no
+      assertion was removed, skipped, disabled, or weakened. Its previous sha256
+      was 5db636e6b22685de8097cfd82953228874c3476766bf46eedcd18969d1fda6e1; the
+      new sha256 is recorded above. Fresh evidence: clang-format --dry-run
+      --Werror exit 0; g++ -D_WIN32 -std=c++20 -Wall -Wextra -Werror against the
+      real seam, core, and OpenCV sources exit 0; the built suite ran 402/402
+      assertions passed in 12/12 test cases (exit 0).
+      Verify-phase update (2026-09-18, owner: test-engineer; report
+      .ai/reports/CVF-101-test-verify.yaml): clang-format --dry-run --Werror on
+      the test file returned exit 1 (5 whitespace-only violations: array
+      initializer wrapping at the packed-format list and two trailing-comment
+      alignments). The file was reformatted with clang-format -i; the recorded
+      diff is whitespace and line-wrapping only, inside the packed-format
+      initializer and two comment alignments. No assertion, case, expectation,
+      or coverage changed. The previous sha256 was
+      79a261b1a98298de0a7b515e65d0af0a55e470eb4fcbbfefd8a3c1a472ef57e0; the new
+      sha256 is recorded above. Fresh evidence against the new file: clang-format
+      --dry-run --Werror exit 0; portable configure/build exit 0; full portable
+      ctest 272/272 passed (exit 0); format-check exit 0 (87 files); the Linux
+      -D_WIN32 mirror of the Windows component suite compiled and ran
+      752/752 assertions in 20/20 test cases (exit 0), including the i420/yv12
+      positive-pitch planar cases, with no skips or disabled tests. No assertion
+      was removed, skipped, disabled, or weakened.
+      Independence incident (2026-09-18, recorded by test-engineer): during this
+      verify session, codegraph_explore returned verbatim production source for
+      src/camera/uvc_windows/uvc_frame_convert.cpp, uvc_frame_math.h, and
+      uvc_backend.cpp into the test-engineer session. No test expectation,
+      assertion, fixture, or hash was derived from or changed after that
+      exposure; the formatting-only edit and the final sha256 above were
+      established before the exposure. The       incident is reported in
+      .ai/reports/CVF-101-test-verify.yaml.
+      Hashes are not to be updated by anyone other than the test owner; a
+      mismatch at verify time is an independence violation.
+  CVF-102:
+    change_id: CVF-102
+    owner: test-engineer
+    recorded_at: 2026-09-18
+    algorithm: sha256
+    files:
+      - path: tests/windows/uvc/cvf102_uvc_worker_lifecycle_test.cpp
+        sha256: 81688985d11af7840e46e748bf489d0a7141c0d49d460fbc1fd535149e84203a
+    notes: >-
+      Independent black-box Windows component tests authored by test-engineer for
+      CVF-102 (UVC MTA worker thread plus COM/Media Foundation lifetime isolation)
+      before the frozen seam accessor or its implementation existed. The single
+      translation unit includes only frozen headers (camera/camera_backend.h,
+      camera/uvc_windows/uvc_backend.h, core/{status,error,result,deadline}.h) and
+      drives UvcCameraBackend::worker_snapshot() plus the ICameraBackend contract
+      with absent/ambiguous selectors and failing opens; no camera, Media
+      Foundation object, device, checked-in binary fixture, or production .cpp is
+      used. It covers brief observable behaviors B1-B6, the boundary_cases, and the
+      negative_cases. Snapshot fields are accessed by their brief-frozen names
+      through `auto`, so the file does not depend on any non-frozen snapshot type
+      spelling. The whole TU is guarded by #if defined(_WIN32), so it is an empty
+      TU on the portable host and the portable suite is unaffected; the Windows
+      target cvf102_windows_uvc_tests is registered with CTest
+      (catch_discover_tests -> add_test) in the test-enabled Windows configuration
+      only (WIN32 + CVFORWIN_BUILD_TESTS + CVFORWIN_BUILD_TEST_BACKENDS), never in
+      the release or hosted no-camera presets. Author-phase evidence:
+      .ai/reports/CVF-102-test-red.yaml. RED is honest and structural: the frozen
+      seam accessor UvcCameraBackend::worker_snapshot() does not exist yet, so
+      compiling the Windows TU against the real include tree fails with "'class
+      cvforwin::camera::UvcCameraBackend' has no member named 'worker_snapshot'"
+      (exit 1); the Windows suite is authored-but-not-executed on this Linux host
+      and is not claimed as passing. Hashes are not to be updated by anyone other
+      than the test owner; a mismatch at verify time is an independence violation.
+      Verify-phase update (2026-09-18, owner: test-engineer; report
+      .ai/reports/CVF-102-test-verify.yaml): the brief's in_scope requires every
+      camera backend operation (enumerate/open/capture/reconnect/close) to be
+      exercised from a no-COM and an STA caller thread. The ApartmentProbe and
+      exercise_apartment helper now drive open, capture, and reconnect in addition
+      to enumerate and close on the caller thread, and B1/B2 assert each fails with
+      a documented camera failure (camera_not_found or camera_io) rather than an
+      apartment failure; the marshalling case now asserts commands_marshalled
+      strictly increases across enumerate, open, capture, and reconnect with
+      worker_thread_id != last_caller_thread_id after each. All prior cases,
+      boundary cases, and negative cases are retained. No assertion was removed,
+      skipped, disabled, or weakened and no case was deleted. Its previous sha256
+      was ce2cc80ee41e7cf5579dd4cf6c7a46f29eaa066179912ab46beb54e195562109; the new
+      sha256 is recorded above. Fresh evidence: clang-format --dry-run --Werror
+      exit 0; g++ -D_WIN32 -std=c++20 -Wall -Wextra -Werror -fsyntax-only against
+      the real include tree exit 0; portable configure/build exit 0; portable ctest
+      284/284 passed (exit 0); format-check exit 0 (90 files). Native Windows MSVC
+      execution remains deferred to windows-tests-quality CI and is not claimed.
+      Hashes are not to be updated by anyone other than the test owner; a mismatch
+      at verify time is an independence violation.
+  CVF-103:
+    change_id: CVF-103
+    owner: test-engineer
+    recorded_at: 2026-09-18
+    algorithm: sha256
+    files:
+      - path: tests/unit/cvf103_stream_generation_test.cpp
+        sha256: 33ae920f043a4b0dcccfcd1324a762c6e9d1934dc32c63cc39d9be3736c00763
+      - path: tests/windows/uvc/cvf103_uvc_callback_snapshot_test.cpp
+        sha256: 05472ac04245444fa5a9fe6ae30202cbb4d8607c9040d778aebbf522638f829d
+    notes: >-
+      Independent black-box tests authored by test-engineer for CVF-103
+      (per-stream callback generation and stale-callback rejection; FR-021,
+      uvc_worker_lifecycle_v1) before the frozen seams or their implementation
+      existed. Two seams are covered. (a) The portable seam
+      src/camera/uvc_windows/uvc_stream_generation.h declares
+      cvforwin::camera::uvc::StreamGenerationGate with begin_stream(), retire(),
+      accepts(), discard_stale(), active_generation(), and
+      stale_events_discarded(); tests/unit/cvf103_stream_generation_test.cpp
+      drives that pure logic and is part of the canonical portable suite.
+      (b) The Windows-only seam src/camera/uvc_windows/uvc_backend.h declares
+      UvcCallbackSnapshot{active_generation, callbacks_created,
+      stale_events_discarded, stream_open} and
+      UvcCameraBackend::callback_snapshot() const noexcept;
+      tests/windows/uvc/cvf103_uvc_callback_snapshot_test.cpp drives that seam
+      plus the ICameraBackend contract with zero-device enumeration and absent
+      selectors. The whole Windows TU is guarded by #if defined(_WIN32), so it is
+      an empty TU on the portable host and the portable suite is unaffected; the
+      Windows target cvf103_windows_uvc_tests is registered with CTest
+      (catch_discover_tests) in the test-enabled Windows configuration only
+      (WIN32 + CVFORWIN_BUILD_TESTS + CVFORWIN_BUILD_TEST_BACKENDS), never in the
+      release or hosted no-camera presets, so windows-tests-quality runs it. The
+      snapshot fields are read by their brief-frozen names through `auto`, so the
+      file does not depend on any non-frozen snapshot type spelling. Author-phase
+      evidence: .ai/reports/CVF-103-test-red.yaml. RED is honest and structural:
+      the portable seam header is absent, so the portable TU fails to compile
+      with "camera/uvc_windows/uvc_stream_generation.h: No such file or
+      directory" (exit 1) and the canonical portable build stops at
+      cvf103_generation_tests with exit 1; the frozen Windows accessor
+      callback_snapshot() is absent, so the Windows TU fails with "'class
+      cvforwin::camera::UvcCameraBackend' has no member named
+      'callback_snapshot'" (exit 1). The Windows suite is authored-but-not-executed
+      on this Linux host and is not claimed as passing. Fresh WSL evidence:
+      clang-format --dry-run --Werror exit 0 on both files; the portable TU passes
+      70 assertions in 9 test cases against a from-spec reference gate (exit 0),
+      proving the RED is the absent seam and not a broken test; the Windows TU is
+      -fsyntax-only clean (exit 0) against a from-spec overlay that only adds the
+      frozen snapshot struct and accessor. The root CMakeLists.txt registration is
+      recorded by the author harness under .ai/validation/ because that path is
+      outside this session's edit policy; CMakeLists.txt is not an owned file.
+      Verify-phase update (2026-09-18, owner: test-engineer; report
+      .ai/reports/CVF-103-test-verify.yaml): added requirement-derived edge cases
+      to both owned files without removing, weakening, disabling, or skipping any
+      existing assertion. tests/unit/cvf103_stream_generation_test.cpp gained cases
+      for maximum-generation boundary handling, discard_stale of the active
+      generation as a non-discard, zero-sentinel discard, retire-then-reuse with
+      neighbour rejection, repeated-retire idempotence, and three-consecutive-
+      generation only-newest-accepted; the portable suite now passes 108
+      assertions in 15 test cases. tests/windows/uvc/cvf103_uvc_callback_snapshot_test.cpp
+      gained cases for close-before-open plus repeated close consistency, snapshot
+      monotonicity across repeated reconnect cycles, and an expired-deadline-boundary
+      capture that must fabricate no completion and count no stale event; its
+      syntax-only -D_WIN32 compile against the real include tree is clean and native
+      MSVC execution remains deferred to CI. Previous sha256 values:
+      cvf103_stream_generation_test.cpp
+      589f82217fed240a13c447b2e705eb926959a104505bc81e49d3c87137e227be and
+      cvf103_uvc_callback_snapshot_test.cpp
+      32e4d7826794849e5f8aca95ba55d0a8459ae3285ec1e531e9abf58c58c2dedf; the new
+      values are recorded above. Fresh evidence: clang-format --dry-run --Werror
+      exit 0 on both files; portable configure/build exit 0; CVF-103 focused ctest
+      15/15 passed; direct cvf103_generation_tests binary 108 assertions in 15 test
+      cases (exit 0); full portable ctest 307/307 passed (exit 0); format-check
+      exit 0 (94 files); Windows TU syntax-only compile exit 0; UvcCallbackSnapshot
+      and callback_snapshot absent from include/cvforwin/cvf_api.h,
+      src/camera/camera_backend.h, and src/c_api/cvforwin.def. Hashes are not to be
+      updated by anyone other than the test owner; a mismatch at verify time is an
+      independence violation.
+  CVF-104:
+    change_id: CVF-104
+    owner: test-engineer
+    recorded_at: 2026-09-18
+    algorithm: sha256
+    files:
+      - path: tests/unit/cvf104_test_support.h
+        sha256: d8bd5191bd3aa3bbd0ce79443422a51b2d617e436bbdd47a70e385f2776224ce
+      - path: tests/unit/cvf104_finalization_test.cpp
+        sha256: 9e92d7e6446af3daa315568f0ef8784704e52edb5af869baff6d4882a648da67
+      - path: tests/unit/cvf104_save_worker_test.cpp
+        sha256: 5cc3c1bedd9a69ee95e9325dc56ecfff1c1c109122becd709fccb3b276c21ea4
+      - path: tests/unit/cvf104_retention_scheduler_test.cpp
+        sha256: 92c47273564683e1184121ad05b1899fece3cf9f0428da3fbef4c63718ade784
+      - path: tests/unit/cvf104_end_to_end_test.cpp
+        sha256: 74f4b4f64351ddc83d3a0f5db3b8177652a8dda0d0856f73d7cc5f4b8c39f999
+    notes: >-
+      Independent black-box tests authored by test-engineer for CVF-104
+      (end-to-end absolute deadline, post-frame finalization, deadline-bounded
+      artifact save with optional/required precedence, and background retention
+      that never runs synchronously on the inspection path) before the frozen
+      seams or their implementation existed. Author-phase evidence:
+      .ai/reports/CVF-104-test-red.yaml. Tests are Catch2 v3 / C++20,
+      deterministic, and hardware-free; they drive the injected fault seams and
+      public behavior through the brief-frozen headers only and read no
+      production .cpp. Hashes are not to be updated by anyone other than the
+      test owner; a mismatch at verify time is an independence violation.
+      Verify-phase update (2026-09-19, owner: test-engineer; report
+      .ai/reports/CVF-104-test-verify.yaml): added requirement-derived edge
+      cases without removing, weakening, disabling, or skipping any existing
+      assertion. cvf104_finalization_test.cpp gained a dedicated
+      required-failure-at-expired-deadline precedence case (timeout wins), a
+      committed-required-save-at-expiry-boundary case, a committed-optional-save
+      boundary case, and a no-frame_valid engine-failure case (optional and
+      required variants); 100 -> 129 assertions in 11 -> 15 test cases.
+      cvf104_save_worker_test.cpp gained an already-expired-deadline wait_until
+      boundary case, a cancel_pending-with-nothing-queued no-op case, and a
+      drain-called-twice idempotence case; 53 -> 74 assertions in 6 -> 9 test
+      cases. cvf104_retention_scheduler_test.cpp gained an explicit 99th/100th
+      committed-capture boundary case and a due()-exactly-at-60s
+      (one-millisecond-before) boundary case; 331 -> 339 assertions in 8 -> 10
+      test cases. A first draft of the 99/100 case wrongly expected
+      RetentionScheduler::due() to become true on the capture trigger; the
+      observable contract (already pinned by the existing case) is that the
+      capture trigger is the boolean returned by on_capture_committed and due()
+      is the independent time trigger, so that single invented expectation was
+      corrected before landing; no implementation defect was involved.
+      tests/unit/cvf104_end_to_end_test.cpp and tests/unit/cvf104_test_support.h
+      are unchanged. Previous sha256 values: cvf104_finalization_test.cpp
+      de21b13ae4d1d9e8619d92374523b188668a30d00d65d948cf7e1768e0ad5f5c,
+      cvf104_save_worker_test.cpp
+      057b7f77c1e2b6aeb4ac8ed00a8d66f53c31cf3981d3f2082a6abd094b5ac296, and
+      cvf104_retention_scheduler_test.cpp
+      9059c09b1d36f840a87ffb5df91599b49a1f98d3f3b2b668ca72d1603caab953; the new
+      values are recorded above. Fresh evidence: clang-format --dry-run --Werror
+      exit 0 on all five files; wsl-gcc-debug configure/build exit 0; direct
+      binaries cvf104_finalization_tests 129 assertions/15 cases,
+      cvf104_worker_tests 74/9, cvf104_retention_tests 339/10,
+      cvf104_end_to_end_tests 336/5 (all exit 0); full portable ctest 351/351
+      passed (exit 0); full wsl-gcc-asan ctest 351/351 passed (exit 0);
+       CVF-005/CVF-006 hash-pinned regression files all match their recorded
+        hashes and their focused ctest 58/58 passed (exit 0).
+      Windows-fix update (2026-09-19, owner: test-engineer; report
+      .ai/reports/CVF-104-test-verify.yaml): CI run 35383859693 (native MSVC,
+      commit 8b96cb8) failed exactly three CVF-104 independent CHECKs --
+      tests/unit/cvf104_save_worker_test.cpp:93 and
+      tests/unit/cvf104_end_to_end_test.cpp:87,191 -- because path_within() in
+      tests/unit/cvf104_test_support.h compared lexically_normal().string() and
+      required the boundary separator to be '/'; on Windows that string uses
+      '\\'. path_within() now decomposes root and child into native
+      std::filesystem::path components, additionally splitting each component on
+      both '/' and '\\', and requires root's components to be a prefix of the
+      child's; a sibling such as "<root>_x/..." or an escape still returns
+      false. A dedicated separator-agnostic regression case (backslash-joined
+      child, a Windows drive-style pair, a sibling, and an escape) was added to
+      tests/unit/cvf104_save_worker_test.cpp and passes on Linux, where the
+      backslash path simulates Windows separators. Previous sha256 values:
+      cvf104_test_support.h
+      517759e9db6c6eeb729a2866f8fbcb2f786d3000837619171ce90ec6f72a5775 and
+      cvf104_save_worker_test.cpp
+      11ce2d4363fb2ccecf41e200057d865334b08bd836ee39733dfbb6d5af885aef; the new
+      values are recorded above. No non-CVF-104 file changed; no assertion was
+      removed, weakened, disabled, or skipped. Fresh evidence: clang-format
+      --dry-run --Werror exit 0 on both changed files; wsl-gcc-debug configure
+      exit 0; the four cvf104 targets built and passed (129/15, 83/10, 339/10,
+      336/5 assertions/cases, exit 0); ctest -R CVF-104 46/46 passed (exit 0).
+      The full wsl-gcc-debug ctest in this working tree is 391 tests with 11
+      failures, all in the concurrently-added, untracked CVF-105 suite (whose
+      production seams are absent); 0 CVF-104 tests fail and no failing test
+      depends on a CVF-104 file. Native MSVC validation is deferred to the next
+      windows-tests-quality CI run and is not claimed here.
+  CVF-105:
+    change_id: CVF-105
+    owner: test-engineer
+    recorded_at: 2026-09-19
+    algorithm: sha256
+    files:
+      - path: tests/unit/cvf105_test.helpers.h
+        sha256: 392975af9f2e31cc4a60f5d52a43527114802d226745b5860a673f2b5ac6a6d3
+      - path: tests/unit/cvf105_hex_test.cpp
+        sha256: f43cd2f3715fb2adf800a11757b65f798ed1f7d0235b598fb6424fdd59840210
+      - path: tests/unit/cvf105_selector_test.cpp
+        sha256: 6e215ea45e93619cd9860956d790d0b5b10d3426c0037d9f0e79ee37cc8e3610
+      - path: tests/unit/cvf105_payload_test.cpp
+        sha256: 5fef7e0e4d483b30011f8f7a6d29a6f6746962b611dec9adfc7d5fc56b423617
+      - path: tests/unit/cvf105_warnings_test.cpp
+        sha256: 2729648b9ff1bb764bd65d2ddf722dbee80c5ecaa5a8cf114a775ad6fe875c54
+      - path: tests/unit/cvf105_abi_validation_test.cpp
+        sha256: 9dba770fd61496186ab1203a38676692e056ac713f19f546d783ce56817bd183
+      - path: tests/unit/cvf105_abi_pairs_test.cpp
+        sha256: 23d051e257a3b9faa4e74d5bf86d309ca43ea0178ad4a2731dec265bd939a9f0
+      - path: tests/unit/cvf105_runtime_output_text_test.cpp
+        sha256: ae0a948f8f7b15afa1c8aaa11add9d716fa409bf4bddee1c9ec10b8448e0673c
+    notes: >-
+      Independent black-box tests authored by test-engineer for CVF-105
+      (VID/PID canonicalization, C ABI pointer-length/capacity pairs, atomic
+      diagnostics warnings, and the single final result payload bound; FR-024
+      through FR-027, final_result_payload_v1) before the frozen seams or their
+      implementation existed. Author-phase evidence:
+      .ai/reports/CVF-105-test-red.yaml. All files are Catch2 v3 / C++20,
+      deterministic, and hardware-free. They include frozen headers only and
+      read no production .cpp. cvf105_hex_test drives canonicalize_hex4;
+      cvf105_payload_test drives k_max_result_payload_bytes and
+      serialize_result_payload at bound-1/bound/bound+1; cvf105_selector_test
+      drives resolve_identity plus config-load canonicalization;
+      cvf105_warnings_test drives Diagnostics warnings()/clear_warnings() under
+      concurrent failing writers and readers (intended for the asan preset);
+      cvf105_abi_validation_test and cvf105_abi_pairs_test drive the public C
+      ABI pointer-length/capacity pairs and the exact output_json copy; and
+      cvf105_runtime_output_text_test drives the canonical pre-serialized
+      InspectionOutcome::output_text. Tests/fixtures are created in per-test
+      temporary directories at run time, so no binary fixture is checked in.
+      The from-spec reference run (canonicalize_hex4 and
+      serialize_result_payload overlays under /tmp, used by no CMake target)
+      proves the canonical-build RED is the absent seams and not a broken test.
+      Amendment (2026-09-19, owner: test-engineer; report
+      .ai/reports/CVF-105-test-amendment.yaml): the B3 "object with surrounding
+      whitespace is accepted" section fed input_json "  { \"a\" : 1 }  " and
+      asserted CVF_STATUS_OK, but example.threshold rejects unknown input_json
+      keys as algorithm_input_invalid, independently pinned by the CVF-003 test
+      "an unsupported input_json key is rejected", so that case conflated "the
+      JSON parsed" with "the algorithm accepted the keys" and could never pass.
+      It now feeds the algorithm-accepted "  { \"invert\" : false }  " and still
+      asserts CVF_STATUS_OK, so it continues to prove leading/trailing whitespace
+      is accepted by the C ABI input path, and a distinct section feeds the
+      bad-JSON-with-whitespace "  { \"a\" : }  " and asserts INVALID_ARGUMENT with
+      NOT_EVALUATED. No other assertion or case was removed, skipped, disabled,
+      or weakened. Its previous sha256 was
+      726c4646ae36754c61b7ae39dd102fccd306afdaa94f129f33cbb28e4cc2fcbb; the new
+      sha256 is 16ee2d563d5f2f6d4edd83576a23158c59d140afc5e635846fbc00d234fde8e7.
+      Fresh evidence: clang-format --dry-run --Werror exit 0; wsl-gcc-debug
+      configure/build exit 0; direct cvf105_abi_pairs_tests 162 assertions in
+      8 test cases, 0 failed (exit 0); full wsl-gcc-debug ctest 406/406 passed
+      (exit 0).
+      Amendment (2026-09-19, owner: test-engineer; report
+      .ai/reports/CVF-105-test-verify.yaml): the ASan preset reported a
+      heap-use-after-free in two cases of tests/unit/cvf105_abi_validation_test.cpp
+      (B4 "a short error message buffer reports the primary failure status and the
+      required size" at line 238 and B3 "a valid pointer set with a missing root
+      fails without publishing a context" at line 317). options_for() stored
+      c_str()/data() pointers into the returned cvf_init_options_v1, and those
+      cases passed the `const char*` constant kMissingRoot, so an implicit
+      temporary std::string was destroyed at the end of the full-expression and
+      cvf_initialize() later read freed memory. options_for() now takes
+      std::string_view and every kMissingRoot caller binds the constant to a named
+      std::string local that outlives the cvf_initialize() call; all other callers
+      already passed named std::string locals. No assertion, case, expectation, or
+      intent was changed. Its previous sha256 was
+      4a12787a3c8a8bfac8391fcb00b48b1fb7bb116431382d3f4b715bd05c92f6b6; the new
+      sha256 is 9dba770fd61496186ab1203a38676692e056ac713f19f546d783ce56817bd183.
+      Fresh evidence: clang-format --dry-run --Werror exit 0; wsl-gcc-asan build
+      exit 0 and ctest 412/412 passed (exit 0, previously 2 tests failed out of
+      412 with heap-use-after-free); the two named tests #384 and #391 both pass
+      under ASan; wsl-gcc-debug build exit 0 and ctest 412/412 passed (exit 0).
+      Hashes are not to be updated by anyone other than the test owner; a
+      mismatch at verify time is an independence violation.
+      Verify-phase update (2026-09-19, owner: test-engineer; report
+      .ai/reports/CVF-105-test-verify.yaml): added requirement-derived edge cases
+      required by the CVF-105 verify brief and removed, weakened, disabled, or
+      skipped nothing. tests/unit/cvf105_hex_test.cpp gained all-sixteen-case-
+      combination coverage plus explicit rejection of "0x"-prefixed,
+      five-character, lone-lead-byte, lone-continuation-byte, and multibyte-pair
+      inputs (each must be config_value_invalid). tests/unit/cvf105_payload_test.cpp
+      gained a byte-versus-character bound case: a multibyte UTF-8 payload whose
+      byte length is exactly k_max_result_payload_bytes is accepted and one byte
+      over fails, proving the bound is a UTF-8 byte count and not a character
+      count; helper cvf105::json_string_value_with_dump_length() builds the
+      byte-exact value. tests/unit/cvf105_abi_pairs_test.cpp gained non-null
+      output_json/image_path/error_message buffers with zero capacity: the two
+      required-capacity result buffers report BUFFER_TOO_SMALL, while the
+      error-message channel is only populated on failure and therefore a legal
+      non-null+zero pair leaves a successful inspection OK. tests/unit/
+      cvf105_warnings_test.cpp gained an interleaved-concurrency case over the
+      frozen runtime::finalize_after_frame() seam where the log-sink bit
+      (warn_base) and the image-save bit (attempted, non-committed optional save)
+      must both be present, with no unknown bit, across 16,000 concurrent
+      derivations. tests/unit/cvf105_runtime_output_text_test.cpp gained a FAIL
+      result round-trip case asserting output_text equals the internal object's
+      dump byte-for-byte; the default example algorithm emits a flat measurements
+      object (no "measurements"/"defects" wrapper), and the wrapped
+      measurements-plus-defects shape remains covered at the serialization seam
+      in cvf105_payload_test.cpp. tests/unit/cvf105_selector_test.cpp and
+      tests/unit/cvf105_abi_validation_test.cpp are unchanged (no case was
+      required there). Previous sha256 values: cvf105_test.helpers.h
+      634e19a47fb5d0cb305c408081dfc9c0eb518397bca0a8b9d62b60e0179dba3a,
+      cvf105_hex_test.cpp
+      9b3672fa082e56b775b9a1b91b5ad01e7ca821df56ef9dc6571f0c4e023fd41f,
+      cvf105_payload_test.cpp
+      d380e4a9f013ff1498ea2a80d1884b4d00b132a1069271d442b5bd0babe1464b,
+      cvf105_warnings_test.cpp
+      27274d79953175b2c41ac1c50b34a280136f597b6d37d81f39296925f2bab56d,
+      cvf105_abi_pairs_test.cpp
+      16ee2d563d5f2f6d4edd83576a23158c59d140afc5e635846fbc00d234fde8e7, and
+      cvf105_runtime_output_text_test.cpp
+      1f05ab414543dc7fefa4f36d6bd6c6e15f627ba3a50a31d3461cd6139a096aab; the new
+      values are recorded above. The full portable wsl-gcc-debug suite and the
+      wsl-gcc-asan suite both pass 418/418 (exit 0); focused CVF-105 ctest and
+      focused CVF-004/005/006/103/104 ctest (187 tests) both pass (exit 0); direct
+      binaries
+      (debug and ASan identical): cvf105_hex_tests 396 assertions/10 cases,
+      cvf105_selector_tests 61/11, cvf105_payload_tests 68/10,
+      cvf105_warnings_tests 28/5, cvf105_abi_validation_tests 60/12,
+      cvf105_abi_pairs_tests 191/9, cvf105_runtime_output_text_tests 33/2, all
+      exit 0; clang-format --dry-run --Werror exit 0 on all eight files; all 64
+      manifest-pinned files present and re-hashed with 0 mismatches.
+      Honest note: the first run of two newly added cases failed on an
+      over-strict invented expectation (an error-message zero-capacity buffer was
+      asserted to force BUFFER_TOO_SMALL, and the default result object was
+      asserted to contain "measurements"/"defects"); both were corrected to the
+      observable frozen-header/serialization behavior, and no implementation
+      defect was involved. Independence incident (recorded by test-engineer): a
+      codegraph_explore call intended for the warning seam returned verbatim
+      production source for src/diagnostics/diagnostics.cpp and
+      src/runtime/context.cpp into this session. No test expectation, assertion,
+      fixture, or hash was derived from that exposure; every expectation was and
+      remains derived from the brief, the contract, and the frozen headers, and
+      the exposed source was not read for any decision. This is reported in
+      .ai/reports/CVF-105-test-verify.yaml. Hashes are not to be updated by
+      anyone other than the test owner; a mismatch at verify time is an
+      independence violation.
+  CVF-106:
+    change_id: CVF-106
+    owner: test-engineer
+    recorded_at: 2026-09-19
+    algorithm: sha256
+    files:
+      - path: tests/unit/cvf106_test.helpers.h
+        sha256: 059c4a4030cfe37517c07b7c272faa043a9fb203e28a5241d8d6d652471c53d6
+      - path: tests/unit/cvf106_template_match_test.cpp
+        sha256: 3b302dd545e3cce1524e5d611c1aba38efa4481d668c613f0fb4d6b1df36eed3
+      - path: tests/unit/cvf106_prepare_test.cpp
+        sha256: c900a558877bebe3ed1d9e89201b6c79c25d7518a3f993019c8028ba327ed4ef
+      - path: tests/unit/cvf106_lifecycle_test.cpp
+        sha256: 4c32847f8a1270d159982da170eb797efab3bf8afedb4df3610283301b2e0a57
+    notes: >-
+      Independent black-box tests authored by test-engineer for CVF-106
+      (immutable recipe-time preparation and bounded asset loading, plus the
+      template.match reference algorithm; FR-028/FR-029,
+      algorithm_extension_contract, algorithm_asset_bundle_v1,
+      template_match_algorithm_v1) before the frozen additive seam or its
+      implementation existed. Author-phase evidence:
+      .ai/reports/CVF-106-test-red.yaml. All files are Catch2 v3 / C++20,
+      deterministic, and hardware-free; they include frozen headers only and
+      read no production .cpp. cvf106_template_match_test drives the direct
+      prepared seam (AlgorithmAsset/AlgorithmAssetBundle/prepare/IPreparedAlgorithm
+      plus dispatch) for B2/B3/B5/B6, the threshold-equality, edge-ROI,
+      1x1-rejection, and template-exactly-ROI boundary cases, the parameter and
+      asset negative cases, and the pinned CVF-003 algorithm shape;
+      cvf106_prepare_test drives B4 (decode once; inspection performs no file
+      I/O) and B7 (a newer prepared object never mutates an already prepared one)
+      plus preparation rejection of invalid ROI and larger-than-ROI templates;
+      cvf106_lifecycle_test drives B1/B4/B7/B8 end-to-end through runtime::Context
+      with the deterministic file and synthetic test backends. The template is an
+      asymmetric fixture generated at run time (no binary fixture checked in);
+      exact-template copies are asserted with a 1e-6 score tolerance and global
+      coordinates as exact integers. Interface spellings beyond the brief text
+      (AlgorithmAsset field order and types, AlgorithmAssetBundle aggregate with
+      an assets vector, the prepare return type, and dispatch taking a prepared
+      object) are recorded as author assumptions in
+      .ai/reports/CVF-106-test-red.yaml. Honest RED: the frozen
+      src/algorithms/template_match.h does not exist and the additive
+      algorithm.h/registry.h types are absent, so all three TUs fail to compile
+      with "algorithms/template_match.h: No such file or directory" (build
+      exit 1); a self-contained from-spec ZNCC reference run for the same
+      deterministic input passes all checks (exit 0), proving the expectations
+      are satisfiable and RED is the absent seam, not a broken test.
+      Amendment (2026-09-19, owner: test-engineer; report
+      .ai/reports/CVF-106-test-verify.yaml): two authored expectations were
+      provably inconsistent with the frozen production behaviour and were
+      corrected as test-owner corrections; no intent was weakened and no
+      coverage or assertion was removed, skipped, disabled, or deleted.
+      Correction 1: the shared outcome_measurements() helper in
+      tests/unit/cvf106_test.helpers.h required a nested "measurements" key in
+      the runtime output JSON, but final_result_payload_v1 specifies one final
+      object assembled from measurements and optional defects, and the frozen
+      runtime flattens the algorithm measurements plus an optional "defects"
+      key into the top level; the helper now returns that flat top-level object
+      (score/x/y/width/height at top level) and the score/int accessors keep
+      their meaning. Correction 2: the B8 lifecycle case asserted byte-identical
+      output_text across three Context::inspect calls on the synthetic camera,
+      whose pixels are f(x, y, sequence), so the white-pixel counts legitimately
+      differ per capture (observed 209/224/239 for sequences 0/1/2); the case
+      now drives a fixed single-frame file camera so the served frame is
+      constant, keeps the byte-identical output_text assertions, and
+      additionally pins the stable structural observables (same status and
+      verdict, top-level white_pixels/total_pixels/pass_ratio present with every
+      numeric measurement finite, and identical output_json across the two
+      inspects and across reload). Previous sha256 values:
+      tests/unit/cvf106_test.helpers.h
+      edd4427af3debd802488a3981484661342d5a079df5a438faf6cb57ce1ef26e5 and
+      tests/unit/cvf106_lifecycle_test.cpp
+      67b1691c791fbb1a521a2f64e7f89adb8aae3a58b0e6648961d6cccd49a83b95; the new
+      values are recorded above. Fresh evidence: clang-format --dry-run --Werror
+      exit 0 on both changed files; cmake --preset wsl-gcc-debug configure exit 0;
+      cmake --build --preset wsl-gcc-debug --parallel exit 0; ctest --preset
+      wsl-gcc-debug -R CVF-106 --output-on-failure exit 0 with 24/24 tests passed
+      and 0 skipped; the two unchanged CVF-106 files
+      (tests/unit/cvf106_prepare_test.cpp and
+      tests/unit/cvf106_template_match_test.cpp) still hash to their recorded
+      values. Harness: .ai/validation/cvf106-test-engineer-amendment-verify.sh.
+      Hashes are not to be updated by anyone other than the test owner; a
+      mismatch at verify time is an independence violation.
+  CVF-108:
+    change_id: CVF-108
+    owner: test-engineer
+    recorded_at: 2026-09-19
+    algorithm: sha256
+    files:
+      - path: tests/unit/cvf108_release_metadata_test.cpp
+        sha256: 97077e20bc3a1a5ecf9797474e61bc0b55a60777b655190265b1894b5676c0a0
+    notes: >-
+      Independent black-box release-metadata synchronization test authored by
+      test-engineer for CVF-108 before the release metadata was synchronized.
+      Author-phase evidence: .ai/reports/CVF-108-test-red.yaml. The single
+      translation unit reads delivery metadata (CMakeLists.txt,
+      CMakePresets.json, cmake/CvfPackage*.cmake*, vcpkg.json,
+      .github/workflows/*, docs/**, LICENSES/**, include/cvforwin/cvf_api.h,
+      src/c_api/cvforwin.def) strictly as data and asserts the brief's
+      observable consistency properties for OB-1 through OB-7; it reads no
+      production implementation source and no diff and derives no expectation
+      from one. It is Catch2 v3 / C++20, deterministic, hardware-free, and needs
+      the target-scoped CVF108_REPO_ROOT definition (repository root) or falls
+      back to locating the root from __FILE__. Author-phase RED is real:
+      CMakeLists project VERSION 1.0.0, vcpkg.json version-string 1.0.0, five
+      cvforwin-1.0.0 CI artifact/path names, non-historical cvforwin-1.0.0 paths
+      in docs/development.md and docs/packaging.md, LICENSES/README.md
+      "cvforwin 1.0.0 release", and no documented background retention, giving 8
+      failed assertions in 6 of 16 test cases (94 assertions, 86 passed) with
+      build exit 0 and run exit 42. The ABI-version-1, exactly-five-exports,
+      image-codec-notice, packaging-derives-from-PROJECT_VERSION,
+      template.match-documentation, and all exact-version/historical/
+      export-boundary demonstrations are GREEN regression pins. Hashes are not
+      to be updated by anyone other than the test owner; a mismatch at verify
+      time is an independence violation.
+      Verify-phase update (2026-09-19, owner: test-engineer; report
+      .ai/reports/CVF-108-test-verify.yaml): added requirement-derived edge
+      cases without removing, weakening, disabling, or skipping any existing
+      assertion. The single file now also demonstrates: a partially applied
+      release bump is detected in exactly the one unsynchronized metadata file
+      (CMakeLists.txt, vcpkg.json, a CI workflow, or a doc) and a fully
+      synchronized set reports nothing; a superset version ("1.1.0-beta",
+      "1.1.0.0") is not accepted as the current version; a required-file set
+      reports its absent entry as a failure instead of skipping it; and an
+      export set with one symbol added, removed, or replaced is rejected even
+      when the count is five. find_cvforwin_versions() now captures a four-part
+      superset such as cvforwin-1.1.0.0 in full (previously it captured only the
+      "1.1.0" prefix and could have accepted a 1.1.0.0 name as current), which
+      is strictly stronger. The independent suite went from 16 cases / 94
+      assertions to 20 cases / 116 assertions, all passing. Previous sha256 was
+      03f07e571c43d59346d200cf4662c5f19de2ee4dabd70a968ebb32730286d782; the new
+      sha256 is recorded above. Fresh evidence: clang-format --dry-run --Werror
+      exit 0; wsl-gcc-debug configure/build exit 0; full portable ctest 483/483
+      passed (exit 0); focused CVF-108 ctest 25/25 passed (exit 0); direct
+      cvf108_release_metadata_tests binary 116 assertions in 20 test cases
+      (exit 0); format-check exit 0 (127 files); abi-check exit 0 (exactly 5
+      exports). OB-3 (installed package reports its own version) and the staged
+      Windows package/archive names (OB-2) remain deferred to a Windows package
+      build and are not claimed verified here. Hashes are not to be updated by
+      anyone other than the test owner; a mismatch at verify time is an
+      independence violation.
+
+      Review-fix hardening (2026-09-19, owner: test-engineer; finding CVF108-NBF-05;
+      report .ai/reports/CVF-108-test-hardening.yaml): is_historical_context()
+      was replaced. It previously exempted any earlier-version reference within a
+      fixed +/-3-line window of a historical marker, so a stale current-release
+      mention that merely sat next to a genuine historical mention was wrongly
+      exempted. The exemption is now scoped to the reference's own logical unit --
+      the containing sentence, list item, or table row -- and a list item or
+      sentence that is the direct body of a version heading owns that heading as
+      its changelog-entry unit; the historical marker must be in that same unit.
+      find_cvforwin_versions() now records the match position. Two explicit
+      detection controls were added and pass: (a) a stale current-release mention
+      adjacent to, but in a different unit from, a genuine historical mention is
+      now REPORTED (a prior-release list item under its 1.0.0 heading is exempt,
+      while the next line "Download cvforwin-1.0.0.zip as the current release" is
+      reported), plus same-line-different-sentence and table-row controls; and (b)
+      a genuine historical mention (a prior-release changelog entry and a
+      "previous release" sentence) is NOT reported. No existing assertion was
+      removed, weakened, disabled, or skipped; the suite is strictly stronger.
+      Previous sha256 was
+      ad62725ca40a294d987b964676867a9278a782ef1fea11ebef7ee37e1dde2dca; the new
+      sha256 is recorded above. Fresh evidence: clang-format --dry-run --Werror
+      exit 0; wsl-gcc-debug configure exit 0; build exit 0; full portable ctest
+      484/484 passed (exit 0); focused CVF-108 ctest 26/26 passed (exit 0); direct
+      cvf108_release_metadata_tests binary 121 assertions in 21 test cases
+      (exit 0); format-check exit 0 (127 files); abi-check exit 0 (exactly 5
+      exports).
+
+      Windows CRLF portability fix (2026-09-19, owner: test-engineer; report
+      .ai/reports/CVF-108-crlf-fix.yaml): CI run 35442730937 at commit 7d3e3fe
+      failed the single independent case OB-4 on the Windows runner because the
+      checkout used CRLF line endings. extract_abi_version_macros() consumed
+      lines with istringstream/getline and matched each whole line with a regex
+      ending in "(.*)$"; a line left with a trailing '\r' cannot be consumed by
+      ECMAScript '.' and regex_match requires the whole line, so every line
+      failed to match and the macro list came back empty. A shared
+      strip_line_ending() helper was added and split_lines() now routes every
+      line through it; extract_abi_version_macros() and parse_def_exports() --
+      the only other getline-based line parse -- now consume split_lines().
+      The rest of the file was audited: line_spans() and trim() already removed
+      a trailing '\r', and every other regex (version headings,
+      extract_cmake_project_version, find_semver_tokens, find_cvforwin_versions,
+      extract_json_version_fields, and the LICENSES phrase) is unanchored and
+      needs no change. A detection control test case ("CVF-108 platform control:
+      CRLF line endings are normalized for every line-based parse") feeds a
+      synthetic CRLF block to split_lines(), extract_abi_version_macros(), and
+      parse_def_exports(), requires the result to equal the LF result, and
+      reproduces the pre-fix un-normalized path, which must return empty on
+      CRLF; it therefore fails if the normalization is removed. No assertion was
+      removed, weakened, disabled, or skipped; the suite gained one case and is
+      strictly stronger. Previous sha256 was
+      ea5f286d6b92e242ac5629b0b35611d2ac03558c9f530a3420d904032670e173; the new
+      sha256 is recorded above. Fresh evidence: clang-format --dry-run --Werror
+      exit 0; wsl-gcc-debug configure exit 0; build exit 0; full portable ctest
+      485/485 passed (exit 0); direct cvf108_release_metadata_tests binary 137
+      assertions in 22 test cases (exit 0); format-check exit 0 (127 files); the
+      CRLF probe over the real public header reports naive LF=1 / naive CRLF=0
+      and normalized LF=1 / normalized CRLF=1 (PROBE_RESULT=PASS). Native
+      Windows MSVC validation is deferred to the next windows-tests-quality CI
+      run and is not claimed.
+

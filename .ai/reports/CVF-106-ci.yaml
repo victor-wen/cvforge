@@ -1,0 +1,27 @@
+change_id: CVF-106
+candidate_sha: 74b3b3f055ddd2408e8ea002b2f645ba4dfff812
+run_id: "35412060643"
+run_url: https://github.com/victor-wen/cvforge/actions/runs/35412060643
+conclusion: success
+jobs:
+- name: Test-enabled suite and clean package consumer
+  conclusion: success
+  tests: "497/497"
+- name: Release build, tests, abi-check, package
+  conclusion: success
+  tests: "332/332"
+superseded_run:
+  run_id: "35409749859"
+  sha: b102946
+  conclusion: failure
+  reason: >-
+    Windows MSVC C2665 in src/recipes/recipe_catalog.cpp:72 (native().starts_with on a wide-native path);
+    fixed portably in 74b3b3f by comparing the first path component to std::filesystem::path("..").
+test_counts:
+  passed: 497
+  failed: 0
+  skipped: 0
+log_copy: .ai/reports/CVF-106-ci-tests.log
+notes: >-
+  Native MSVC execution at the CVF-106 delivery SHA 74b3b3f055ddd2408e8ea002b2f645ba4dfff812, including the template.match example, the recipe
+  preparation lifecycle, and the clean package consumer. No hardware claim.

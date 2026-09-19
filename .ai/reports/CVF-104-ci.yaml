@@ -1,0 +1,32 @@
+change_id: CVF-104
+candidate_sha: de167ba1c84e3b9354a16aaf16ab7bed14316d2a
+run_id: "35386486871"
+run_url: https://github.com/victor-wen/cvforge/actions/runs/35386486871
+conclusion: success
+superseded_run:
+  run_id: "35383859693"
+  sha: 8b96cb8
+  conclusion: failure
+  reason: >-
+    One CVF-104 independent test failed natively on Windows: the test-side path_within helper required a
+    '/' separator while Windows uses '\\'. Fixed test-only in de167ba (helper plus a separator regression
+    case); no production defect.
+jobs:
+- name: Release build, tests, abi-check, package
+  conclusion: success
+- name: Test-enabled suite and clean package consumer
+  conclusion: success
+preset: windows-tests-quality
+evidence:
+- "100% tests passed, 0 tests failed out of 397"
+- "92 CVF-104 log lines: the four cvf104 component suites built and ran natively on Windows at de167ba"
+test_counts:
+  passed: 397
+  failed: 0
+  skipped: 0
+log_copy: .ai/reports/CVF-104-ci-tests.log
+sha256:
+  tests_log: a24ea54ef51b6e99968394241d0a70c14fa01c65bcd36c5c8a20a518767a3ee0
+notes: >-
+  Native MSVC execution at the frozen candidate SHA de167ba1c84e3b9354a16aaf16ab7bed14316d2a; not run on the
+  Linux host. CVF-104 production code is portable runtime/artifact code with no Media Foundation dependency.

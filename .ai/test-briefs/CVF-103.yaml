@@ -1,0 +1,54 @@
+schema_version: 1
+change_id: CVF-103
+program: cvforwin-hardening-1.1.0
+target: "Per-stream callback generation and stale-callback rejection"
+in_scope:
+  - A retired stream's delayed completion must not satisfy a replacement stream.
+  - Timeout/flush/reconnect ordering after a cancelled read.
+out_of_scope:
+  - Pixel conversion math, COM startup lifetime, recipes/inspection/ABI.
+constraints:
+  - "Windows-only behavior for the backend; the generation-gate logic itself is portable and unit-testable on Linux."
+  - "Tests must not read production .cpp files."
+  - "Two frozen seams are defined by the change contract: (a) portable StreamGenerationGate in src/camera/uvc_windows/uvc_stream_generation.h - begin_stream(), retire(), accepts(), discard_stale(), active_generation(), stale_events_discarded(); and (b) Windows-only UvcCameraBackend::callback_snapshot() returning UvcCallbackSnapshot (active_generation, callbacks_created, stale_events_discarded, stream_open)."
+  - "Deterministic without hardware: the gate is pure logic, and backend-level cases use failing opens and zero-device enumeration."
+interface_reference:
+  - "cvforwin::camera::uvc::StreamGenerationGate (portable; see change contract frozen_test_seam)"
+  - "cvforwin::camera::UvcCameraBackend::callback_snapshot() -> UvcCallbackSnapshot"
+  - "cvforwin::camera::ICameraBackend and its documented camera failure values"
+  - "cvforwin::core::{Deadline, Result, Status, ErrorCode}"
+observable_behaviors:
+  - id: B1
+    behavior: "after a new stream is created, a completion belonging to the previous generation is ignored: the active capture does not report completion from it."
+  - id: B2
+    behavior: "a delayed completion arriving after timeout/flush does not produce a frame for the next capture."
+  - id: B3
+    behavior: "after a timeout the stream is either successfully flushed or marked to require reconnect; a second capture on an unknown-state stream fails deterministically rather than returning a stale frame."
+  - id: B4
+    behavior: "each stream generation is strictly increasing and a completion is only accepted for the active generation."
+  - id: B5
+    behavior: "at most one reconnect/recapture is attempted per inspection through capture_with_one_retry."
+boundary_cases:
+  - "Completion arrives before the waiter starts; after the waiter is already waiting; exactly at the deadline boundary."
+  - "Flush completes within the grace budget versus after it."
+negative_cases:
+  - "Two consecutive generations both delivering completions: only the active one is accepted."
+acceptance_criteria:
+  - "Portable suite remains green; Windows component tests exist and are format-clean with honest execution status."
+allowed_context:
+  - .ai/project-contract.yaml
+  - .ai/changes/CVF-103.yaml
+  - .ai/test-briefs/CVF-103.yaml
+  - tests/windows/uvc/**
+  - CMakeLists.txt
+  - "frozen headers (may #include, must not open .cpp files): src/camera/camera_backend.h, src/camera/captured_frame.h, src/core/{status,error,result,deadline}.h"
+forbidden_context:
+  - "any src/** .cpp implementation file"
+  - .ai/changes/** (other than CVF-103.yaml), .ai/reports/**, .ai/reviews/**
+  - "any diff, changed-file list, developer note, or root-cause description"
+allowed_test_paths:
+  - tests/windows/uvc/**
+ownership_manifest: .ai/test-ownership.yaml
+evidence:
+  red_report: .ai/reports/CVF-103-test-red.yaml
+  verify_report: .ai/reports/CVF-103-test-verify.yaml

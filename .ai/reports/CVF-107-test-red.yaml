@@ -1,0 +1,151 @@
+schema_version: 1
+change_id: CVF-107
+phase: AUTHOR
+owner: test-engineer
+recorded_at: 2026-09-19
+role: test-engineer (independent black-box)
+
+target: >-
+  Opt-in UVC hardware stress suite: stress cycles, orientation, color, forced
+  timeout, bounded reconnect, explicit selector, release evidence, operator docs.
+
+owned_files:
+  - path: tests/hardware/uvc_smoke.cpp
+    sha256: 7a62b1c8a45f7db1782f303c1be4c79b3ffa87593137c1d15e6c3ce83f8a689c
+    lines: 1519
+  - path: docs/hardware-uvc.md
+    sha256: 62c4ac2ad3951bd1d9a1f1262dca4a8eb90d27de5715176ccbf4c2d75692c7a8
+    note: operator manual; documented, intentionally not hash-pinned as a test file
+ownership_manifest:
+  path: .ai/test-ownership.yaml
+  sha256: d97894cb8ee55b5be5f4208a665f2d672e27a6dfdfb9b80986416988fe65963f
+  cvf107_entry_change_id: CVF-107
+  cvf107_entry_file_sha256: 7a62b1c8a45f7db1782f303c1be4c79b3ffa87593137c1d15e6c3ce83f8a689c
+  manifest_file_audit: "69 pinned files re-hashed, 0 mismatches"
+  note: >-
+    The CVF-107 ownership entry already records the current hardened file hash
+    (7a62b1c8...), so no byte change to .ai/test-ownership.yaml was required and
+    none was made (other sections preserved byte-for-byte).
+
+behavior_cases:
+  - id: B1
+    behavior: >-
+      Stress mode supports >= 1000 consecutive captures; every capture validates
+      configured dimensions, BGR8 pixel format (CV_8UC3), buffer continuity, and a
+      strictly increasing sequence.
+    test: run_repeated_cycles_case (H4)
+    cases: [stress-minimum 1000, configured min 1, invalid/dimension/type/continuity/sequence counters]
+  - id: B2
+    behavior: >-
+      Orientation check uses an asymmetric TOP/BOTTOM target and passes only when
+      contrast >= threshold and the bright band is at the visual top; a vertically
+      symmetric image is explicitly rejected as orientation evidence;
+      CVF_HW_REQUIRE_ORIENTATION makes a skip a FAILURE in stress mode.
+    test: run_orientation_case (H7) + CVF_HW_ORIENTATION_SYMMETRIC_CONTROL negative control
+  - id: B3
+    behavior: >-
+      Color check against the documented target with documented tolerances; passes
+      inside and fails outside; CVF_HW_REQUIRE_COLOR makes a skip a FAILURE in
+      stress mode.
+    test: run_color_case (H8) with dominance/level/neutral-spread/reference-tolerance checks
+  - id: B4
+    behavior: >-
+      Forced timeout is exercised deterministically (already-expired deadline and
+      timeout_ms == 0), reports explicit pass/fail, and is never silently skipped in
+      stress mode.
+    test: run_forced_timeout_case (H5) + mandatory require_timeout assertion
+  - id: B5
+    behavior: >-
+      Bounded reconnect recovers after the documented manual unplug/replug and
+      attempts at most one retry; the manual step stays environment-gated.
+    test: run_manual_replug_case (H6) + capture_with_one_retry bound
+  - id: B6
+    behavior: >-
+      A missing selector is a configuration failure; there is never a first-device
+      fallback; device_path or VID/PID (or exact name) selects exactly one device.
+    test: run_suite selector gate + run_resolution_cases (H2)
+boundary_cases:
+  - "Zero-device station run: empty enumeration + camera_not_found resolution (CVF_HW_EXPECT_ZERO_DEVICES=1)."
+  - "Cycle count at the configured minimum (CVF_HW_CYCLES=1): sequence checks not asserted, all other validations apply."
+negative_cases:
+  - "Stale descriptor open fails camera_not_found with no crash."
+  - "Capture before open fails camera_io with no crash."
+acceptance_evidence_record:
+  - "device identity (device_path, VID/PID, friendly_name, selector kind)"
+  - "cycle count; Windows version (RtlGetVersion or override); camera driver/firmware best effort"
+  - "stress/requirement flags; check counts; process exit code; optional CVF_HW_EVIDENCE_FILE"
+
+environment:
+  host: "WSL Linux (no Windows, no UVC camera, no Media Foundation)"
+  target_station: "designated Windows 10/11 x64 UVC station"
+  translation_unit_guard: "#if defined(_WIN32) -> empty TU on the portable host"
+
+red_evidence:
+  classification: STRUCTURAL
+  statement: >-
+    Hardware execution cannot be produced on this Linux host. The suite is
+    authored and format/syntax-clean, but the Windows binary cannot be built or
+    run here and no camera exists, so there is no hardware pass/fail observation.
+    Hardware execution is BLOCKED/UNVERIFIED until a designated station runs it.
+  pre_change_baseline:
+    command: "bash .ai/validation/cvf107-test-engineer-author.sh baseline"
+    exit_code: 0
+    observation: >-
+      git HEAD:tests/hardware/uvc_smoke.cpp is the 797-line CVF-007 baseline
+      (sha256 02141468189556cae2f71985f65a6009b63d37aeb148c2faf3eeb3feeb5ff69c)
+      with zero occurrences of CVF_HW_STRESS, CVF_HW_REQUIRE_ORIENTATION,
+      CVF_HW_REQUIRE_COLOR, CVF_HW_REQUIRE_TIMEOUT, CVF_HW_ORIENTATION_TEST,
+      CVF_HW_COLOR_TEST, CVF_HW_EVIDENCE_FILE, "orientation", and "color", which
+      confirms the CVF-107 behaviors are absent from the committed baseline.
+  commands:
+    - command: "bash .ai/validation/cvf107-test-engineer-author.sh format"
+      exit_code: 0
+      summary: "clang-format -i and --dry-run --Werror both clean"
+    - command: "bash .ai/validation/cvf107-test-engineer-author.sh build"
+      exit_code: 0
+      summary: >-
+        configure_exit=0 build_exit=0; ctest 454/454 passed, 0 failed; format-check
+        124 files; uvc_smoke_ctest_matches=0 (target never registered with CTest)
+    - command: "bash .ai/validation/cvf107-test-engineer-author.sh stub"
+      exit_code: 0
+      summary: >-
+        forced -D_WIN32 g++ -fsyntax-only with throwaway windows/MF/COM stubs
+        exit 0 (SYNTAX CHECK ONLY, not Windows execution or Windows build
+        evidence); Linux empty-TU probe exit 0
+    - command: "bash .ai/validation/cvf107-test-engineer-author.sh hash"
+      exit_code: 0
+      summary: "sha256 recorded for test/doc/manifest; manifest_files_checked=69 mismatches=0"
+  observed_failures: []
+
+interface_assumptions:
+  - "cvforwin::camera::UvcCameraBackend is default-constructible, implements ICameraBackend, backend_key() == \"uvc\" (static_assert pinned)."
+  - "Backend methods: enumerate(Deadline), open(descriptor, settings, Deadline), capture(Deadline), reconnect(settings, Deadline), close()."
+  - "CameraDescriptor fields: backend_key, device_path, vendor_id, product_id, friendly_name."
+  - "CameraSelector fields: device_path, vendor_id, product_id, friendly_name; empty selector -> selector_empty."
+  - "resolve_identity(devices, selector) -> Result<CameraDescriptor>; errors selector_empty, camera_not_found, camera_identity_ambiguous."
+  - "CameraSettings: width, height, frame_rate, preferred_format (PixelFormat::bgr8)."
+  - "CapturedFrame: metadata.{width,height,pixel_format,sequence} plus owned cv::Mat pixels."
+  - "core::Deadline::from_timeout_ms / core::Deadline::immediate."
+  - "core::Result<T>::has_value()/value()/failure(); Failure fields status, code, message; status_name/error_code_name."
+  - "Status::{invalid_argument,camera_not_found,camera_io,timeout}; ErrorCode::{selector_empty,camera_not_found,camera_identity_ambiguous,capture_timed_out}."
+  - "free function cam::capture_with_one_retry(backend, settings, deadline)."
+  - "These assumptions must be coordinated before verify; they come only from the frozen headers and the brief, never from a .cpp."
+
+independence:
+  production_source_read: false
+  forbidden_inputs_consumed: []
+  notes:
+    - "No src/**/*.cpp implementation file was opened or requested."
+    - >-
+      The interactive read allowlist denied direct reads of tests/hardware/uvc_smoke.cpp
+      and .ai/changes/CVF-107.yaml; the contract, test brief, ownership manifest, docs,
+      and reports remained readable. The change brief was used as the behavior-only input.
+    - >-
+      codegraph_node(file=tests/hardware/uvc_smoke.cpp) returned the on-disk prior
+      revision of this test-owner file (a test artifact, not production source and not a
+      diff/root-cause note). It was used only to confirm the owned test file content.
+      No test expectation was derived from production implementation source.
+
+operator_commands: "see docs/hardware-uvc.md sections 11 and 3-10"
+execution_status: UNVERIFIED
+next_action: "designated Windows 10/11 x64 station runs the stress command and records the evidence block"

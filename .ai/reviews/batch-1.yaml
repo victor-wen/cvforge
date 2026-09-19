@@ -1,0 +1,84 @@
+batch: batch-1-uvc-correctness
+members: [CVF-101, CVF-102, CVF-103]
+candidate_sha: a37673551bbb962d6dec4a2ca567325e6109c84a
+verdict: RELEASE_READY_WITH_FINDINGS
+basis:
+  quality_report: .ai/reports/batch-1-quality.json
+  quality_report_sha256: 2a381d2a01c4c832f63ef682ec0c17ea74171d1b3a13fa8e570e17d97cc86113
+  quality_verdict: PASS
+  ci_report: .ai/reports/batch-1-ci.yaml
+  ci_report_sha256: b4c9cb846959fd71f4091a71ee55e96cd7b1ca609fb5ddebe68c47a0087f429b
+  ci_run: "35326684044"
+  ci_conclusion: success
+  ci_counts: "351/351 windows test-enabled; both jobs success"
+  descriptor_sha256: b437b605b1db231cb42c203f218d00f88986f71226673ccfca40acbb5fbbefda
+  source_segment: .ai/reviews/batch-1-source.yaml
+  source_segment_sha256: ad834dbbdcd26dde69a7b3fe97a73bc26a323814c3bb5cc69ed6fba37f5af95e
+segments:
+  A_source_semantics:
+    verdict: PASS_WITH_FINDINGS
+    judgments:
+      compose: PASS
+      fresh_callback: PASS
+      gated: PASS
+      stale_no_mutation: PASS
+      teardown_race: PASS
+    findings:
+    - id: A-1
+      severity: non_blocking
+      file: src/camera/uvc_windows/uvc_backend.cpp
+      line: 721
+      issue: TOCTOU between the outside-mutex gate check and teardown retire; unreachable false completion due to serialized worker commands, fresh replacement callback, and mutex-guarded waiter predicates.
+    - id: A-2
+      severity: non_blocking
+      file: src/camera/uvc_windows/uvc_backend.cpp
+      line: 1567
+      issue: Same-generation stale-write clearing depends on documented MF per-reader serial dispatch; no reachable false completion.
+  B_invariants_evidence:
+    verdict: PASS
+    judgments:
+      quality_pass: true
+      ci_match_sha: true
+      component_target_evidence: true
+      descriptor_consistent: true
+      no_extra_export: true
+    findings: []
+  C_carry_forward:
+    verdict: PASS_WITH_FINDINGS
+    dispositions:
+    - finding: CVF-102 NB-1
+      decision: ACCEPT_TO_CARRY
+    - finding: CVF-102 NB-5
+      decision: ACCEPT_TO_CARRY
+      note: Superseded by CVF-103 fresh-callback-per-stream.
+    - finding: CVF-103 NB-1
+      decision: ACCEPT_TO_CARRY
+      note: Source-verified by two independent reviews plus the portable gate suite; executable backstop is the deferred CVF-107 hardware run.
+    - finding: CVF-103 NB-3
+      decision: ACCEPT_TO_CARRY
+    - finding: CVF-103 NB-4
+      decision: ACCEPT_TO_CARRY
+    - finding: CVF-103 NB-5
+      decision: ACCEPT_TO_CARRY
+    - finding: CVF-103 NB-6
+      decision: ACCEPT_TO_CARRY
+    - finding: A-1
+      decision: ACCEPT_TO_CARRY
+    - finding: A-2
+      decision: ACCEPT_TO_CARRY
+controller_verification:
+- include/** and src/c_api/** unchanged across 85e1de0..HEAD (no public C surface / ABI change).
+- UvcCallbackSnapshot and callback_snapshot absent from include/** and src/c_api/**; cvforwin.def exports only the five cvf_* functions.
+- Device identity remains explicit (resolve_identity; has_identity); no first-device fallback.
+- Windows-only Media Foundation execution verified natively only by CI at a376735: cvf103_generation_tests.exe and cvf103_windows_uvc_tests.exe built, CVF-103 ctest cases passed (351/351).
+platform_matrix:
+  portable_wsl: VERIFIED (307/307 ctest, 307/307 asan, format, static analysis)
+  windows_ci: VERIFIED (native windows-2022, 351/351, both jobs, candidate SHA)
+  hardware: BLOCKED (CVF-107 designated station unavailable; not claimed)
+conditions:
+- Record CVF-103 NB-1 in the release report and schedule the delayed-callback fault seam or amend the CVF-103 verification wording.
+- CVF-107 hardware stress (1000 cycles with forced timeout/reconnect/orientation/color) remains an outstanding hard gate before FCT deployment; it is not waived by this verdict.
+release_statement: >-
+  batch-1-uvc-correctness is RELEASE_READY_WITH_FINDINGS at candidate a37673551bbb962d6dec4a2ca567325e6109c84a. All nine
+  carried findings are accepted with no task reopened; they are residual limitations backed by source review and
+  portable/CI evidence, not live defects. Hardware evidence is absent by design and must not be implied.

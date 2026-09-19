@@ -1,0 +1,490 @@
+schema_version: 1
+change_id: CVF-101
+phase: IMPLEMENTATION
+author: developer
+recorded_at: 2026-09-18
+host: Linux (WSL), gcc/clang portable build only; Windows MSVC not executable here
+status: COMPLETE
+
+summary: >-
+  The prior BLOCKED_INDEPENDENT_TEST_INTERNAL_CONTRADICTION blocker is resolved. The independent
+  test owner corrected the stale B1/B2/1x1/width-1 rgb24 call sites so they now pass
+  kBgrA[0..2] (native B,G,R memory order) consistently with fill_rgb24_row's (blue, green, red)
+  parameterization, matching the dedicated no-swap channel-order case. The observed independent
+  test sha256 is 4fb03ee44b0c0fb33c5d43cc52aca5488775bb2fc3c7d91e083580629110e08c (matches the
+  expected hash given to the developer). No production code change was needed: the production
+  fix from the prior session (rgb24 identity B,G,R copy, no channel swap) is contract-conformant
+  and unchanged (sha256 4fd74209c782db883eef6a88d1eda6dd7cc3bcef3d8ab011df01345905946610).
+  The independent test was recompiled with -D_WIN32 on this Linux host against the real
+  implementation (uvc_frame_convert.cpp), real core (src/core/error.cpp) and real OpenCV + Catch2,
+  then executed: 12 test cases, 402 assertions, ALL PASSED, exit code 0. All canonical portable
+  gates are green: configure, build, ctest 272/272, format-check 87 files, static-analysis 22
+  files, developer unit binary 838 assertions in 9 test cases. No real defect was found in this
+  re-run.
+
+prior_blocker_resolution:
+  prior_status: BLOCKED_INDEPENDENT_TEST_INTERNAL_CONTRADICTION
+  blocker: >-
+    The corrected independent test left B1/B2/1x1/width-1 rgb24 fixtures stale: they filled
+    (10,20,30) but asserted kBgrA=(30,20,10), contradicting the dedicated channel-order case
+    that required an identity B,G,R mapping.
+  resolution: >-
+    Test owner updated the stale call sites (now fill_rgb24(..., kBgrA[0], kBgrA[1], kBgrA[2]))
+    so all rgb24 fixtures agree with native B,G,R memory order. No contract or production change
+    was required; the developer did not and must not edit the independent test.
+  observed_sha256: 4fb03ee44b0c0fb33c5d43cc52aca5488775bb2fc3c7d91e083580629110e08c
+  expected_sha256: 4fb03ee44b0c0fb33c5d43cc52aca5488775bb2fc3c7d91e083580629110e08c
+  sha_match: true
+
+changed_files_this_session:
+  note: >-
+    No production, test, or build file was added or modified this session. The list below is the
+    current deliverable set with live sha256 values; all were unchanged by the developer during
+    this re-verification.
+  files:
+    - path: src/camera/uvc_windows/uvc_frame_convert.cpp
+      sha256: 4fd74209c782db883eef6a88d1eda6dd7cc3bcef3d8ab011df01345905946610
+      role: >-
+        Production implementation of the frozen seam. PackedKind::rgb24 is an identity B,G,R copy
+        (no channel swap), matching contract native_memory_semantics and HEAD production behavior.
+        Negative pitch uses scanline0 + r*pitch with no vertical reversal; every row is bounds-checked
+        against accessible_bytes; overflow-safe arithmetic returns camera_io/capture_failed.
+      changed_this_session: false
+    - path: src/camera/uvc_windows/uvc_frame_convert.h
+      sha256: 570ebfc5b3aed41eb2d2eb2300d60b70d61a5e9d88a3ecb7fa69e48a27b40b43
+      role: "Frozen seam declaration (enum values, Locked2DBufferView fields, function signature)."
+      changed_this_session: false
+    - path: src/camera/uvc_windows/uvc_frame_math.h
+      sha256: e531f56bb7652c443476c8972d844d5e347a0a16e2ce28c167d86d4e74bbd501
+      role: "Overflow-safe row/bounds helper functions."
+      changed_this_session: false
+    - path: src/camera/uvc_windows/uvc_backend.cpp
+      sha256: 9666053afe175d657eb7a95ae430aa471d47e9af4e773949ccec473d5abe77e0
+      role: "Production backend routes its 2D-lock conversion through decode_locked_buffer_to_bgr8."
+      changed_this_session: false
+    - path: tests/unit/uvc_frame_math_test.cpp
+      sha256: 898597330a062f5c3eaadae2364c684ff2911f5eec74efe9da3f13e6909e3715
+      role: "Developer-owned portable unit test for the row/bounds helpers."
+      changed_this_session: false
+    - path: CMakeLists.txt
+      sha256: 9ac2ae5f5b48d26e6e4974b573540c93dde8563af14e70b26be66e2e5495f2af
+      role: "Registers the cvf101_windows_uvc_tests Windows component target and the portable developer unit target."
+      changed_this_session: false
+
+frozen_files_untouched:
+  - path: include/cvforwin/**
+    status: untouched
+  - path: src/c_api/**
+    status: untouched
+  - path: .ai/project-contract.yaml
+    sha256: 24411d0b9fb44815c39948bba1ad24a473c1b3775233d9ab4fc9413bb113c9a6
+    status: "untouched by developer (a pre-existing worktree modification predates this session)"
+  - path: .ai/test-ownership.yaml
+    sha256: 60cc8aed0c5994987e407578e510d49f5ab114c06d4f84cb927a5459f35307c5
+    status: untouched
+  - path: tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp
+    sha256: 4fb03ee44b0c0fb33c5d43cc52aca5488775bb2fc3c7d91e083580629110e08c
+    status: "untouched by developer (test-engineer owned)"
+
+commands:
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    result: PASS
+    observed: "Configuring done (14.5s); Generating done; build files written to build/wsl-gcc-debug"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    result: PASS
+    observed: "[0/2] Re-checking globbed directories; ninja: no work to do."
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    result: PASS
+    observed: "100% tests passed, 0 tests failed out of 272 (Total Test time real 3.45 sec)"
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    result: PASS
+    observed: "-- format-check passed: 87 file(s) conform to .clang-format"
+  - command: "cmake --preset wsl-clang-analysis"
+    exit_code: 0
+    result: PASS
+    observed: "Configuring done (17.2s); Generating done; build files written to build/wsl-clang-analysis"
+  - command: "cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+    exit_code: 0
+    result: PASS
+    observed: "-- static-analysis passed: 22 file(s) clean under .clang-tidy"
+  - command: "build/wsl-gcc-debug/uvc_frame_math_developer_tests"
+    exit_code: 0
+    result: PASS
+    observed: "All tests passed (838 assertions in 9 test cases)"
+
+independent_test_execution:
+  note: >-
+    Mirrored Linux -D_WIN32 cross-harness compile against the real implementation, real core and
+    real OpenCV/Catch2, then executed. This is a behavioral/syntactic proxy, not MSVC evidence.
+  observed_test_sha256: 4fb03ee44b0c0fb33c5d43cc52aca5488775bb2fc3c7d91e083580629110e08c
+  compile_command: >-
+    g++ -D_WIN32 -std=c++20 -O0 -g -I src -I include
+    -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include/opencv4
+    -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include
+    tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp
+    src/camera/uvc_windows/uvc_frame_convert.cpp src/core/error.cpp
+    -Lbuild/wsl-gcc-debug/vcpkg_installed/x64-linux/debug/lib
+    -Lbuild/wsl-gcc-debug/vcpkg_installed/x64-linux/debug/lib/manual-link
+    -Wl,--start-group -lopencv_imgproc4d -lopencv_core4d -lCatch2Maind -lCatch2d -Wl,--end-group
+    -lpthread -ldl -o /tmp/opencode/cvf101b/final_recheck
+  compile_exit_code: 0
+  run_command: "/tmp/opencode/cvf101b/final_recheck -r compact"
+  run_exit_code: 0
+  result: PASS
+  observed: "All tests passed (402 assertions in 12 test cases)"
+  failing_cases: 0
+  binary: /tmp/opencode/cvf101b/final_recheck
+  compile_log: /tmp/opencode/cvf101b/compile_recheck.log
+  prior_run_for_contrast: >-
+    Previous session (stale test, sha 5db636e...): 12 test cases, 3 failed, 402 assertions with
+    38 failed. Current corrected test (sha 4fb03ee...): 12 test cases, 0 failed, 402 assertions
+    passed. Same binary harness, same implementation; the difference is the test-owner fixture fix.
+
+windows_msvc_status:
+  verifiable_on_this_host: false
+  note: >-
+    Windows MSVC compilation and execution of cvf101_windows_uvc_tests are NOT verifiable on this
+    Linux host and were NOT fabricated. The Windows-only translation unit is not compiled by the
+    portable presets (it is an empty TU there). The Linux -D_WIN32 compile+run above is a
+    behavioral proxy only and is not MSVC evidence. The canonical windows-msvc-tests run remains
+    deferred to the designated Windows/CI station (the CMake target and add_test registration are
+    in place).
+
+notes:
+  - "Blocker resolved; no production defect found in re-verification; no code changed this session."
+  - "All six portable gates plus the developer unit binary pass with real exit code 0."
+  - "Independent test re-run against the real implementation passes 402/402 assertions in 12 cases."
+  - "Windows/MSVC evidence remains unverifiable here and is explicitly not claimed."
+
+# =============================================================================
+# SESSION 2 (2026-09-18): FIND-CVF101-01 planar 4:2:0 buffer fix.
+# The block above is retained verbatim as prior evidence. Everything below
+# records the new session in which a real production defect was fixed.
+# =============================================================================
+session_2:
+  recorded_at: 2026-09-18
+  trigger: >-
+    Independent verification FIND-CVF101-01: decode_planar_420 allocated a planar buffer with only
+    luma_rows + chroma_rows rows but wrote the V plane at planar.ptr(luma_rows + chroma_rows + row),
+    so NativePixelFormat::i420 and yv12 with a positive pitch always failed with
+    camera_io/capture_failed thrown from Mat::ptr and swallowed by the seam catch.
+
+  root_cause:
+    file: src/camera/uvc_windows/uvc_frame_convert.cpp
+    function: decode_planar_420
+    summary: >-
+      The planar destination was allocated with height*3/2 rows (luma_rows + chroma_rows) but the
+      chroma copy loop wrote U as one FULL-WIDTH row at index luma_rows + row and V as one
+      full-width row at index luma_rows + chroma_rows + row. That both (a) addressed row
+      luma_rows + chroma_rows + row, outside the height*3/2 allocation, and (b) wrote each chroma
+      plane at full width instead of the packed half-width representation OpenCV expects. The
+      out-of-range Mat::ptr threw cv::Exception, caught by decode_locked_buffer_to_bgr8's catch,
+      surfacing as camera_io/capture_failed for every positive-pitch i420/yv12 lock.
+    opencv_layout_ground_truth: >-
+      Confirmed empirically and from the vcpkg OpenCV 4.12.0 source of cvtThreePlaneYUVtoBGR and
+      RGB8toYUV420pInvoker: COLOR_YUV2BGR_I420 requires an input Mat of exactly height*3/2 rows;
+      U starts at byte width*height and V at byte width*height + width*height/4, each occupying
+      width*height/4 contiguous bytes at half width. An H + 2*(H/2) = 2H allocation is rejected by
+      OpenCV's CV_Assert(sz.height % 3 == 0).
+    note_on_contract_wording: >-
+      The task text's literal formula "luma_rows + 2*chroma_rows" evaluates to 2H and is
+      contradicted by its own stated intent "total height*3/2 for 4:2:0" and by OpenCV's actual
+      requirement. The fix follows the stated canonical total height*3/2 and OpenCV's byte layout:
+      allocation luma_rows + chroma_rows, with U/V packed contiguously at half width.
+
+  fix:
+    file: src/camera/uvc_windows/uvc_frame_convert.cpp
+    sha256_after: d98a58804c4aa960eec711343cb0e52f61da3d9d30e998eefb34fa94f465015c
+    change: >-
+      decode_planar_420 now allocates cv::Mat planar(luma_rows + chroma_rows, width, CV_8UC1)
+      (height*3/2, continuous) and writes both chroma planes packed at half width: U at row
+      offset luma_rows (byte offset chroma_rows*chroma_row_bytes into the chroma region) and V
+      immediately after U, using u_destination/v_destination byte pointers. The
+      first_plane_is_u = (format == i420) mapping is retained, so I420 (U then V) and YV12
+      (V then U) both map to the canonical Y,U,V buffer.
+    preserved:
+      - "All bounds/overflow checks and accessible_bytes validation are untouched."
+      - "Negative-pitch rejection, even-dimension checks and even-stride checks are untouched."
+      - "No public interface, seam declaration, CMake, or test file changed."
+
+  independent_test_execution:
+    test_sha256: 79a261b1a98298de0a7b515e65d0af0a55e470eb4fcbbfefd8a3c1a472ef57e0
+    test_sha256_unchanged_from_session_start: true
+    note: >-
+      Mirrored Linux -D_WIN32 compile of the independent test against the real implementation,
+      real core and real OpenCV/Catch2, then executed. Behavioral/syntactic proxy only; not MSVC
+      evidence. No test file was modified.
+    compile_command: >-
+      g++ -D_WIN32 -std=c++20 -O0 -g -I src -I include
+      -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include/opencv4
+      -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include
+      tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp
+      src/camera/uvc_windows/uvc_frame_convert.cpp src/core/error.cpp
+      -Lbuild/wsl-gcc-debug/vcpkg_installed/x64-linux/debug/lib
+      -Lbuild/wsl-gcc-debug/vcpkg_installed/x64-linux/debug/lib/manual-link
+      -Wl,--start-group -lopencv_imgproc4d -lopencv_core4d -lCatch2Maind -lCatch2d -Wl,--end-group
+      -lpthread -ldl -o /tmp/opencode/cvf101c/fixed_repro
+    compile_exit_code: 0
+    run_command: "/tmp/opencode/cvf101c/fixed_repro -r compact"
+    run_exit_code: 0
+    result: PASS
+    observed: "All tests passed (752 assertions in 20 test cases)"
+    failing_cases: 0
+    before_fix_contrast: >-
+      Same harness against the unfixed source: 20 test cases, 2 failed, 722 assertions with 2
+      failed (planar format 7 / planar 2x2 minimum format 7), run exit code 42, with OpenCV
+      throwing at mat.inl.hpp:701 exactly as FIND-CVF101-01 reported.
+    plane_order_probe:
+      purpose: >-
+        The independent planar cases use neutral U=V=128, so they cannot distinguish plane order.
+        A developer probe with U=100, V=200 verified the mapping.
+      observed: >-
+        I420 (physical U then V) and YV12 (physical V then U) decode to the identical BGR pixel
+        (18,27,189); reversing the physical plane order changes it to (220,69,30). I420/YV12 order
+        mapping is therefore correct and load-bearing.
+      binary: /tmp/opencode/cvf101c/order_probe
+
+  commands:
+    - command: "cmake --preset wsl-gcc-debug"
+      exit_code: 0
+      result: PASS
+      observed: "Configuring done; Generating done; build files written to build/wsl-gcc-debug"
+    - command: "cmake --build --preset wsl-gcc-debug --parallel"
+      exit_code: 0
+      result: PASS
+      observed: "ninja: no work to do."
+    - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+      exit_code: 0
+      result: PASS
+      observed: "100% tests passed, 0 tests failed out of 272 (real 3.16 sec)"
+    - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+      exit_code: 0
+      result: PASS
+      observed: "-- format-check passed: 87 file(s) conform to .clang-format"
+    - command: "cmake --preset wsl-clang-analysis"
+      exit_code: 0
+      result: PASS
+      observed: "build files written to build/wsl-clang-analysis"
+    - command: "cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+      exit_code: 0
+      result: PASS
+      observed: "-- static-analysis passed: 22 file(s) clean under .clang-tidy"
+    - command: "build/wsl-gcc-debug/uvc_frame_math_developer_tests"
+      exit_code: 0
+      result: PASS
+      observed: "All tests passed (838 assertions in 9 test cases)"
+
+  frozen_files_untouched:
+    - path: tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp
+      sha256: 79a261b1a98298de0a7b515e65d0af0a55e470eb4fcbbfefd8a3c1a472ef57e0
+      status: untouched
+    - path: .ai/test-ownership.yaml
+      status: untouched
+    - path: .ai/project-contract.yaml
+      status: untouched by developer
+
+  windows_msvc_status:
+    verifiable_on_this_host: false
+    note: >-
+      Windows MSVC compilation and execution of cvf101_windows_uvc_tests remain NOT verifiable on
+      this Linux host and were NOT fabricated. The Linux -D_WIN32 compile+run is a behavioral
+      proxy only. The canonical windows-msvc-tests run remains deferred to the designated
+      Windows/CI station.
+
+  conclusion: >-
+    FIND-CVF101-01 is fixed. decode_planar_420 now builds a canonical height*3/2 Y,U,V buffer
+    with half-width contiguous chroma planes; positive-pitch i420 and yv12 decode successfully.
+    The independent test is green (752/752 assertions, 20/20 cases, exit 0), all six portable
+    gates and the developer unit binary pass, and the independent test and ownership files are
+    untouched.
+
+# =============================================================================
+# SESSION 3 (2026-09-18): FIND-CVF101-02 accessible_bytes basis clarification.
+# The blocks above are retained verbatim as prior evidence. Everything below
+# records the bounded fix that closes FIND-CVF101-02.
+# =============================================================================
+session_3:
+  recorded_at: 2026-09-18
+  trigger: >-
+    Reviewer FIND-CVF101-02: the frozen seam header documented accessible_bytes as "reachable
+    bytes from scanline0", but uvc_frame_math.h computes row offsets from the LOWEST ADDRESSED
+    byte and uvc_backend.cpp passed IMF2DBuffer2::Lock2DSize's pcbBufferLength, which Microsoft
+    documents as the length from ppbBufferStart. For a full-frame bottom-up buffer the two
+    coincide, so the field meaning was ambiguous/inconsistent. The architect clarified the
+    contract: accessible_bytes is measured from the lowest addressed byte of the scanned region,
+    and a caller reporting a start pointer plus length must pass
+    buffer_start + buffer_length - lowest_addressed.
+
+  root_cause:
+    file: src/camera/uvc_windows/uvc_backend.cpp
+    function: lock_2d_buffer / Impl::convert_sample
+    summary: >-
+      The Lock2DSize return values (ppbBufferStart, pcbBufferLength) were stored raw as the view's
+      accessible bytes, i.e. the length from the lock's start pointer, while the seam's row math
+      (packed_row_region_offset / packed_row_fits) measures every row from the lowest addressed
+      byte. Whenever buffer_start was not the lowest addressed byte of the scanned region (in
+      particular any negative-pitch view whose lock starts at scanline0 rather than at the
+      physically-lowest row), the accessible length and the row offsets were expressed on
+      different bases, so the bound was either trusted beyond its real reach or mis-attributed.
+    secondary: >-
+      The frozen seam header comment "reachable bytes from scanline0" stated the pre-clarification
+      basis and was inconsistent with the math header, which already documented the lowest
+      addressed byte.
+
+  fix:
+    principle: >-
+      accessible_bytes is now explicitly measured from the lowest addressed byte everywhere:
+      lowest_addressed = scanline0 for pitch >= 0, else scanline0 - (height-1)*|pitch|;
+      accessible = buffer_start + buffer_length - lowest_addressed. A lock whose reported range
+      does not strictly contain the addressed region is rejected with camera_io/capture_failed.
+    files:
+      - path: src/camera/uvc_windows/uvc_frame_convert.h
+        sha256: 823eb1b3a8026866735a6b9fee937f736098a25fd9e10c2bd7c8c3652df13b6c
+        change: >-
+          Comments only. The Locked2DBufferView field comment now reads "reachable bytes from the
+          lowest addressed byte"; the header banner documents the new basis and the
+          buffer_start + buffer_length - lowest_addressed caller obligation. Struct layout,
+          member types/order/defaults, enum values and the function signature are byte-for-byte
+          unchanged: no ABI/interface shape change.
+      - path: src/camera/uvc_windows/uvc_frame_math.h
+        sha256: f0e4554bc2e760a3849dd7c691af7b05ed166e5a6037acce16a913901193d399
+        change: >-
+          Added three portable, overflow-safe constexpr helpers: lowest_addressed_address()
+          (scanline0 minus (height-1)*|pitch| for negative pitch, underflow-safe),
+          rebase_accessible_extent() (end = start + length with checked_add, rejects empty ranges
+          and ranges that do not strictly contain the lowest addressed byte), and
+          lock_accessible_extent() which composes them into the exact basis the backend consumes.
+          Updated the file banner to state the rebasing rule. No existing helper changed.
+      - path: src/camera/uvc_windows/uvc_backend.cpp
+        sha256: 9294cbe213ed4488c082e7f02fbae58b3c0d08ffed8b2fb7450f234bacea583b
+        change: >-
+          Locked2DView now stores the raw Lock2DSize range (buffer_start, buffer_length) instead
+          of a raw "accessible_bytes"; lock_2d_buffer() is otherwise unchanged and the Lock2D
+          unknown-bounds path is unchanged (start null, length 0, known=false). New
+          accessible_extent_from_lock_start() is a thin pointer-widening call into the tested
+          lock_accessible_extent(). convert_sample() rebases the Lock2DSize range onto the lowest
+          addressed byte and, when the reported range does not contain the scanned region, unlocks
+          and returns camera_io/capture_failed instead of silently trusting the lock. The empty
+          buffer (buffer_length == 0) keeps its previous "the Media Foundation sample buffer is
+          empty" failure. The contiguous IMFMediaBuffer::Lock fallback path is untouched.
+      - path: tests/unit/uvc_frame_math_test.cpp
+        sha256: ed09ebff2bd293655bac50adf0f605e2fd284a34044df2acd2994e423f828eec
+        change: >-
+          Added three developer-owned cases (names do not start with cvf1): the lowest addressed
+          byte follows the pitch sign (top-down, bottom-up, single row, zero height, INT32_MIN,
+          sub-zero descent); the accessible extent rebases onto the lowest addressed byte
+          (full-frame, range starting below the region, last-byte boundary, non-containing range,
+          empty range, end overflow); and the composite lock range gives the accessible extent
+          from its lowest addressed byte (bottom-up full frame, a scanline0-anchored negative-pitch
+          range that must be rejected, short ranges, empty range, zero height, start overflow).
+
+  overflow_safety_and_unchanged_behavior:
+    - "rebase_accessible_extent uses checked_add for start+length and rejects overflow; lowest_addressed_address rejects height 0, INT32_MIN pitch, and a descent below address zero."
+    - "Positive pitch: lowest_addressed == scanline0, so accessible == buffer_length, byte-for-byte the previous behavior."
+    - "Lock2D unknown-bounds path and the IMFMediaBuffer::Lock contiguous fallback are unchanged."
+    - "No inversion is applied for negative pitch; scanline0 + row*pitch addressing is unchanged."
+
+  developer_tests:
+    file: tests/unit/uvc_frame_math_test.cpp
+    sha256: ed09ebff2bd293655bac50adf0f605e2fd284a34044df2acd2994e423f828eec
+    note: >-
+      TDD: the three cases were compiled first against the unmodified header and failed with
+      "'lock_accessible_extent' is not a member" / "'lowest_addressed_address' is not a member" /
+      "'rebase_accessible_extent' is not a member" before each helper was added, then went green.
+    build_command: "cmake --build --preset wsl-gcc-debug --target uvc_frame_math_developer_tests --parallel"
+    build_exit_code: 0
+    run_command: "build/wsl-gcc-debug/uvc_frame_math_developer_tests"
+    run_exit_code: 0
+    observed: "All tests passed (867 assertions in 12 test cases)"
+
+  independent_test_execution:
+    test_sha256: ae8874a546bccca4b117202b5ee30bd22d999c933c53573d1f6b641a296c9537
+    test_sha256_unchanged_from_session_start: true
+    note: >-
+      Mirrored Linux -D_WIN32 compile of the independent test against the real implementation,
+      real core and real OpenCV/Catch2, then executed. Behavioral/syntactic proxy only; not MSVC
+      evidence. No test file was modified.
+    compile_command: >-
+      g++ -D_WIN32 -std=c++20 -O0 -g -Wall -Wextra -Werror -I src -I include
+      -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include/opencv4
+      -isystem build/wsl-gcc-debug/vcpkg_installed/x64-linux/include
+      tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp
+      src/camera/uvc_windows/uvc_frame_convert.cpp src/core/error.cpp
+      -Lbuild/wsl-gcc-debug/vcpkg_installed/x64-linux/debug/lib
+      -Lbuild/wsl-gcc-debug/vcpkg_installed/x64-linux/debug/lib/manual-link
+      -Wl,--start-group -lopencv_imgproc4d -lopencv_core4d -lCatch2Maind -lCatch2d -Wl,--end-group
+      -lpthread -ldl -o /tmp/opencode/cvf101d/finding02_final
+    compile_exit_code: 0
+    run_command: "/tmp/opencode/cvf101d/finding02_final -r compact"
+    run_exit_code: 0
+    result: PASS
+    observed: "All tests passed (752 assertions in 20 test cases)"
+    failing_cases: 0
+    binary: /tmp/opencode/cvf101d/finding02_final
+
+  commands:
+    - command: "cmake --preset wsl-gcc-debug"
+      exit_code: 0
+      result: PASS
+      observed: "Configuring done; Generating done; build files written to build/wsl-gcc-debug"
+    - command: "cmake --build --preset wsl-gcc-debug --parallel"
+      exit_code: 0
+      result: PASS
+      observed: "ninja: no work to do (portable TUs exclude the Windows-only backend)"
+    - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+      exit_code: 0
+      result: PASS
+      observed: "100% tests passed, 0 tests failed out of 275 (real 3.15 sec)"
+    - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+      exit_code: 0
+      result: PASS
+      observed: "-- format-check passed: 87 file(s) conform to .clang-format"
+    - command: "cmake --preset wsl-clang-analysis"
+      exit_code: 0
+      result: PASS
+      observed: "Configuring done; Generating done; build files written to build/wsl-clang-analysis"
+    - command: "cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+      exit_code: 0
+      result: PASS
+      observed: "-- static-analysis passed: 22 file(s) clean under .clang-tidy"
+
+  frozen_files_untouched:
+    - path: tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp
+      sha256: ae8874a546bccca4b117202b5ee30bd22d999c933c53573d1f6b641a296c9537
+      status: untouched
+    - path: .ai/test-ownership.yaml
+      sha256: 2441c3656db05141da50b13212a7863c2b904caae09e1f9bcd2ac0c0ca3edab9
+      status: untouched by developer
+    - path: .ai/changes/CVF-101.yaml
+      sha256: 3605cb0f82d3f870cc700b8acf423e2df242f742e3b6a67479e6006021e86cac
+      status: untouched by developer (clarification authored by the architect)
+    - path: .ai/project-contract.yaml
+      status: untouched by developer
+
+  windows_msvc_status:
+    verifiable_on_this_host: false
+    note: >-
+      Windows MSVC compilation and execution of cvf101_windows_uvc_tests and of the Windows-only
+      uvc_backend.cpp translation unit are NOT verifiable on this Linux host and were NOT
+      fabricated. No MinGW/w64 cross toolchain or Windows SDK headers are installed. The Linux
+      -D_WIN32 compile+run of the seam is a behavioral proxy only and is not MSVC evidence. The
+      backend edit was reviewed by hand against the MF2DBuffer2 contract, and its logic is a thin
+      pointer-widening call into the portable helper that the developer test covers. The canonical
+      windows-msvc-tests run remains deferred to the designated Windows/CI station.
+
+  finding_closure:
+    finding: FIND-CVF101-02
+    status: CLOSED
+    statement: >-
+      The seam header now documents accessible_bytes as measured from the lowest addressed byte of
+      the scanned region (struct layout unchanged); uvc_backend.cpp keeps the raw Lock2DSize
+      (buffer_start, buffer_length) and passes the rebased extent
+      buffer_start + buffer_length - lowest_addressed, failing with camera_io/capture_failed when
+      the reported range does not contain the addressed region; positive-pitch, Lock2D
+      unknown-bounds and contiguous-Lock behavior are unchanged; the pure rebasing arithmetic is
+      covered by a developer unit test that was watched fail first. The independent test is
+      untouched and green (752/752 assertions, 20/20 cases).

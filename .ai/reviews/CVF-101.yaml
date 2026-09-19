@@ -1,0 +1,367 @@
+change_id: CVF-101
+verdict: APPROVE
+# Live task verdict after the bounded FIND-CVF101-02 re-review. Earlier review content below
+# (findings INFO-1..INFO-4, summary, explicit statements) is retained intact; the earlier
+# verdict was PASS_WITH_FINDINGS with FIND-CVF101-02 open, now CLOSED in the re_review section
+# at the end of this file. No blocking findings remain; INFO findings are non-blocking.
+# The functional correction is real, the independent suite is intact, and every claim that
+# cannot be executed on this host is honestly deferred.
+
+reviewed_artifacts:
+  # Every file below was read in full. This reviewer has no shell, so sha256 values could not
+  # be recomputed; the values shown are the ones recorded by the developer/test-owner reports
+  # and the ownership manifest and are marked as recorded evidence.
+  - path: src/camera/uvc_windows/uvc_frame_convert.h
+    sha256_recorded: 570ebfc5b3aed41eb2d2eb2300d60b70d61a5e9d88a3ecb7fa69e48a27b40b43
+  - path: src/camera/uvc_windows/uvc_frame_convert.cpp
+    sha256_recorded: d98a58804c4aa960eec711343cb0e52f61da3d9d30e998eefb34fa94f465015c
+    note: "session-2 post-fix value; the earlier 4fd74209... value is stale"
+  - path: src/camera/uvc_windows/uvc_frame_math.h
+    sha256_recorded: e531f56bb7652c443476c8972d844d5e347a0a16e2ce28c167d86d4e74bbd501
+  - path: src/camera/uvc_windows/uvc_backend.cpp
+    sha256_recorded: 9666053afe175d657eb7a95ae430aa471d47e9af4e773949ccec473d5abe77e0
+  - path: tests/unit/uvc_frame_math_test.cpp
+    sha256_recorded: 898597330a062f5c3eaadae2364c684ff2911f5eec74efe9da3f13e6909e3715
+  - path: tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp
+    sha256_recorded: ae8874a546bccca4b117202b5ee30bd22d999c933c53573d1f6b641a296c9537
+  - path: CMakeLists.txt
+    sha256_recorded: 9ac2ae5f5b48d26e6e4974b573540c93dde8563af14e70b26be66e2e5495f2af
+  - path: CMakePresets.json
+  - path: .ai/changes/CVF-101.yaml
+  - path: .ai/test-briefs/CVF-101.yaml
+  - path: .ai/project-contract.yaml
+  - path: .ai/test-ownership.yaml
+  - path: .ai/reports/CVF-101-implementation.yaml
+  - path: .ai/reports/CVF-101-test-red.yaml
+  - path: .ai/reports/CVF-101-test-verify.yaml
+  - path: .ai/validation/cvf101-format.diff
+  - path: .ai/workflow-state.yaml
+
+summary: >-
+  CVF-101 decodes the locked Media Foundation 2D buffer correctly: packed rows are addressed as
+  scanline0 + r*pitch exactly once with no residual reversal (uvc_frame_convert.cpp:48-52, 177-181),
+  bounds are overflow-checked and enforced whenever Lock2DSize supplied a length
+  (uvc_frame_convert.cpp:154-174), the unknown-length Lock2D fallback keeps only structural checks as
+  Microsoft documents (uvc_backend.cpp:463-471), the i420/yv12 planar path now builds the canonical
+  3H/2 half-width-packed Y,U,V buffer OpenCV expects with correct plane order (uvc_frame_convert.cpp:281-304),
+  and the packed B,G,R(,A) channel order is preserved without any swap (uvc_frame_convert.cpp:92-113).
+  The independent test suite is intact at its pinned hash, covers B1-B6 and all boundary/negative
+  cases across every native format, only includes the frozen seam header, and contains no skips or
+  weakened assertions; the recorded formatting-only edit is verified as whitespace/line-wrapping from
+  the diff (after-image matches the on-disk file at lines 986-992 and 1094-1095). The accessible_bytes
+  wording/basis mismatch is real but is a spec-consistency defect (classification b), not a demonstrated
+  live defect: all known MF full-frame layouts make the two bases coincide, and the literal-reading
+  direction fails cleanly rather than unsafely; a bounded production-side hardening is required before
+  the batch release gate. Scope is clean, ABI/camera_contract are untouched, the Windows target is
+  registered only in the test-enabled Windows configuration, and independence incident CVF-101-II-01
+  does not invalidate the frozen evidence. Windows MSVC execution remains honestly deferred.
+
+findings:
+  - id: FIND-CVF101-02
+    severity: low
+    classification: >-
+      (b) documentation/spec-consistency defect with a latent validation-base gap - not (a) a
+      demonstrated correctness defect, and not fully (c) benign.
+    file: src/camera/uvc_windows/uvc_frame_convert.h
+    location: line 53 (accessible_bytes comment)
+    related_locations:
+      - src/camera/uvc_windows/uvc_frame_math.h:88-115 (offsets measured from the lowest addressed byte; line 95)
+      - src/camera/uvc_windows/uvc_backend.cpp:455-459 (pcbBufferLength stored verbatim), 586-601 (view built from it)
+    evidence: >-
+      The frozen header documents accessible_bytes as "reachable bytes from scanline0"
+      (uvc_frame_convert.h:53), while packed_row_region_offset/packed_row_fits convert every row to a
+      distance from the LOWEST addressed byte (uvc_frame_math.h:95, 103-115) and production forwards
+      Lock2DSize's raw pcbBufferLength (uvc_backend.cpp:455-459 -> 600-601). Microsoft documents
+      pcbBufferLength as the length of the buffer that begins at ppbBufferStart and ppbScanline0 as the
+      visual top scan line, which for a bottom-up image is the last scan line in memory (Lock2DSize
+      reference, verified). For a full-frame buffer the addressed-region extent, the length from
+      buffer_start and the reachable extent from scanline0 all coincide, so every exercised layout is
+      exact; no real MF buffer with the image not starting at buffer_start is demonstrated. Residual
+      gap: if ppbBufferStart < the image's lowest addressed byte and the buffer is short, the relative
+      check (extent <= accessible_bytes) can accept a region ending up to (lowest - buffer_start) bytes
+      past buffer_start + pcbBufferLength (uvc_frame_math.h:110-114). A caller literally reading the
+      comment as "distance from scanline0" would instead be under-permissive (2*(height-1)*|pitch| +
+      row_bytes required) and receive a clean camera_io/capture_failed rejection - never an unsafe read.
+    required_action: >-
+      (1) architect: state the actual convention in the frozen field comment and the change-contract
+      text (extent of the addressed row region measured from its lowest addressed byte, which is what
+      Lock2DSize/IMFMediaBuffer::Lock actually report), or approve a seam revision carrying buffer_start.
+      (2) camera_adapter_author (preferred; inside allowed_files, no frozen-seam change): retain
+      Lock2DSize's buffer_start/buffer_length in uvc_backend.cpp and pass
+      accessible_bytes = buffer_start + buffer_length - lowest_addressed_byte
+      (lowest = scanline0 + (pitch < 0 ? (height-1)*pitch : 0)), making the contract invariant
+      "no row is read outside the bounds supplied by the lock" unconditional.
+      (3) release-reviewer: verify closure or record an explicit acceptance before the batch-1 gate.
+
+  - id: INFO-1
+    severity: info
+    classification: independent planar plane-order observability
+    file: tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp
+    location: lines 1030-1045, 1055-1079, 1264-1279 (all planar cases use neutral U=V=128)
+    evidence: >-
+      The independent planar fixtures initialize the whole allocation to 0x80 (PlanarLock, lines
+      312-374), so a U/V plane swap would be invisible to them; the file documents this deliberately
+      ("it pins no chroma-plane convention"). Plane order is confirmed only by source inspection
+      (uvc_frame_convert.cpp:290-292) and the developer's non-recorded order probe, not by an
+      independent assertion.
+    required_action: >-
+      test_owner: add one planar case with distinct non-neutral chroma (e.g. U=100, V=200) asserting
+      the exact BGR triple, or record the CVF-107 hardware color check as the closure path. Non-blocking.
+
+  - id: INFO-2
+    severity: info
+    classification: ownership-manifest traceability
+    file: .ai/test-ownership.yaml
+    location: CVF-101 notes, lines 454-469
+    evidence: >-
+      The independent suite grew from 12 cases / 402 assertions (hash 4fb03ee4...) to 20 cases /
+      752 assertions (hash 79a261b1... via the verify-phase cases added 2026-09-18, test file lines
+      940-1299), but the manifest's correction history itemizes only the format-only transition
+      (79a261b1 -> ae8874a5) and the earlier call-site corrections; the 12->20 extension is not
+      explicitly recorded there. The verify report documents the added cases and the in-file banner
+      marks them as verify-phase requirement-derived; no assertion was removed or weakened.
+    required_action: >-
+      test_owner: record the intermediate hash/coverage transition in the CVF-101 manifest notes for
+      audit traceability. Non-blocking.
+
+  - id: INFO-3
+    severity: info
+    classification: duplicated dimension constant
+    file: src/camera/uvc_windows/uvc_frame_math.h
+    location: line 30 (k_max_locked_dimension = 16384) vs uvc_backend.cpp:68 (k_max_frame_dimension = 16384)
+    evidence: >-
+      Two independent 16384 constants define the same supported dimension limit; the comment claims
+      they match, but a future edit to either side silently desynchronizes the seam from the backend.
+    required_action: >-
+      camera_adapter_author: derive one from the other or centralize the constant at the next touch of
+      the module. Non-blocking.
+
+  - id: INFO-4
+    severity: info
+    classification: packed-vs-planar YUV range asymmetry
+    file: src/camera/uvc_windows/uvc_frame_convert.cpp
+    location: lines 114-145 (packed yuy2/uyvy use full-range yuv_to_bgr_full) vs lines 221, 303 (planar nv12/i420/yv12 use OpenCV limited-range cvtColor)
+    evidence: >-
+      U=V=128 maps to (Y,Y,Y) for packed YUV (uvc_frame_math.h:140-148) but to gray 130 through
+      OpenCV's limited-range planar conversion; the brief explicitly forbids pinning a range, so this is
+      contract-permitted, but the same scene would differ by several luma levels between a YUY2 and an
+      I420 stream from one camera.
+    required_action: >-
+      release-reviewer/quality_owner: cover this in the NFR-019 / CVF-107 hardware color checks and
+      decide before release whether packed YUV should also use OpenCV's range for consistency.
+      Non-blocking.
+
+blocking_findings: []
+
+explicit_statements:
+  scanline0_pitch:
+    statement: >-
+      CONFIRMED - applied exactly once, no double flip, no residual reversal. Row r is addressed as
+      scanline0 + r*pitch in uvc_frame_convert.cpp:48-52 ((int64)row * (int64)pitch, then
+      scanline0 + offset); the live packed loop enumerates visual rows 0..height-1
+      (uvc_frame_convert.cpp:177-181). `height - 1 - row` exists only at uvc_frame_math.h:95 to
+      convert a row into a distance from the lowest addressed byte for bounds measurement, never for
+      addressing. uvc_backend.cpp contains no copy_packed_rows-style reversal (the only `- 1` uses are
+      the luma extent at lines 559/563); the 2D-lock view returns scanline0/pitch unmodified from MF
+      (uvc_backend.cpp:448-472) and convert_locked_to_bgr8 passes the pitch once (uvc_backend.cpp:586-602).
+  bounds_safety:
+    statement: >-
+      CONFIRMED, with the single latent caveat of FIND-CVF101-02. checked_mul/checked_add/pitch_magnitude
+      are overflow-safe and reject INT32_MIN before negation (uvc_frame_math.h:32-61); decode_packed
+      rejects pitch == 0, |pitch| < row_bytes, extent overflow, and (when known) accessible_bytes < extent
+      plus every row end (uvc_frame_convert.cpp:154-174); null base, zero dims and >16384 dims are
+      rejected first (uvc_frame_convert.cpp:311-319). The Lock2D path (no length available per Microsoft)
+      sets accessible_bytes_known=false (uvc_backend.cpp:463-471), leaving only the structural checks -
+      the documented limitation, with no guessed length. NV12 and planar 4:2:0 add even/positive-pitch
+      and per-plane checks (uvc_frame_convert.cpp:187-212, 227-270); cv::Exception is contained
+      (uvc_frame_convert.cpp:336-338).
+  accessible_bytes_adjudication:
+    statement: >-
+      Classification (b) documentation/spec-consistency defect with a latent validation-base gap; not
+      (a) a demonstrated correctness defect and not fully (c) benign. The header's "reachable bytes from
+      scanline0" (uvc_frame_convert.h:53) and the math's "from the lowest addressed byte"
+      (uvc_frame_math.h:95, 103-115) name the same extent for a full-frame buffer (positive pitch:
+      scanline0 is the lowest byte; negative pitch: the addressed region runs from the lowest byte up to
+      scanline0's row end), and production's Lock2DSize pcbBufferLength (uvc_backend.cpp:455-459) equals
+      that extent whenever the image fills the buffer - which is the normal MF layout and the only one
+      exercised. No real MF buffer with ppbBufferStart earlier than the image's lowest addressed byte is
+      demonstrated; if one existed and the buffer were short, the relative check could miss a region
+      ending up to that prefix past buffer_start + length, while a literal "distance from scanline0"
+      caller would be under-permissive and rejected cleanly. Required action: architect corrects the
+      frozen wording and camera_adapter_author makes the check absolute from buffer_start/length
+      (see FIND-CVF101-02).
+  planar_i420_yv12:
+    statement: >-
+      CONFIRMED. decode_planar_420 allocates cv::Mat planar(luma_rows + chroma_rows, width, CV_8UC1)
+      = canonical height*3/2 rows (uvc_frame_convert.cpp:281) and writes U at byte offset
+      luma_rows*width with V immediately after at luma_rows*width + chroma_rows*(width/2)
+      (uvc_frame_convert.cpp:293-301), exactly the Y-then-U-then-V half-width-packed layout OpenCV's
+      COLOR_YUV2BGR_I420 requires (input height 3H/2; U at W*H; V at W*H + W*H/4). i420 sets
+      first_plane_is_u=true and yv12 maps its physically V-first planes into the canonical U slot
+      (uvc_frame_convert.cpp:290-292), so I420 (U then V) and YV12 (V then U) are both correct; the
+      source planes are read at luma_rows*pitch and + chroma_rows*(pitch/2) with even pitch enforced
+      (uvc_frame_convert.cpp:230, 287-300). The independent positive-pitch planar and bottom-up no-OOB
+      cases pass (test lines 1030-1045, 1055-1079).
+  channel_order:
+    statement: >-
+      CONFIRMED - no channel swap. rgb24 copies native B,G,R bytes unchanged
+      (uvc_frame_convert.cpp:92-103); rgb32/argb32 copy the low three bytes B,G,R and drop the fourth
+      (uvc_frame_convert.cpp:105-112); output is always continuous CV_8UC3 BGR8
+      (uvc_frame_convert.cpp:176). This matches the contract's MF D3DFMT_R8G8B8/X8R8G8B8/B,G,R,A memory
+      order. The independent file's packers write native (b,g,r[,a]) (test lines 164-192) and the
+      distinct-value cases assert the exact BGR triple and explicitly reject the swapped triple
+      (test lines 447-449, 562-625, 1085-1126).
+  test_adequacy:
+    statement: >-
+      ADEQUATE. The independent suite (tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp, 20 cases /
+      752 assertions, hash ae8874a5...) includes only the frozen seam header (lines 28-40), contains no
+      skips/disabled cases, and covers: B1/B2 asymmetric-row orientation both pitch signs (455-491);
+      B3 all packed formats both signs plus the distinct-RGB channel-order guard (497-556, 562-625,
+      1085-1126); B4 padding-by-pitch with a pad-byte absence scan (631-661); B5 exact-minimum accepted
+      vs one-byte-short rejected for every packed format and truncated/bottom-up cases (759-797,
+      803-831, 1133-1163); B6 overflow and INT32_MIN without UB, known and unknown bounds (837-880,
+      1169-1199); negatives null/zero-dims/pitch<row/zero-pitch/per-format (886-938, 950-975);
+      boundaries 1x1 both signs, width-1/height-1 for all byte-packed formats, 4:2:2 min width 2,
+      planar 2x2 minimum (667-757, 1205-1280). The developer unit suite
+      (tests/unit/uvc_frame_math_test.cpp:31-212) exercises the pure helpers with exact values
+      (36/55/24/0), INT32_MIN, clamp saturation, all 256 neutral-luma iterations and chroma extremes -
+      meaningful, not tautological, and it honestly labels the 64-bit-unreachable overflow guards.
+      Limits recorded honestly: Windows MSVC execution is deferred and the -D_WIN32 Linux mirror is a
+      proxy, not MSVC evidence; neutral chroma hides plane order (INFO-1).
+  scope:
+    statement: >-
+      CLEAN as far as inspectable without shell. Changed production files are all inside
+      src/camera/uvc_windows/** (allowed), the developer test is tests/unit/uvc_frame_math_test.cpp
+      (not a cvf1*_* name; allowed), the component test is tests/windows/uvc/** (allowed, test-owner
+      owned), and CMakeLists.txt changes (lines 859-922) are inside allowed build files. No
+      include/**, src/c_api/**, camera_backend/captured_frame, runtime, algorithms, recipes or docs
+      change was observed; the seam is internal, _WIN32-guarded (uvc_frame_convert.h:24) and not part
+      of the ABI; CapturedFrame is still BGR8 (uvc_backend.cpp:1322) and no export changed. Windows
+      gating is correct: CMakeLists.txt:902 requires WIN32 AND CVFORWIN_BUILD_TESTS AND
+      CVFORWIN_BUILD_TEST_BACKENDS; the release preset keeps TEST_BACKENDS=OFF
+      (CMakePresets.json:73) so cvf101_windows_uvc_tests is never registered in windows-msvc-release /
+      windows-ci; windows-msvc-tests sets it ON (CMakePresets.json:94) and windows-tests-quality
+      (CMakePresets.json:313-341) runs it; Linux is not WIN32 so the portable suite is unaffected.
+      Caveat: no shell was available to produce a full worktree diff; scope rests on direct inspection
+      of the files above plus the recorded changed-file lists. The recorded pre-existing
+      .ai/project-contract.yaml worktree modification is not attributable to this change.
+  independence_incident:
+    statement: >-
+      Incident CVF-101-II-01 (recorded in .ai/reports/CVF-101-test-verify.yaml:108-137): codegraph_explore
+      returned verbatim production sources into the implementation-blind test-engineer session during
+      VERIFY, after the final test hash ae8874a5... and the formatting-only edit had been established.
+      Final evidence remains SOUND: the test bytes were frozen and hashed before the exposure; the
+      recorded format diff (.ai/validation/cvf101-format.diff) is whitespace/line-wrapping only and its
+      after-image matches the on-disk file at lines 986-992 and 1094-1095; no assertion, case,
+      expectation or fixture changed; all post-exposure executions used the frozen file. Process
+      caveat: the post-exposure mirror run was not implementation-blind, and this reviewer cannot
+      recompute hashes or diff the pre-exposure bytes without a shell, so hash integrity rests on the
+      mutually consistent developer/test-owner/ownership records and the mechanical quality gate. The
+      recommended denial of codegraph tools to implementation-blind roles should be enforced.
+
+independence_notes: >-
+  Test-set integrity is intact. The independent file's on-disk content (1302 lines) matches the
+  recorded final hash ae8874a5... in .ai/test-ownership.yaml:399 and the verify report line 17, and its
+  20-case structure matches the recorded 752-assertion run. The format-only edit was verified from the
+  recorded diff and by matching its after-image to the final file; no assertion text appears in the
+  diff. The developer did not modify test-engineer files (reports and manifest agree, including the
+  incident note). Residual non-mechanical risks are recorded above (hash recomputation not possible
+  here; the 12->20 verify-phase extension lacks an explicit manifest transition entry, INFO-2; planar
+  plane order is source-verified but not independently observable with neutral chroma, INFO-1).
+
+# =============================================================================
+# Re-review (2026-09-18): bounded FIND-CVF101-02 fix. All content above is the
+# earlier review and is retained intact.
+# =============================================================================
+re_review:
+  reviewed_at: 2026-09-18
+  reviewer: reviewer
+  scope: >-
+    Bounded re-review of the session-3 FIND-CVF101-02 fix. Read in full: the seam header, the math
+    header, the backend, the developer unit test, and the frozen independent Windows component test,
+    plus the change contract and .ai/reports/CVF-101-implementation.yaml session_3. The only question
+    is whether the fix closes FIND-CVF101-02 correctly and safely and introduces no new defect.
+
+  finding_updates:
+    - id: FIND-CVF101-02
+      status: CLOSED
+      basis: >-
+        (1) Basis now stated correctly and consistently. uvc_frame_convert.h:15-21 and the field
+        comment at :61 document accessible_bytes as measured from the lowest addressed byte of the
+        scanned region, and the change contract carries the same wording plus the caller obligation
+        (.ai/changes/CVF-101.yaml:78-79). Struct members, order, types, defaults, enum values and the
+        function signature are unchanged from the earlier review's record: comment-only header edit,
+        no ABI/shape change. (2) Math is correct for both pitch signs. lowest_addressed_address()
+        (uvc_frame_math.h:97-116) returns scanline0 for pitch >= 0 and scanline0 - (height-1)*|pitch|
+        for pitch < 0, with height==0, INT32_MIN and descent-below-zero all rejected; for the
+        bottom-up case scanline0 != buffer_start, lowest is computed from the pitch geometry, not
+        from the lock. rebase_accessible_extent() (:126-141) returns end - lowest where
+        end = start + buffer_length, so the value is exactly the reachable byte count from the lowest
+        addressed byte for a contiguous lock range: it cannot over-estimate the lock's own end, and
+        it under-estimates only if the lock itself understates the memory (conservative). The helper
+        requires lowest to be strictly inside [start, end) and rejects otherwise, at :136-138.
+        (3) Overflow/underflow is safe. checked_mul guards (height-1)*|pitch|, pitch_magnitude
+        rejects INT32_MIN before negation (:61-68), descent > scanline0 rejects address underflow
+        before the subtraction (:111-114), and checked_add guards start + buffer_length before the
+        subtraction (:132-135); no size_t wrap path remains. (4) Backend is consistent and rejects
+        correctly. uvc_backend.cpp:449-455 keeps the raw (buffer_start, buffer_length) from
+        Lock2DSize; :493-503 is a thin pointer-widening call into the tested helper;
+        convert_sample :1424-1435 fails with camera_io/capture_failed (after one Unlock2D) when the
+        range is empty or does not contain the addressed region. The downstream seam validates the
+        whole region extent and every row end against the rebased accessible_bytes
+        (uvc_frame_convert.cpp:165-174 packed, :200-211 nv12, :248-269 planar), so combined the
+        region is read only when it lies inside the lock's reported bounds. (5) No regression to the
+        other paths. Positive pitch with buffer_start == scanline0 yields accessible == buffer_length
+        exactly as before; when the lock starts below scanline0 the rebased value is smaller, which
+        is the contract's intended stricter semantics (a frame whose rows extend past the lock end is
+        rejected instead of read). The Lock2D unknown-bounds path (start null, length 0, known=false)
+        and the contiguous IMFMediaBuffer::Lock fallback (data == buffer start, positive computed
+        stride, current_length) are unchanged and remain on the same basis. (6) A full-frame
+        bottom-up lock (scanline0 = buffer_start + (height-1)*|pitch|) now yields the full extent
+        rather than the raw length; a lock anchored at scanline0 for negative pitch is rejected.
+        (7) Tests are meaningful. The three new developer cases (tests/unit/uvc_frame_math_test.cpp:
+        160-239) assert hand-computed exact values for positive pitch, bottom-up, single row, zero
+        height, INT32_MIN, sub-zero descent, rebasing with a prefix, last-byte boundary, and the
+        reject cases, including the scanline0-anchored negative-pitch range; they are not
+        tautological and cover both negative pitch and the reject path. (8) The frozen independent
+        test was not modified in this session and its behavior is unaffected: the seam .cpp's
+        accessible_bytes consumption is unchanged and the math header changes are additive.
+
+  new_findings:
+    - id: INFO-5
+      severity: info
+      file: src/camera/uvc_windows/uvc_frame_math.h
+      location: line 22 (banner) vs line 97
+      issue: >-
+        The new banner paragraph names packed_lowest_address_offset() as one of the overflow-safe
+        rebasing helpers, but no such function exists; the real helpers are
+        lowest_addressed_address(), rebase_accessible_extent() and lock_accessible_extent().
+        Comment-only inaccuracy; it could send a future caller searching for a non-existent symbol.
+      required_fix: >-
+        camera_adapter_author: correct the banner name at the next touch of the module.
+        Non-blocking.
+
+    - id: INFO-6
+      severity: info
+      file: .ai/reports/CVF-101-implementation.yaml
+      location: session_3 overflow_safety_and_unchanged_behavior, second bullet (line 387)
+      issue: >-
+        "Positive pitch: lowest_addressed == scanline0, so accessible == buffer_length,
+        byte-for-byte the previous behavior" holds only when the lock's buffer_start equals
+        scanline0. When the lock starts below scanline0 the rebased extent is smaller than the raw
+        length; that is the intended stricter behavior required by the contract, but the report's
+        universal phrasing overstates the invariance.
+      required_fix: >-
+        developer: report wording only; no code change required. Non-blocking.
+
+  final_task_verdict: APPROVE
+  final_verdict_note: >-
+    Zero blocking findings: FIND-CVF101-02 is CLOSED and the fix introduces no new defect. INFO-1
+    through INFO-4 from the earlier review and the two new INFO observations remain non-blocking
+    follow-ups (release review owns the batch gate). Windows MSVC compilation/execution of the
+    backend wiring remains deferred to the designated station and is not claimed here; the backend
+    helper call is a thin pointer-widening wrapper over the portable arithmetic that the developer
+    unit tests cover with exact values. As in the earlier review, sha256 values could not be
+    recomputed without a shell; the on-disk independent test content (1302 lines, 20 cases, no
+    skips/disabled tests, only the frozen seam header included) is consistent with the pinned
+    ae8874a5... record and the ownership manifest entry.

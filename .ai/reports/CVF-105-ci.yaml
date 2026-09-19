@@ -1,0 +1,25 @@
+change_id: CVF-105
+candidate_sha: ab47119
+run_id: "35396078367"
+run_url: https://github.com/victor-wen/cvforge/actions/runs/35396078367
+conclusion: success
+jobs:
+- name: Test-enabled suite and clean package consumer
+  conclusion: success
+  tests: "462/462"
+- name: Release build, tests, abi-check, package
+  conclusion: success
+  tests: "325/325"
+evidence:
+- "windows-tests-quality: 100% tests passed, 0 tests failed out of 462 (130 CVF-105 log lines)"
+- "windows-ci: 100% tests passed, 0 tests failed out of 325 (abi-check + package included)"
+test_counts:
+  passed: 462
+  failed: 0
+  skipped: 0
+log_copy: .ai/reports/CVF-105-ci-tests.log
+sha256:
+  tests_log: ae26488cdf2499c75266c6b480b91cca239de001e22084bcc3ccbed5975a19e0
+notes: >-
+  Native MSVC execution of the CVF-105 canonicalization/ABI/diagnostics/payload suites at the delivery SHA
+  35396078367 (ab47119). Portable behavior was verified on the WSL host (418/418 debug and ASan). No hardware claim.

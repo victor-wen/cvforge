@@ -1,0 +1,104 @@
+batch: batch-2-runtime-artifacts
+candidate_sha: ab47119c8abc00f9d2d69cb1d61c70b22ddc1813
+segment: A (combined-source semantics)
+requested_path: .ai/reviews/batch-2-source.yaml
+persistence_note: >-
+  The requested .ai/reviews/ path is not writable under release-reviewer permissions; this
+  segment was persisted to the allowed .ai/reports/ path. The controller may relocate it.
+reviewed_files:
+  - .ai/changes/batch-2-runtime-artifacts.yaml
+  - .ai/changes/CVF-104.yaml
+  - .ai/changes/CVF-105.yaml
+  - src/runtime/context.cpp
+  - src/runtime/context.h
+  - src/runtime/finalization.h
+  - src/artifacts/save_worker.cpp
+  - src/artifacts/capture_sink.cpp
+  - src/diagnostics/diagnostics.cpp
+  - src/c_api/cvf_entry_points.cpp
+  - src/recipes/config.cpp
+  - src/camera/camera_backend.cpp
+findings:
+  - severity: non_blocking
+    file: src/artifacts/save_worker.cpp
+    line: 154-167
+    issue: >-
+      Cancellation/commit TOCTOU, intrinsic to CVF-104 (not a composition regression). When
+      wait_until() times out it calls cancel_target() (save_worker.cpp:81), which inserts the
+      executing id into cancelled_ids_ under mutex_; but execute() may already have passed its
+      mutex-guarded is_cancelled check (157) and then commits (167). The final file is published
+      after cancellation in that narrow window, against CVF-104's "no cancelled artifact is
+      published" invariant. Caller-visible behavior stays conservative and correct: no image_path
+      is reported, an optional save only sets warning_image_save_failed, a required save still
+      yields required_artifact_error/timeout, and the orphan file stays inside the managed
+      captures root subject to background retention.
+    required_fix: >-
+      developer: re-check cancellation under mutex_ immediately before sink_.commit() (or make
+      commit conditional on a cancel flag consumed under the same lock) and discard the temp
+      when the mark arrived inside the window.
+  - severity: non_blocking
+    file: src/runtime/context.cpp
+    line: 521-525
+    issue: >-
+      The required-save queue-saturation path busy-waits in 1 ms sleep_for steps on the
+      inspection caller thread until the absolute deadline expires. It is bounded by the single
+      deadline (honoring "waits only to the absolute deadline") and reachable only after stacked
+      prior timeouts (the gate serializes inspects, so both worker slots must already be full),
+      but a deadline-bounded condition-variable wait on worker completion would avoid burning
+      the remaining budget in a poll loop while holding the gate.
+    required_fix: >-
+      developer (optional hardening): replace the sleep loop with a deadline-bounded wait on the
+      save worker's state_cv_ or an equivalent completion/cancellation signal.
+judgment:
+  compose: true
+  single_serialize: true
+  single_finalize: true
+  warnings_safe: true
+  abi_before_side_effects: true
+  shared_state_race: false
+verdict: PASS_WITH_FINDINGS
+notes: >-
+  (1) Compose: the two changes integrate without conflict. context.cpp carries both the CVF-104
+  single absolute deadline (created once at context.cpp:341, passed unchanged to the gate wait
+  at 356, capture_with_one_retry at 385, settle checks at 393/400, and the save wait at 507; no
+  stage recomputes Deadline::from_timeout_ms) and the CVF-105 single-payload serialization.
+  camera_backend.cpp canonical_vid_pid (20-37) is idempotent with the config-side
+  canonicalize_hex4 (config.cpp:350-367, applied at 219-232), so selector and descriptor sides
+  meet on one canonical form; non-4-hex descriptor values still compare exactly while config
+  values must be exactly four hex digits. diagnostics.cpp serves both the CVF-105 atomic warning
+  store and the CVF-104 serialized-callback contract. (2) Single serialization:
+  serialize_result_payload (context.cpp:258-272) is the only dump of the result object and is
+  called exactly once per inspect at context.cpp:427, before finalization; the C API copies
+  outcome.output_text verbatim (cvf_entry_points.cpp:526, 541) and never re-serializes; failure
+  paths clear output_text (context.cpp:544), and pre-frame failures never produce a payload.
+  The over-bound failure (buffer_too_small / runtime_result_too_large, context.cpp:267-270) is
+  deterministic and precedes any C API copy; the C API's own capacity re-check
+  (cvf_entry_points.cpp:527-534) is redundant fail-safe defense given the 65535-byte bound.
+  (3) Single finalization: finalize_after_frame is called exactly once (context.cpp:531) inside
+  finalize_post_frame; every post-frame return path (context.cpp:397, 402, 410, 417, 429, 437,
+  441) routes through it, and precedence matches the contract (required-timeout >
+  required-failure > post-frame technical error > verdict with optional-save warning only).
+  Pre-frame failures use failure_outcome (context.cpp:628) by design since no frame existed;
+  consequently the !frame_valid branch (finalization.h:95-111) is defensive and unreachable
+  from the current wiring. (4) Warnings: both stores are std::atomic<uint32_t>
+  (diagnostics.cpp:87/104/122/135/163 fetch_or relaxed; context.cpp:643 fetch_or), the
+  per-decision snapshot is read once (context.cpp:531 via warning_flags() at 463-466),
+  add_warning is an idempotent OR, and the maintenance thread's retention-failure bit
+  (context.cpp:622) cannot be lost. Bits are never double-counted within one result; Impl
+  warnings accumulate across calls per the documented context.h:132-133 semantics (sticky for
+  the context lifetime; Diagnostics::clear_warnings clears only the diagnostics store).
+  (5) ABI ordering: in inspect_impl the result capacity pairs (cvf_entry_points.cpp:313-352,
+  invoked at 503) and the request pointer-length pairs (272-283, invoked at 507) are all
+  validated before runtime->inspect (512), which is the only path that engages the save worker
+  and produces output_text; the copy at 541 happens after the runtime returned. Zero-length
+  input_json is absent regardless of pointer (293, 363). Note: on the initialize path the
+  NULL+nonzero rejection for config_root/output_root is delegated to core::validate_init_options
+  through the empty view (cvf_entry_points.cpp:248-253), outside this segment's read set; the
+  std::string constructions at 402-403 run only after that validation passes. (6) Shared state:
+  the serialization gate (context.cpp:355-361) is held for the whole cycle, so only one inspect
+  touches the save worker at a time; RetentionScheduler state and retention_root_ are guarded by
+  maintenance_mutex_ (574-591, 599-625); the recipe snapshot is an atomically published
+  shared_ptr consumed under the gate (363); the callback mutex is never held together with the
+  warning atomics and no internal lock is held across the retention scan (lock released at 617).
+  No race is introduced by combining the two changes; the save-worker cancellation window in
+  finding 1 is intrinsic to CVF-104 alone.

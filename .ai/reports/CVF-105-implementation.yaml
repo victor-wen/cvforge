@@ -1,0 +1,306 @@
+schema_version: 1
+change_id: CVF-105
+phase: IMPLEMENTATION
+author: developer
+recorded_at: 2026-09-19
+host: "Linux (WSL) GCC 13.3.0 / Clang 18; Windows MSVC not executable here"
+status: COMPLETE
+
+summary: >-
+  Completed the CVF-105 implementation record. The four production fixes were
+  already present in the tree and compile: canonical VID/PID handling
+  (src/recipes/config.*), the C ABI pointer-length/capacity pre-validation and
+  verbatim payload copy (src/c_api/cvf_entry_points.cpp), atomic diagnostics
+  warning bits (src/diagnostics/diagnostics.*), and the single canonical,
+  bounded pre-serialized result payload plus exact-identity matching
+  (src/runtime/context.*, src/camera/camera_backend.cpp). The one remaining
+  wiring gap was closed: tests/unit/test_cvf105_hardening.cpp was registered in
+  CMakeLists.txt as cvf105_hardening_developer_tests inside the
+  CVFORWIN_BUILD_TESTS path and nested under CVFORWIN_BUILD_TEST_BACKENDS (it
+  drives the production runtime against the deterministic synthetic backend),
+  never inside CVFORWIN_BUILD_HARDWARE_TESTS. It builds and runs clean on the
+  portable debug preset (105 assertions / 6 cases) and under ASan. The full
+  wsl-gcc-debug ctest suite is 412/412 green including the amended CVF-004 test,
+  format-check and clang static-analysis are clean, abi-check still exports
+  exactly the five v1 symbols, and the independent cvf105 test files and
+  .ai/test-ownership.yaml are byte-identical to their pinned hashes. One
+  blocker is recorded below: two independent CVF-105 ASan cases use a
+  heap-use-after-free that is a test-owned lifetime defect in a hash-pinned file
+  and cannot be fixed from the developer scope.
+
+deliverables:
+  - requirement: "Register tests/unit/test_cvf105_hardening.cpp as a build target"
+    status: done
+    note: >-
+      Added cvf105_hardening_developer_tests in CMakeLists.txt immediately after
+      the independent CVF-105 block, inside the enclosing if(CVFORWIN_BUILD_TESTS)
+      block and nested in if(CVFORWIN_BUILD_TEST_BACKENDS). It links cvforwin,
+      cvforwin_runtime, cvforwin_recipes, cvforwin_camera, cvforwin_diagnostics,
+      cvforwin_test_backends, nlohmann_json, opencv_core, Threads and
+      Catch2::Catch2WithMain, defines CVFORWIN_TEST_BACKENDS_ENABLED=1, applies
+      cvforwin_apply_test_compile_options and cvforwin_apply_sanitizers, calls
+      cvforwin_place_shared_library (shared libcvforwin.so), and registers via
+      catch_discover_tests. No production source logic was touched by the wiring.
+  - requirement: "Build and run the developer target; fix only its own file"
+    status: done
+    note: >-
+      Built and ran clean with no compile, sanitizer, clang-tidy, or
+      clang-format issues. No edit to tests/unit/test_cvf105_hardening.cpp was
+      required.
+  - requirement: "Record the real verification matrix"
+    status: done
+    note: "See verification_matrix below; every command was run in this session."
+  - requirement: "Report production/build/developer-test hashes"
+    status: done
+    note: "See hashes below."
+  - requirement: "Confirm independent cvf105 tests and .ai/test-ownership.yaml unmodified"
+    status: done
+    note: >-
+      A before/after sha256 diff over tests/unit/cvf105_* and
+      .ai/test-ownership.yaml is empty and every hash equals the value pinned in
+      .ai/test-ownership.yaml.
+  - requirement: "No Windows/hardware claim"
+    status: done
+    note: >-
+      No Windows MSVC, UVC hardware, or tests/hardware/uvc_smoke run is claimed.
+      All evidence is the portable WSL GCC/Clang matrix.
+
+scope_confirmation:
+  allowed_files_touched:
+    - CMakeLists.txt            # build wiring only (register developer target)
+    - tests/unit/test_cvf105_hardening.cpp  # developer-owned; unchanged content
+  production_files_verified_present_and_compiling:
+    - src/recipes/config.cpp
+    - src/recipes/config.h
+    - src/camera/camera_backend.cpp
+    - src/c_api/cvf_entry_points.cpp
+    - src/diagnostics/diagnostics.cpp
+    - src/diagnostics/diagnostics.h
+    - src/runtime/context.cpp
+    - src/runtime/context.h
+  not_touched:
+    - include/cvforwin/**
+    - src/camera/uvc_windows/**
+    - src/algorithms/**
+    - src/artifacts/**
+    - docs/**
+    - .ai/changes/**
+    - .ai/project-contract.yaml
+    - .ai/test-ownership.yaml
+    - tests/unit/cvf1*_* (independent, hash-pinned)
+  seam_evidence:
+    - "src/recipes/config.h:31 declares core::Result<std::string> canonicalize_hex4(std::string_view); defined at src/recipes/config.cpp:350 and used at config.cpp:220/227."
+    - "src/runtime/context.h:42 k_max_result_payload_bytes=65535; :50 serialize_result_payload; :106 output_text; enforced at context.cpp:258-267 and set once at context.cpp:424-442."
+    - "src/diagnostics/diagnostics.h:91 std::atomic<std::uint32_t> warnings_; fetch_or(relaxed) at diagnostics.cpp:87/104/122/135/163; load at :142; clear_warnings stores warning_none at :147."
+
+verification_matrix:
+  debug_configure:
+    command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    result: "Configuring done; Generating done; build files written to build/wsl-gcc-debug"
+  debug_build:
+    command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    result: "cvf105_hardening_developer_tests compiled and linked; all other targets up to date"
+  debug_ctest:
+    command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    result: "100% tests passed, 0 tests failed out of 412"
+    total: 412
+    passed: 412
+    failed: 0
+    includes_amended_cvf004: true
+  amended_cvf004_test:
+    command: "build/wsl-gcc-debug/cvf004_tests"
+    exit_code: 0
+    result: "All tests passed (1187 assertions in 60 test cases)"
+    amended_case:
+      name: "CVF-004 B1: a valid cvforwin.json parses to the documented values and records both roots"
+      command: "build/wsl-gcc-debug/cvf004_tests \"CVF-004 B1: a valid cvforwin.json parses*\""
+      exit_code: 0
+      result: "All tests passed (20 assertions in 1 test case)"
+  cvf105_binaries:
+    - target: cvf105_hex_tests
+      command: "build/wsl-gcc-debug/cvf105_hex_tests"
+      exit_code: 0
+      assertions: 296
+      test_cases: 8
+    - target: cvf105_selector_tests
+      command: "build/wsl-gcc-debug/cvf105_selector_tests"
+      exit_code: 0
+      assertions: 61
+      test_cases: 11
+    - target: cvf105_payload_tests
+      command: "build/wsl-gcc-debug/cvf105_payload_tests"
+      exit_code: 0
+      assertions: 53
+      test_cases: 9
+    - target: cvf105_warnings_tests
+      command: "build/wsl-gcc-debug/cvf105_warnings_tests"
+      exit_code: 0
+      assertions: 26
+      test_cases: 4
+    - target: cvf105_abi_validation_tests
+      command: "build/wsl-gcc-debug/cvf105_abi_validation_tests"
+      exit_code: 0
+      assertions: 60
+      test_cases: 12
+    - target: cvf105_abi_pairs_tests
+      command: "build/wsl-gcc-debug/cvf105_abi_pairs_tests"
+      exit_code: 0
+      assertions: 162
+      test_cases: 8
+    - target: cvf105_runtime_output_text_tests
+      command: "build/wsl-gcc-debug/cvf105_runtime_output_text_tests"
+      exit_code: 0
+      assertions: 14
+      test_cases: 1
+    - target: cvf105_hardening_developer_tests
+      command: "build/wsl-gcc-debug/cvf105_hardening_developer_tests"
+      exit_code: 0
+      assertions: 105
+      test_cases: 6
+  format_check:
+    command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    result: "format-check passed: 115 file(s) conform to .clang-format"
+  static_analysis_configure:
+    command: "cmake --preset wsl-clang-analysis"
+    exit_code: 0
+    result: "Clang 18.1.3; generating done"
+  static_analysis:
+    command: "cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+    exit_code: 0
+    result: "static-analysis passed: 24 file(s) clean under .clang-tidy"
+  asan_configure:
+    command: "cmake --preset wsl-gcc-asan"
+    exit_code: 0
+    result: "build files written to build/wsl-gcc-asan"
+  asan_build:
+    command: "cmake --build --preset wsl-gcc-asan --parallel"
+    exit_code: 0
+    result: "65/65 objects built, including cvf105_hardening_developer_tests"
+  asan_ctest:
+    command: "ctest --preset wsl-gcc-asan --output-on-failure"
+    exit_code: 8
+    result: "99% tests passed, 2 tests failed out of 412"
+    total: 412
+    passed: 410
+    failed: 2
+    failures:
+      - "384 - CVF-105 B3: a valid pointer set with a missing root fails without publishing a context"
+      - "391 - CVF-105 B4: a short error message buffer reports the primary failure status and the required size"
+  asan_developer_target:
+    command: "build/wsl-gcc-asan/cvf105_hardening_developer_tests"
+    exit_code: 0
+    result: "All tests passed (105 assertions in 6 test cases)"
+  abi_check:
+    command: "cmake --build --preset wsl-gcc-debug --target abi-check"
+    exit_code: 0
+    result: "abi-check passed: exactly 5 export(s): cvf_get_abi_version;cvf_initialize;cvf_inspect;cvf_reload_recipes;cvf_shutdown"
+
+hashes:
+  algorithm: sha256
+  production:
+    - path: src/recipes/config.cpp
+      sha256: 6bfe076522695f62a4c7bffb1c43af1edc48cf4d89e5bcf7f6f87a1c86379a12
+    - path: src/recipes/config.h
+      sha256: 351d6b81216a3c3d120fb37dfa9bf87a01d2d3b42240dce71ea5bc50a0ce197d
+    - path: src/camera/camera_backend.cpp
+      sha256: 90685185b9cf99379cbd851e2244f8f88ad1a6a301be663e1dd5aa4a7ba8936d
+    - path: src/c_api/cvf_entry_points.cpp
+      sha256: da90e9dd6636b3134cd1b1a8ea84bd3aadb4e44b045f4e7ae79a5c3ede852bb9
+    - path: src/diagnostics/diagnostics.cpp
+      sha256: c9040267395f25395cf7b8d3cff8f5909823bc29c621d8ed2e6ebd20fc810127
+    - path: src/diagnostics/diagnostics.h
+      sha256: 306b60946b5b9d7ba315618c4f9fbac74d2ab7dc3a77a23c7dec461c9cde3584
+    - path: src/runtime/context.cpp
+      sha256: 0fbdb98be4566b1c6dfbb8fc45c73271c4e3bf8664c9205ce6e9b0e9c42f95cd
+    - path: src/runtime/context.h
+      sha256: b0a4a8a6a7960c305835779e6e83e5d667e31714fe9f6455793f6cb29871ed15
+  build:
+    - path: CMakeLists.txt
+      sha256: 5b230e4af0591ed9dc755f6cba28258547e47868375c648a1b8eb9c312f300bc
+  developer_test:
+    - path: tests/unit/test_cvf105_hardening.cpp
+      sha256: e09b1610db90892a665e721b147200ef8db1285fb894b19dceef8d09a89f7b19
+  independent_pinned_unchanged:
+    - path: tests/unit/cvf105_test.helpers.h
+      sha256: 634e19a47fb5d0cb305c408081dfc9c0eb518397bca0a8b9d62b60e0179dba3a
+    - path: tests/unit/cvf105_hex_test.cpp
+      sha256: 9b3672fa082e56b775b9a1b91b5ad01e7ca821df56ef9dc6571f0c4e023fd41f
+    - path: tests/unit/cvf105_selector_test.cpp
+      sha256: 6e215ea45e93619cd9860956d790d0b5b10d3426c0037d9f0e79ee37cc8e3610
+    - path: tests/unit/cvf105_payload_test.cpp
+      sha256: d380e4a9f013ff1498ea2a80d1884b4d00b132a1069271d442b5bd0babe1464b
+    - path: tests/unit/cvf105_warnings_test.cpp
+      sha256: 27274d79953175b2c41ac1c50b34a280136f597b6d37d81f39296925f2bab56d
+    - path: tests/unit/cvf105_abi_validation_test.cpp
+      sha256: 4a12787a3c8a8bfac8391fcb00b48b1fb7bb116431382d3f4b715bd05c92f6b6
+    - path: tests/unit/cvf105_abi_pairs_test.cpp
+      sha256: 16ee2d563d5f2f6d4edd83576a23158c59d140afc5e635846fbc00d234fde8e7
+    - path: tests/unit/cvf105_runtime_output_text_test.cpp
+      sha256: 1f05ab414543dc7fefa4f36d6bd6c6e15f627ba3a50a31d3461cd6139a096aab
+    - path: .ai/test-ownership.yaml
+      sha256: ecdd9b7960a8340738a393804dcdd13f41c6c78810568458a393be2c20eabee1
+  independence_check: >-
+    A before/after sha256 sum over tests/unit/cvf105_* and .ai/test-ownership.yaml
+    produced an empty diff, and every independent hash equals the value pinned in
+    .ai/test-ownership.yaml (CVF-105 block). The developer did not modify any
+    independent test or the ownership manifest.
+
+blockers:
+  - id: CVF-105-IMPL-ASAN-UAF
+    severity: blocking-for-asan-gate
+    owner: test-engineer
+    status: open
+    summary: >-
+      Two hash-pinned independent CVF-105 cases fail under AddressSanitizer with
+      heap-use-after-free inside the test file itself. The developer cannot fix
+      them: the file is test-owner owned and must remain hash-pinned.
+    failing_cases:
+      - "ctest #384 / TEST_CASE 'CVF-105 B3: a valid pointer set with a missing root fails without publishing a context', tests/unit/cvf105_abi_validation_test.cpp:310-327"
+      - "ctest #391 / TEST_CASE 'CVF-105 B4: a short error message buffer reports the primary failure status and the required size', tests/unit/cvf105_abi_validation_test.cpp:230-261"
+    root_cause: >-
+      The helper options_for(const std::string& config_root, const std::string&
+      output_root) (cvf105_abi_validation_test.cpp:43-56) stores
+      options.config_root_utf8 = config_root.c_str() and
+      options.config_root_utf8_bytes = config_root.size(). Both failing cases call
+      it with the const char* literal kMissingRoot ("/nonexistent/cvf105-1007-
+      config-root", line 58), so a temporary std::string is materialized that is
+      destroyed at the end of the initializing full-expression (B3 line 317, B4
+      lines 238 and 250). cvf_initialize then reads options.config_root_utf8 in
+      validate_root_path -> core::validate_text -> string_view::find (memchr), a
+      heap-use-after-free. Every other case in the file passes a named std::string
+      test-local, so its pointer outlives the call and those cases do not trip ASan.
+    not_a_production_defect: >-
+      include/cvforwin/cvf_api.h:15-16 states "Input pointers and the log callback
+      must stay valid for the duration of the call that uses them; cvf_initialize
+      copies the values it retains." Production builds a string_view from the
+      caller's pointer and byte length and reads it synchronously, which is the
+      documented contract. Nothing production can do detects a pointer that was
+      freed by the caller before the call. src/core/abi_validation.cpp and
+      src/core/text.cpp are unchanged by CVF-105 (not in the change diff).
+    asan_evidence: >-
+      ASan: heap-use-after-free, READ of size 3 at the freed 37-byte kMissingRoot
+      buffer, in std::char_traits<char>::find <- core::validate_text
+      (src/core/text.cpp:78) <- validate_root_path (src/core/abi_validation.cpp:52)
+      <- validate_init_options (abi_validation.cpp:126) <- validate_options_struct
+      (src/c_api/cvf_entry_points.cpp:259) <- initialize_impl (:397) <-
+      cvf_initialize (:595). Allocation and free both at the test's
+      options_for(kMissingRoot, ...) statement.
+    required_action: >-
+      Test owner to bind the literal to a named std::string local (e.g.
+      const std::string missing_root = kMissingRoot;) in both cases so the buffer
+      lives across the cvf_initialize call, re-run wsl-gcc-asan ctest, and update
+      the pinned hash. No production change is warranted.
+    impact: >-
+      All other gates are green; only ctest --preset wsl-gcc-asan exits non-zero
+      (410/412). The non-sanitized wsl-gcc-debug suite is 412/412 green because
+      the freed 37-byte buffer is still readable there.
+
+notes:
+  - "No Windows MSVC build, UVC hardware run, or tests/hardware target is claimed; all evidence is portable WSL GCC 13.3.0 / Clang 18.1.3."
+  - "CMakeLists.txt wiring is additive only: one developer target registration inside if(CVFORWIN_BUILD_TESTS) nested in if(CVFORWIN_BUILD_TEST_BACKENDS); nothing added inside CVFORWIN_BUILD_HARDWARE_TESTS."
+  - "The independent cvf105_abi_pairs_test.cpp amendment (B3 whitespace case) and cvf004_config_test.cpp amendment (canonical lowercase) are green in wsl-gcc-debug."
+  - "tests/unit/test_cvf105_hardening.cpp content was not changed; only its build registration was added."

@@ -1,0 +1,121 @@
+schema_version: 1
+change_id: CVF-103
+program: cvforwin-hardening-1.1.0
+title: "Per-stream callback generation and stale callback rejection"
+risk: R2
+risk_justification: >-
+  Internal lifetime/synchronization correction in one Windows-only module; no interface or
+  schema change.
+intent: >-
+  Ensure a retired SourceReader can never complete a capture for its replacement: each
+  SourceReader gets a fresh callback and a monotonic stream generation, and late events from
+  retired generations are discarded.
+scope:
+  allowed_files:
+    production:
+      - src/camera/uvc_windows/**
+    developer_tests:
+      - tests/unit/** (files not matching cvf1*_* independent names)
+    windows_component_tests:
+      - tests/windows/uvc/**
+    build_files:
+      - CMakeLists.txt (build wiring only: register the CVF-103 targets; never source logic)
+    evidence_harness:
+      - .ai/validation/**
+  out_of_scope:
+    - include/cvforwin/**
+    - src/c_api/**
+    - src/camera/camera_backend.*
+    - src/runtime/**
+    - docs/**
+    - .ai/project-contract.yaml
+interface_v1:
+  authority_note: >-
+    ICameraBackend behavior is unchanged; only callback ownership and generation tagging change.
+  frozen_test_seam:
+    portable_logic_header: src/camera/uvc_windows/uvc_stream_generation.h
+    portable_logic_note: >-
+      Pure, dependency-free generation gate with no Windows, Media Foundation, or OpenCV
+      dependency, so it is unit-testable on the portable Linux host like uvc_frame_math.h.
+    portable_logic_declaration: |
+      namespace cvforwin::camera::uvc {
+
+      /* Monotonic stream generation gate. Generation 0 means "no active stream". */
+      class StreamGenerationGate {
+      public:
+          /* Starts a new stream: retires the current generation, returns the next
+           * strictly greater generation (starts at 1), and marks it active. */
+          std::uint64_t begin_stream() noexcept;
+
+          /* Retires the active generation; later events are stale until the next begin_stream. */
+          void retire() noexcept;
+
+          /* True only when `generation` equals the active generation and a stream is active. */
+          bool accepts(std::uint64_t generation) const noexcept;
+
+          /* Records an event that `accepts` rejected; returns the new stale count. */
+          std::uint64_t discard_stale(std::uint64_t generation) noexcept;
+
+          std::uint64_t active_generation() const noexcept;
+          std::uint64_t stale_events_discarded() const noexcept;
+      };
+
+      }  // namespace cvforwin::camera::uvc
+    backend_accessor:
+      header: src/camera/uvc_windows/uvc_backend.h
+      note: >-
+        UvcCameraBackend gains a Windows-only internal observability accessor; it is not part of
+        ICameraBackend or the public C ABI and changes no existing signature.
+      declaration: |
+        namespace cvforwin::camera {
+
+        struct UvcCallbackSnapshot {
+            std::uint64_t active_generation = 0;        /* 0 when no stream is active */
+            std::uint64_t callbacks_created = 0;        /* fresh callback per started stream */
+            std::uint64_t stale_events_discarded = 0;   /* completions rejected by generation */
+            bool stream_open = false;                   /* a SourceReader is currently open */
+        };
+
+        class UvcCameraBackend final : public ICameraBackend {
+        public:
+            /* ... existing declarations unchanged ... */
+
+            /* Windows-only internal diagnostics; never exposed through the C ABI. */
+            UvcCallbackSnapshot callback_snapshot() const noexcept;
+        };
+
+        }  // namespace cvforwin::camera
+    wiring_requirements:
+      - "Every started stream constructs a NEW callback object carrying the generation returned by StreamGenerationGate::begin_stream; one callback instance is never reused by a different SourceReader."
+      - "OnReadSample and OnFlush record their callback's immutable generation; a completion is only applied to the waiter when the gate accepts that generation."
+      - "Rejected events increment stale_events_discarded and must not set read_completed, read_status, read_flags, read_sample, or flush_completed."
+      - "Teardown retires the generation before releasing the reader/source/callback, so a late event cannot satisfy a replacement stream."
+      - "callbacks_created increments once per started stream; active_generation is monotonic across reconnect."
+  behavior:
+    - "Each successful start_stream creates a new callback object and a new monotonic generation number."
+    - "OnReadSample/OnFlush completion records its generation; the capture waiter accepts a completion only when the generation matches the active stream."
+    - "Teardown retires the active generation before releasing reader/source; a late event from a retired generation is discarded and cannot set read_completed for a new read."
+    - "Timeout/flush path: Flush is requested, the flush completion is bounded by the remaining deadline, late completion from the cancelled read is cleared, and a stream in an unknown state is marked for reconnect."
+    - "Callback objects are reference-counted with no dangling raw pointer to a destroyed backend."
+    - "No reuse of one callback instance across two SourceReaders."
+invariants:
+  - "Monotonic generation ordering; equality check on completion acceptance."
+  - "No stale callback may produce a frame, a false completion, or a false flush success."
+  - "At most one reconnect/recapture per inspection remains enforced by camera_contract."
+verification:
+  portable_wsl:
+    - "cmake --preset wsl-gcc-debug && cmake --build --preset wsl-gcc-debug --parallel"
+    - "ctest --preset wsl-gcc-debug --output-on-failure"
+    - "cmake --build --preset wsl-gcc-debug --target format-check"
+    - "cmake --preset wsl-clang-analysis && cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+  windows:
+    - "windows_uvc_component suite injects delayed retired-generation callbacks and asserts rejection, timeout, and reconnect ordering."
+acceptance_reference: >-
+  Contract FR-021, uvc_worker_lifecycle_v1, and the delayed-callback acceptance check.
+rollback: "Revert callback generation changes in src/camera/uvc_windows/uvc_backend.cpp."
+reporting:
+  developer_report: .ai/reports/CVF-103-implementation.yaml
+  test_red_report: .ai/reports/CVF-103-test-red.yaml
+  test_verify_report: .ai/reports/CVF-103-test-verify.yaml
+  review_report: .ai/reviews/CVF-103.yaml
+  quality_report: .ai/reports/CVF-103-quality.yaml

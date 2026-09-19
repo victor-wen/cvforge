@@ -1,0 +1,294 @@
+schema_version: 1
+change_id: CVF-101
+phase: AUTHOR
+author: test-engineer
+recorded_at: 2026-09-18
+host: Linux (WSL); Windows suite authored-but-not-executed on this host
+
+summary: >-
+  Independent black-box component tests were authored for the frozen Windows UVC
+  2D-buffer seam before the seam header or its implementation exists. RED is
+  honest and structural: the frozen header
+  src/camera/uvc_windows/uvc_frame_convert.h is absent, so the test translation
+  unit cannot compile against the real include tree (fatal error, exit 1). No
+  Windows execution output is fabricated or claimed. The portable canonical
+  commands stay green and are explicitly not evidence for this Windows-only
+  change.
+
+authored_files:
+  - path: tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp
+    sha256: 1c006a1d11b89b261943ba553ebfe85a6f74f877a17988e7f0aa25b61ded1595
+    windows_only: true
+    guard: "#if defined(_WIN32)"
+    includes_production_surface: "src/camera/uvc_windows/uvc_frame_convert.h (frozen seam only)"
+    synthetic_only: true
+  - path: CMakeLists.txt
+    change: "added WIN32 + CVFORWIN_BUILD_TESTS + CVFORWIN_BUILD_TEST_BACKENDS gated target cvf101_windows_uvc_tests, registered via catch_discover_tests (add_test)"
+    sha256_after_change: 82b51830edf5e3ea52619c6065170b574f52bca81563e6e0d35382b585846c6d
+    lines_added: 36
+    lines_removed: 0
+
+seam_selection:
+  header: src/camera/uvc_windows/uvc_frame_convert.h
+  declaration_used: "cvforwin::camera::uvc::decode_locked_buffer_to_bgr8(const Locked2DBufferView&) -> core::Result<cv::Mat>"
+  note: >-
+    The header is frozen by the CVF-101 change contract
+    (.ai/changes/CVF-101.yaml, interface_v1.frozen_test_seam). The test file
+    includes that header only; no production .cpp was read at any point.
+
+cases:
+  acceptance:
+    - id: B1
+      name: "CVF-101 B1: a top-down buffer returns the visual top row first and the bottom row last"
+      observable: "pitch > 0; row0 pattern A (rgb 10,20,30), row2 pattern B (rgb 200,150,100); output row0==A, row2==B, BGR8 CV_8UC3 6x3"
+    - id: B2
+      name: "CVF-101 B2: a bottom-up buffer (pitch < 0) yields the same visual orientation with no double flip"
+      observable: "pitch = -18; same visual content; output row0==A, row2==B (no inversion)"
+    - id: B3
+      name: "CVF-101 B3: RGB24, RGB32, and YUY2 all preserve top/bottom orientation for both pitch signs"
+      observable: "6 format/sign combinations; gray ramp 0/128/255; output row0 black, row2 white for each"
+    - id: B4
+      name: "CVF-101 B4: a padded row is decoded by pitch and pad bytes never appear in the output"
+      observable: "rgb24 width 5 (15 packed bytes), pitch 20 (5 pad bytes 0xEE); rows correct by pitch and no output channel equals 0xEE"
+    - id: B5
+      name: "CVF-101 B5: an accessible length too short for every addressed row fails with camera_io/capture_failed"
+      observable: "top-down one-byte-short, first-row-only, and bottom-up truncated locks; failure status camera_io, code capture_failed, no value"
+    - id: B6
+      name: "CVF-101 B6: dimension and pitch arithmetic that would overflow fails cleanly"
+      observable: "height 0xFFFFFFFF; width 0xFFFFFFF0; pitch+dimension product overflow; camera_io/capture_failed, no crash, no read"
+  boundary:
+    - name: "1x1 packed image with positive and negative pitch (rgb24 and rgb32)"
+    - name: "height-1 and width-1 edges (rgb24, rgb32; yuy2 minimum even width 2)"
+    - name: "accessible length exactly the minimum extent accepted vs one byte short rejected (rgb24 4x3 pitch 12; rgb32 4x2 pitch 16)"
+    - name: "padded row where width is not a multiple of 4 (rgb24 width 5, pitch 20)"
+  negative:
+    - name: "null base pointer with nonzero extent and dimensions -> camera_io/capture_failed, no crash"
+    - name: "zero width with nonzero height; zero height with nonzero width -> camera_io/capture_failed, no crash"
+    - name: "pitch magnitude smaller than one packed row (pitch 11 and -11 for a 12-byte rgb24 row) -> camera_io/capture_failed"
+    - name: "zero pitch with more than one row -> camera_io/capture_failed"
+
+expected_red:
+  reason: >-
+    The frozen seam header and decode_locked_buffer_to_bgr8 do not exist yet, so
+    the test TU cannot compile against the real include tree. This is the honest
+    RED for a pre-implementation author phase.
+  windows_suite_execution: "authored-but-not-executed on this Linux host; not claimed as passing"
+  portable_suite: "unaffected: the TU is empty off Windows and the target is not configured on Linux"
+
+commands:
+  - command: "g++ -D_WIN32 -std=c++20 -Wall -Wextra -Werror -fsyntax-only -I<src> -I<include> tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp"
+    exit_code: 1
+    result: RED
+    observed: |
+      tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp:28:10: fatal error: camera/uvc_windows/uvc_frame_convert.h: No such file or directory
+         28 | #include "camera/uvc_windows/uvc_frame_convert.h"
+            |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      compilation terminated.
+    interpretation: "missing frozen seam header; the test cannot link against an unimplemented seam"
+  - command: "clang-format --style=file:<repo>/.clang-format --dry-run --Werror tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp"
+    exit_code: 0
+    result: PASS
+    observed: "no formatting violations; file is format-clean"
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    result: GREEN
+    observed: "Configuring done; Generating done; build files written to build/wsl-gcc-debug"
+    note: "portable; not evidence for the Windows-only change"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    result: GREEN
+    observed: "ninja: no work to do (the Windows target is gated out on Linux)"
+    note: "portable; not evidence for the Windows-only change"
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    result: GREEN
+    observed: "100% tests passed, 0 tests failed out of 263"
+    note: "portable; not evidence for the Windows-only change"
+
+supporting_validation:
+  - command: "g++ -D_WIN32 -std=c++20 -Wall -Wextra -Werror -fsyntax-only against a scratch /tmp stub of the frozen seam header"
+    exit_code: 0
+    result: PASS
+    note: >-
+      Confirms the authored test code itself is syntactically valid and
+      warning-clean against the declared seam shape. The stub exists only under
+      /tmp for this check; it is not the production header and is not a
+      substitute for the real RED.
+  - command: "g++ -std=c++20 -Wall -Wextra -Werror -fsyntax-only (portable, no -D_WIN32)"
+    exit_code: 0
+    result: PASS
+    note: "empty TU off Windows; portable build unaffected"
+
+ownership:
+  manifest: .ai/test-ownership.yaml
+  manifest_sha256_after_amendment: d7f345e3c193933a70dc401d581c3e70ed28a0873297f78129b34955de5bcb6f
+  amendment: "CVF-101 section appended"
+  existing_sections_removed_lines: 0
+  files_checked:
+    - path: tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp
+      sha256: 1c006a1d11b89b261943ba553ebfe85a6f74f877a17988e7f0aa25b61ded1595
+  mismatches: []
+
+blockers: []
+notes:
+  - "Windows execution result is deferred to the windows-tests-quality workflow / windows-msvc-tests preset; no output from that run is claimed here."
+  - "Author harness scripts live under .ai/validation/cvf101-author-*.sh and are not production or test artifacts."
+
+correction_2026_09_18:
+  reason: >-
+    A semantic defect in the authored test was found and confirmed against the
+    change contract (.ai/changes/CVF-101.yaml) and the pre-existing production
+    behavior: the test assumed NativePixelFormat rgb24/rgb32 mean R,G,B byte
+    order in memory. That is wrong. The contract fixes Media Foundation native
+    memory layouts: rgb24 (D3DFMT_R8G8B8) and rgb32 (X8R8G8B8) store B,G,R,
+    argb32 stores B,G,R,A, and the seam always outputs BGR8. YUV formats
+    (yuy2/uyvy/nv12/i420/yv12) use U=V=128 as neutral with no fixed
+    limited-versus-full range in the contract.
+  changes:
+    - id: C1
+      description: >-
+        fill_rgb24_row now writes native bytes (b, g, r), i.e. byte0=blue,
+        byte1=green, byte2=red, honoring D3DFMT_R8G8B8 memory order, so a byte
+        sequence [b,g,r] yields BGR8 (b,g,r) with no channel swap. SyntheticLock
+        and every fill_rgb24 call site were re-parameterized to (b,g,r) to match.
+    - id: C2
+      description: >-
+        Added fill_bgr32_row and SyntheticLock::fill_bgr32 for 32-bit packed
+        formats, writing native bytes (b,g,r,a) so rgb32 and argb32 follow their
+        documented memory order.
+    - id: C3
+      description: >-
+        Added the dedicated regression guard TEST_CASE "CVF-101 B3: packed
+        B,G,R native memory decodes to the identical BGR8 channel order"
+        [cvf-101][B3][channel-order] with 4 SECTIONs: rgb24 2x1 top-down, rgb24
+        2x2 bottom-up, rgb32 2x1 top-down+bottom-up, and argb32 2x1
+        top-down+bottom-up. Each uses DISTINCT B,G,R values (kBgrA=(30,20,10),
+        kBgrMid=(60,50,40), kBgrB=(100,150,200)) and asserts the exact BGR8
+        triple, so a channel-swapping decoder fails.
+    - id: C4
+      description: >-
+        The YUY2 orientation cases assert only structural neutrality (equal B, G,
+        R channels for U=V=128) and monotonic ordering (dark row before bright
+        row); no assertion pins a specific limited-versus-full YUV range. The
+        boundary yuy2 minimum-width case likewise asserts neutrality only.
+    - id: C5
+      description: >-
+        All orientation (B1, B2, B3 orientation), padding (B4), boundary, bounds
+        (B5), overflow (B6), and negative cases are retained. The only relaxed
+        expectations are the YUY2 luminance value pins described in C4; every
+        orientation, channel-order, structural-neutrality, padding, bounds, and
+        negative assertion remains.
+  updated_file:
+    path: tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp
+    previous_sha256: 1c006a1d11b89b261943ba553ebfe85a6f74f877a17988e7f0aa25b61ded1595
+    new_sha256: 5db636e6b22685de8097cfd82953228874c3476766bf46eedcd18969d1fda6e1
+  expected_red:
+    reason: >-
+      RED remains honest and structural: the frozen seam header / correct
+      implementation is absent, so on this Linux host the Windows TU cannot be
+      compiled against the real include tree and the Windows suite is not
+      executed. The corrected channel-order expectations are RED against any
+      implementation that does not honor B,G,R native memory order.
+    windows_suite_execution: "authored-but-not-executed on this Linux host; not claimed as passing"
+  commands:
+    - command: "clang-format --style=file:<repo>/.clang-format --dry-run --Werror tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp"
+      exit_code: 0
+      result: PASS
+      observed: "clang-format-exit=0; corrected file is format-clean"
+    - command: "sha256sum tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp"
+      exit_code: 0
+      result: PASS
+      observed: "5db636e6b22685de8097cfd82953228874c3476766bf46eedcd18969d1fda6e1  tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp"
+  ownership:
+    manifest: .ai/test-ownership.yaml
+    updated_section: CVF-101
+    previous_manifest_sha256: d7f345e3c193933a70dc401d581c3e70ed28a0873297f78129b34955de5bcb6f
+    new_manifest_sha256: d57dc053c3a910d6ff135d93d1a2aaf32f0d7489729c2280a627cab9ba31bb44
+    previous_file_sha256: 1c006a1d11b89b261943ba553ebfe85a6f74f877a17988e7f0aa25b61ded1595
+    new_file_sha256: 5db636e6b22685de8097cfd82953228874c3476766bf46eedcd18969d1fda6e1
+    other_sections_preserved: true
+    diff_hunks_outside_cvf101: 0
+  no_assertion_weakened: >-
+    No orientation, channel-order, structural-neutrality, padding, bounds, or
+    negative assertion was removed, skipped, disabled, or weakened. The only
+    expectations changed are the YUY2 exact-luma value pins, which the brief
+    requires replacing with range-independent assertions (C2/C4): exact
+    neutral-gray and monotonic ordering remain asserted, so coverage is not
+    reduced.
+  supporting_checks:
+    - command: "g++ -D_WIN32 -std=c++20 -Wall -Wextra -Werror -fsyntax-only against a scratch /tmp stub of the frozen seam header"
+      exit_code: 0
+      result: PASS
+      note: "corrected test code is syntactically valid and warning-clean against the declared seam shape"
+    - command: "g++ -std=c++20 -Wall -Wextra -Werror -fsyntax-only (portable, no -D_WIN32)"
+      exit_code: 0
+      result: PASS
+      note: "empty TU off Windows; portable build unaffected"
+
+correction_2_2026_09_18:
+  reason: >-
+    An implementation-side verification proved the corrected test was internally
+    contradictory: it could not pass with ANY decoder. The first correction
+    re-parameterized fill_rgb24_row/SyntheticLock::fill_rgb24 to (blue, green,
+    red) writing (b,g,r) memory and added an identity channel-order case, but
+    four call sites still passed the old R,G,B-style literals while expecting the
+    kBgr* constants. Specifically B1 (~line 344) and B2 (~line 365) called
+    fill_rgb24(0u, 10u, 20u, 30u) / (1u, 40u, 50u, 60u) / (2u, 200u, 150u,
+    100u) and expected kBgrA(30,20,10) / kBgrMid(60,50,40) / kBgrB(100,150,200);
+    under B,G,R identity semantics those calls produce (10,20,30) etc., so B1/B2
+    failed. The two rgb24 1x1 boundary SECTIONs (~line 554/564) had the same
+    stale argument order. This was a test defect, not an implementation defect:
+    the change contract's native_memory_semantics and pre-existing production
+    behavior both define rgb24/rgb32 as B,G,R memory order, and the
+    implementation conforms. Only the test owner may change the test.
+  changes:
+    - id: D1
+      description: >-
+        B1 and B2 now pass the expected-constant channel values in (blue, green,
+        red) order: fill_rgb24(0u, kBgrA[0], kBgrA[1], kBgrA[2]),
+        fill_rgb24(1u, kBgrMid[0], kBgrMid[1], kBgrMid[2]),
+        fill_rgb24(2u, kBgrB[0], kBgrB[1], kBgrB[2]). Because the constants are
+        BGR8 triples and the packer writes (b,g,r) memory, the arguments and the
+        expected BGR constants now agree byte-for-byte.
+    - id: D2
+      description: >-
+        Both rgb24 1x1 boundary SECTIONs (top-down pitch 3 and bottom-up pitch
+        -3) now call fill_rgb24(0u, kBgrA[0], kBgrA[1], kBgrA[2]) instead of the
+        stale (10u, 20u, 30u).
+    - id: D3
+      description: >-
+        Intent preserved: three visually distinct asymmetric rows proving
+        TOP/BOTTOM orientation under both pitch signs, plus the 1x1 edges. The
+        distinct-RGB channel-order case (identity assertion) is unchanged in
+        intent. All other formatting remains (blue, green, red).
+  updated_file:
+    path: tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp
+    previous_sha256: 5db636e6b22685de8097cfd82953228874c3476766bf46eedcd18969d1fda6e1
+    new_sha256: 4fb03ee44b0c0fb33c5d43cc52aca5488775bb2fc3c7d91e083580629110e08c
+  commands:
+    - command: "clang-format --style=file:<repo>/.clang-format --dry-run --Werror tests/windows/uvc/cvf101_uvc_frame_convert_test.cpp"
+      exit_code: 0
+      result: PASS
+      observed: "clang-format-exit=0; corrected file is format-clean"
+    - command: "g++ -D_WIN32 -std=c++20 -Wall -Wextra -Werror -g -O0 against real src/camera/uvc_windows/uvc_frame_convert.cpp + src/core/error.cpp + real OpenCV include/lib, linked with Catch2, then executed"
+      exit_code: 0
+      result: GREEN
+      observed: >-
+        compiled and linked exit 0; the built Catch2 host ran
+        "All tests passed (402 assertions in 12 test cases)"; run-exit=0.
+        No failures. This is the Linux-host mirror of the implementation
+        session's documented method; Windows/UVC execution evidence remains
+        deferred to windows-2022 CI.
+  ownership:
+    manifest: .ai/test-ownership.yaml
+    updated_section: CVF-101
+    previous_file_sha256: 5db636e6b22685de8097cfd82953228874c3476766bf46eedcd18969d1fda6e1
+    new_file_sha256: 4fb03ee44b0c0fb33c5d43cc52aca5488775bb2fc3c7d91e083580629110e08c
+    new_manifest_sha256: 60cc8aed0c5994987e407578e510d49f5ab114c06d4f84cb927a5459f35307c5
+    other_sections_preserved: true
+  no_assertion_weakened: >-
+    No assertion, case, or expectation was removed, skipped, disabled, or
+    weakened. The correction only makes four call-site arguments consistent with
+    their already-present expected BGR constants, which fixes the contradiction
+    rather than relaxing any expectation.
+

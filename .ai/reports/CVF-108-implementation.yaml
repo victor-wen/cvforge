@@ -1,0 +1,183 @@
+schema_version: 1
+change_id: CVF-108
+phase: IMPLEMENT
+title: "Release 1.1.0 version, package, CI artifact, and documentation synchronization"
+author: developer
+recorded_at: 2026-09-19
+contract: .ai/changes/CVF-108.yaml
+brief: .ai/test-briefs/CVF-108.yaml
+risk: R2
+result: COMPLETE
+
+summary: >-
+  Synchronized release 1.1.0 across the CMake project version, the vcpkg
+  dependency manifest, the CI artifact/package-path names, the documentation
+  set, and the license/notice material, and documented the background artifact
+  retention behavior. The public C ABI is untouched: version stays 1 and the
+  export set stays exactly five symbols. Registered the independent
+  test-owner test and one developer-owned regression test in the root
+  CMakeLists.txt and ran the canonical portable WSL verification.
+
+files_changed:
+  - path: CMakeLists.txt
+    change: >-
+      project VERSION 1.0.0 -> 1.1.0; registered cvf108_release_metadata_tests
+      (independent, test-owner owned source) and
+      cvf108_release_naming_developer_tests inside the existing
+      if(CVFORWIN_BUILD_TESTS) block, unconditionally (no WIN32 / hardware /
+      test-backend gate), each linking only Catch2::Catch2WithMain with the
+      CVF108_REPO_ROOT definition, C++20 properties,
+      cvforwin_apply_test_compile_options, cvforwin_apply_sanitizers, and
+      catch_discover_tests.
+    sha256_before: 273b750b2126b957f04a92deb4fb4267fb367663d3074324866a2eb01b56e9c4
+    sha256_after: 36ec61ad0d762a51353fc92220d74439234700add5e2128eb960b8700b0421a7
+  - path: vcpkg.json
+    change: version-string 1.0.0 -> 1.1.0
+    sha256_before: 6c65ccecb1c2a4a5349baa97a57658a9b4cd4fa49426f8cbc64755af0f5622ef
+    sha256_after: dcd77945c32a749e9f6186b3a1356dbe5c0908d465c5fefc1656b30697f6e6e7
+  - path: .github/workflows/windows.yml
+    change: >-
+      five cvforwin-1.0.0 names -> cvforwin-1.1.0 (package artifact, package
+      ZIP path, symbols artifact, symbols ZIP path, and the clean-consumer
+      package root).
+    sha256_before: ca4e2b273cfead0102054a26e469279035bc6514dd7bc3a71f4c6c2ef601451f
+    sha256_after: 46a92504c3018479b0957df40cb4b54421a48f201988c742d8cd8be4a455e1f0
+  - path: docs/development.md
+    change: >-
+      nine current cvforwin-1.0.0 package/artifact references -> cvforwin-1.1.0
+      (section 4 table, section 11 staging/archive bullets, section 11 CI job
+      table, section 13 troubleshooting); documented that retention runs
+      asynchronously on a dedicated background maintenance worker, coalesced by
+      a time trigger and a committed-capture trigger, and never blocks the
+      inspection caller.
+    sha256_before: 981695fc9695c5bf3ee655076fc764cca7bfb9c0ec56cfb76ee043d4e1b51855
+    sha256_after: 5ac23af770be74eb1e879abba83804576dea0b3d296d539c5d580f820ac141d5
+  - path: docs/packaging.md
+    change: five current cvforwin-1.0.0 package/archive path references -> cvforwin-1.1.0
+    sha256_before: 1a0072c4d0c115a6a366db62d5c19af72fe8791b11b610c1beaab43bbae28956
+    sha256_after: 247e7f444f9e7d796f77652fdb4fb85e269b1fbe1ab8ff77f6fdb5f898ba9aeb
+  - path: LICENSES/README.md
+    change: 'current-release claim "the cvforwin 1.0.0 release" -> 1.1.0'
+    sha256_before: 8bf864fff459feeb85470af30401afc283ba899c653308ceda7361fca62ec28c
+    sha256_after: f480f0a7ebc45bb99dc02fe3df406d535056ecf241e52f8e8094c47be224670f
+  - path: tests/unit/test_cvf108_release_naming_developer.cpp
+    change: >-
+      NEW developer-owned regression test (5 test cases, 38 assertions). Pins
+      that the staged package directory (cvforwin-@PROJECT_VERSION@), the
+      package archive (${cvf_package_name}.zip), and the symbols archive
+      (cvforwin-${PROJECT_VERSION}-symbols.zip) all derive from the single
+      declared project version; that no cmake/CvfPackage* body hardcodes a
+      cvforwin-<x.y.z> release name; that every CI cvforwin name matches the
+      declared version; that the public export allowlist is exactly five and
+      the header ABI constant stays 1; with a synthetic boundary case proving
+      the hardcoded-name detector fires on a literal and ignores a version
+      macro. Disjoint from the independent test file.
+    sha256_before: null
+    sha256_after: 98e8cc12e8b266b2d78f170f304f9e8f3e28e8cd60646ae6bfc60caec174412e
+
+files_unchanged_but_verified:
+  - path: tests/unit/cvf108_release_metadata_test.cpp
+    note: test-owner file; only registered in CMakeLists.txt, never modified
+    sha256: 03f07e571c43d59346d200cf4662c5f19de2ee4dabd70a968ebb32730286d782
+  - path: cmake/CvfPackage.cmake.in
+    note: >-
+      the single-source packaging body; temporarily mutated during a red-green
+      demonstration and restored byte-for-byte (hash matches before and after)
+    sha256: 8c099eb145702f5a324e8a77e81420f9c815392d9d266cb7ba328a09c7659e6a
+  - path: cmake/CvfPackage.cmake
+    note: already derives the symbols archive from ${PROJECT_VERSION}; no edit needed
+  - path: CMakePresets.json
+    note: already carries no product-version token; no edit needed
+  - path: include/cvforwin/cvf_api.h
+    note: "untouched; ABI version constant stays CVF_ABI_VERSION_V1 1u"
+  - path: src/c_api/cvforwin.def
+    note: "untouched; exactly five exports"
+  - path: .ai/test-ownership.yaml
+    note: test-owner manifest; not modified
+
+untouched_confirmation:
+  public_header: >-
+    include/cvforwin/cvf_api.h is not in git status; CVF_ABI_VERSION_V1 is
+    still `#define CVF_ABI_VERSION_V1 1u` (independent test OB-4 and the
+    developer test both assert it).
+  abi_version: 1
+  export_set:
+    count: 5
+    symbols:
+      - cvf_get_abi_version
+      - cvf_initialize
+      - cvf_inspect
+      - cvf_reload_recipes
+      - cvf_shutdown
+  source_tree: "git status --porcelain -- src include is empty (untouched)"
+  project_contract: ".ai/project-contract.yaml not modified"
+
+commands:
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    summary: "Configured and generated; GNU 13.3.0, Debug; vcpkg install done"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    summary: "Built cvf108_release_metadata_tests and cvf108_release_naming_developer_tests"
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    summary: "100% tests passed, 0 failed out of 479 (baseline before additions: 458)"
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    summary: "format-check passed: 127 file(s) conform to .clang-format"
+  - command: "cmake --build --preset wsl-gcc-debug --target abi-check"
+    exit_code: 0
+    summary: "exactly 5 export(s): cvf_get_abi_version;cvf_initialize;cvf_inspect;cvf_reload_recipes;cvf_shutdown"
+
+test_counts:
+  baseline_before_additions: 458
+  added_independent_cvf108_cases: 16
+  added_developer_cvf108_cases: 5
+  total_after: 479
+  failures: 0
+
+independent_test_status:
+  path: tests/unit/cvf108_release_metadata_test.cpp
+  registered_target: cvf108_release_metadata_tests
+  result: PASS
+  detail: "16 test cases, 94 assertions, all passed; all 8 previously-RED assertions now GREEN"
+  direct_run: "All tests passed (94 assertions in 16 test cases)"
+
+developer_test_status:
+  path: tests/unit/test_cvf108_release_naming_developer.cpp
+  registered_target: cvf108_release_naming_developer_tests
+  result: PASS
+  detail: "5 test cases, 38 assertions, all passed"
+  red_green_proof: >-
+    Temporarily hardcoded cvforwin-1.0.0 into cmake/CvfPackage.cmake.in's
+    cvf_package_name; the developer test failed (exit 42, 2 failed assertions
+    naming CvfPackage.cmake.in hardcoded release names: [cvforwin-1.0.0]).
+    Restored the file to its exact sha256; the test then passed (exit 0).
+    This proves the packaging-path guard is non-vacuous.
+
+hashes_of_record:
+  CMakeLists_txt: 36ec61ad0d762a51353fc92220d74439234700add5e2128eb960b8700b0421a7
+  test_cvf108_release_naming_developer_cpp: 98e8cc12e8b266b2d78f170f304f9e8f3e28e8cd60646ae6bfc60caec174412e
+
+scope_compliance:
+  allowed_files_only: true
+  modified_paths:
+    - CMakeLists.txt
+    - vcpkg.json
+    - .github/workflows/windows.yml
+    - docs/development.md
+    - docs/packaging.md
+    - LICENSES/README.md
+    - tests/unit/test_cvf108_release_naming_developer.cpp
+  forbidden_paths_touched: []
+  historical_mentions_untouched: >-
+    .ai/archive/** and old release reports retain their 1.0.0 historical
+    references unchanged.
+
+deviations: []
+open_questions:
+  - >-
+    OB-2/OB-3 installed-package behavior and the Windows clean-consumer run
+    remain deferred to a Windows package build, exactly as the test-red report
+    records; this change only makes the source-side single-source derivation
+    consistent and does not claim the Windows package run.

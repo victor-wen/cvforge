@@ -1,0 +1,64 @@
+schema_version: 1
+change_id: CVF-104
+program: cvforwin-hardening-1.1.0
+target: "End-to-end deadline, post-frame finalization, deadline-bounded artifact save, background retention"
+in_scope:
+  - One absolute deadline covering queue, capture, algorithm, final serialization, required persistence, and return.
+  - fail_or_error saving the latest valid frame after a technical error.
+  - Optional versus required artifact behavior and error precedence.
+  - Retention never running synchronously on the inspection path.
+out_of_scope:
+  - Pixel conversion, COM/Media Foundation lifetime, VID/PID, ABI pointer rules, JSON size bound, template matching.
+constraints:
+  - "Deterministic and hardware-free: use the existing synthetic/file camera override."
+  - "Tests drive the injected fault seams and public behavior through frozen headers; they must not read production .cpp files."
+  - "Tests must not weaken or delete existing hash-pinned CVF-005/CVF-006 cases."
+  - "Frozen seams defined by the change contract: (a) src/runtime/finalization.h - SaveRequirement save_requirement_for(save_policy, required), struct FinalizeRequest, struct FinalizeDecision, FinalizeDecision finalize_after_frame(request, warn_base); (b) src/artifacts/save_worker.h - SaveJob, SaveState, SaveOutcome, class ArtifactSink (write_temp/commit/discard), class SaveWorker (try_submit/wait_until/cancel_pending/drain/executing/queued); (c) src/artifacts/retention_scheduler.h - RetentionScheduler (on_capture_committed/due/on_retention_run/committed_captures). RuntimeOptions gains an optional artifact_sink injection point (default null)."
+interface_reference:
+  - "cvforwin::runtime::Context, RuntimeOptions (with artifact_sink), InspectionRequest, InspectionOutcome, TimeoutMs, FinalizeRequest/FinalizeDecision/finalize_after_frame, save_requirement_for"
+  - "cvforwin::artifacts::CaptureStore, CaptureSaveRequest, SaveDecision/decide_capture_save, SaveJob, SaveState, SaveOutcome, ArtifactSink, SaveWorker, RetentionScheduler"
+  - "cvforwin::core::{Deadline, Status, Verdict, ErrorCode, WarningFlags}"
+observable_behaviors:
+  - id: B1
+    behavior: "A PASS with save_policy never returns no image_path, a warning-free OK result, and does not run retention."
+  - id: B2
+    behavior: "A FAIL with fail_or_error returns OK execution with a committed image_path inside the managed captures root."
+  - id: B3
+    behavior: "An algorithm failure after a valid frame with fail_or_error returns the technical error status/NOT_EVALUATED and still reports a committed diagnostic image_path when the save completed before the deadline."
+  - id: B4
+    behavior: "A serialization failure after a valid frame behaves like B3 (fail_or_error sees execution failed)."
+  - id: B5
+    behavior: "An optional save that cannot complete before the deadline leaves a valid OK+PASS/FAIL verdict intact, sets the image-save warning bit, and publishes no image_path."
+  - id: B6
+    behavior: "A required save that cannot complete before the deadline returns TIMEOUT with NOT_EVALUATED."
+  - id: B7
+    behavior: "A required save failure before the deadline returns REQUIRED_ARTIFACT_ERROR with NOT_EVALUATED."
+  - id: B8
+    behavior: "elapsed_ms/return happen after finalization and no retention directory scan, sort, or delete occurs before inspect returns."
+  - id: B9
+    behavior: "Repeated inspections accumulate saved files without unbounded queue growth; retention eventually removes oldest files per age/size policy without being awaited by inspect."
+boundary_cases:
+  - "Deadline already expired before capture; exactly at expiry during save; save completes just before expiry."
+  - "No valid frame acquired (capture failure) -> no fail_or_error save attempt."
+  - "Queue saturation (one executing + one queued) -> optional save degrades to warning; required save waits to deadline then TIMEOUT."
+negative_cases:
+  - "Cancelled optional save leaves no partial/final file and no image_path."
+  - "Shutdown during an in-flight save does not deadlock and leaves no temporary file."
+acceptance_criteria:
+  - "Portable debug+asan, format, and static analysis pass; artifact/deadline tests recorded with real command output."
+allowed_context:
+  - .ai/project-contract.yaml
+  - .ai/changes/CVF-104.yaml
+  - .ai/test-briefs/CVF-104.yaml
+  - tests/unit/**
+  - "frozen headers (may #include, must not open .cpp files): src/runtime/context.h, src/artifacts/capture_store.h, src/inspection/algorithm.h, src/camera/camera_backend.h, src/core/**"
+forbidden_context:
+  - "any src/** .cpp implementation file"
+  - .ai/changes/** (other than CVF-104.yaml), .ai/reports/**, .ai/reviews/**
+  - "any diff, changed-file list, developer note, or root-cause description"
+allowed_test_paths:
+  - tests/unit/**
+ownership_manifest: .ai/test-ownership.yaml
+evidence:
+  red_report: .ai/reports/CVF-104-test-red.yaml
+  verify_report: .ai/reports/CVF-104-test-verify.yaml

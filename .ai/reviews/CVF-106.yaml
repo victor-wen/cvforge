@@ -1,0 +1,240 @@
+change_id: CVF-106
+verdict: PASS_WITH_FINDINGS
+verdict_classification: APPROVE
+blocking_count: 0
+
+review_note: >-
+  Read-only source review of the completed CVF-106 package. Every citation below was
+  verified in the working tree this session at file:line; the .ai/validation logs were
+  read only as corroborating pointers, not as proof. No shell was available, so on-disk
+  digests, the changed-file scope audit, and the final ctest/format/static-analysis/
+  abi-check reruns remain with the deterministic quality gate. The shipped example PNG
+  cannot be rendered to this model; its decodability and asymmetric-match behavior are
+  judged from the catalog/prepare path and the developer test that decodes the shipped
+  asset and matches it at a known location.
+
+reviewed_artifacts:
+  - .ai/changes/CVF-106.yaml
+  - .ai/test-briefs/CVF-106.yaml
+  - .ai/project-contract.yaml
+  - .ai/reports/CVF-106-implementation.yaml
+  - .ai/reports/CVF-106-test-red.yaml
+  - .ai/reports/CVF-106-test-verify.yaml
+  - .ai/test-ownership.yaml
+  - .ai/workflow-state.yaml
+  - .ai/validation/cvf106-amendment-ctest.log
+  - .ai/validation/logs/cvf003-fr029-amendment-summary.txt
+  - src/inspection/algorithm.h
+  - src/inspection/algorithm.cpp
+  - src/inspection/registry.h
+  - src/inspection/registry.cpp
+  - src/recipes/recipe.h
+  - src/recipes/recipe.cpp
+  - src/recipes/recipe_catalog.h
+  - src/recipes/recipe_catalog.cpp
+  - src/runtime/context.h
+  - src/runtime/context.cpp
+  - src/camera/camera_backend.cpp
+  - src/algorithms/template_match.h
+  - src/algorithms/template_match.cpp
+  - src/algorithms/compiled_algorithms.cpp
+  - src/algorithms/example_threshold.cpp
+  - config/examples/recipes/template.match.json
+  - config/examples/assets/tmpl.asymmetric.png
+  - LICENSES/README.md
+  - docs/development.md
+  - tests/unit/cvf106_test.helpers.h
+  - tests/unit/cvf106_template_match_test.cpp
+  - tests/unit/cvf106_prepare_test.cpp
+  - tests/unit/cvf106_lifecycle_test.cpp
+  - tests/unit/test_template_match_developer.cpp
+  - tests/unit/cvf003_registry_test.cpp
+  - CMakeLists.txt
+
+summary: >-
+  APPROVE (zero blocking findings). The additive seam is intact: the pre-existing
+  key()/validate_parameters()/inspect() pure virtuals (src/inspection/algorithm.h:106,109,115)
+  and the pre-existing const dispatch overload (registry.h:54; registry.cpp:94-132) are
+  unchanged, the new prepare() has a correct default (algorithm.cpp:38-52), and the new
+  prepared dispatch (registry.h:62; registry.cpp:134-172) mirrors the old containment rules.
+  The recipe asset lifecycle enforces the documented bounds and parses bytes plus calls
+  prepare() for every recipe before the single atomic publish, with the previous snapshot
+  kept alive for in-flight inspection (recipe.cpp:24-26,215-275,359-363;
+  recipe_catalog.cpp:25-26,44-99,147-190; context.cpp:383,427-435,465-478). template.match
+  is correct on the inspected paths: single prepare-time imdecode+grayscale, bounded
+  template checks, TM_CCOEFF_NORMED, global-frame coordinates, score>=threshold PASS else
+  deterministic template_mismatch FAIL, and deadline checks before preprocessing, before
+  matchTemplate, and before return (template_match.cpp:139-160,193-248,272-306). The
+  runtime override change is gated on an injected camera_override only; without it
+  select_descriptor() calls camera::resolve_identity(candidates, selector) exactly as
+  before, so production selection is unchanged (context.cpp:253-265,745-765). No public
+  header/symbol change (5 exports), out-of-scope modules show no CVF-106 content, targets
+  are correctly gated, both test sets are meaningful, the test-owner amendments did not
+  weaken intent, and the CVF-003 registry assertion now pins the exact set. Five
+  non-blocking findings are recorded; none is acceptance-blocking.
+
+judgments:
+  - >-
+    1. Additive seam integrity: SATISFIED — key()/validate_parameters()/inspect() are still the
+    only required pure virtuals (src/inspection/algorithm.h:106,109,115); the legacy
+    dispatch(const IInspectionAlgorithm&, const AlgorithmRequest&) declaration (registry.h:54)
+    and body (registry.cpp:94-132) are semantically unchanged; prepare() is virtual with a
+    default (algorithm.h:124-125). The default validates parameters, rejects a non-empty
+    bundle for asset-less algorithms with config_error/algorithm_parameters_invalid, and
+    returns a forwarding prepared object (algorithm.cpp:38-52), so example.threshold still
+    loads, validates and inspects unchanged through the new lifecycle
+    (example_threshold.cpp:109-174; cvf106_lifecycle_test.cpp:243-303). CVF-003 StubAlgorithm
+    compilation is preserved (cvf003_registry_test.cpp:154-200 passes in the 447/447 logs).
+  - >-
+    2. Preparation lifecycle: SATISFIED — asset parsing enforces <=16 assets, 16 MiB each,
+    64 MiB running total per recipe, <=512-byte forward-slash relative reference with no
+    leading '/', backslash, ':', '//', empty/'.'/'..' component (recipe.cpp:24-26,215-275);
+    loading rejects missing/non-regular/link targets and canonical-path escapes
+    (recipe_catalog.cpp:44-99) using config_root/assets (recipe_catalog.cpp:147). Bytes are
+    loaded and prepare() is invoked for every recipe in the candidate load loop before the
+    catalog is constructed (recipe_catalog.cpp:149-190), and Context publishes only after the
+    whole load succeeds (context.cpp:471-478) while inspect holds its own shared_ptr snapshot
+    so the old prepared objects outlive an in-flight call (context.cpp:383,427-435). No
+    inspect-time asset I/O or lazy loading exists; the forced-decoded-at-load and
+    removed-asset cases pass (cvf106_prepare_test.cpp:47-80; cvf106_lifecycle_test.cpp:195-211).
+  - >-
+    3. template.match correctness: SATISFIED — rejects non-objects, unknown keys, wrong types,
+    missing keys, non-integer roi entries, negative origin, roi outside 1..64 (the compiled
+    extent), non-finite/out-of-range threshold, method != ccoeff_normed and malformed asset
+    keys (template_match.cpp:68-137); prepare decodes empty bytes and malformed images,
+    rejects >8192x8192 / >134217728 decoded bytes, template larger than ROI and zero variance
+    (template_match.cpp:139-160,286-302); inspect converts to gray, rejects an ROI outside the
+    real frame, uses cv::TM_CCOEFF_NORMED, clamps non-finite scores, reports global-frame
+    x/y and template width/height, PASS iff score >= threshold, else FAIL with a deterministic
+    kind=template_mismatch defect, and checks the deadline before preprocessing,
+    before matchTemplate and before returning (template_match.cpp:170-248).
+  - >-
+    4. CRITICAL runtime override: SATISFIED — Context::create computes
+    overridden = options.camera_override != nullptr before moving the override
+    (context.cpp:745-755), and select_descriptor() routes !overridden straight to
+    camera::resolve_identity(candidates, selector) (context.cpp:257-259), unchanged in
+    camera_backend.cpp:62-87 with no first-device fallback and explicit-identity semantics.
+    The new behavior (exactly one enumerated candidate, selector not applied) is reachable
+    only when a test injects camera_override (context.h:84-85; no production C API setter
+    exists) and is covered by the developer regression (test_template_match_developer.cpp:531-579).
+    No production behavior change when no override is set; the only internal behavior change
+    is that an override enumerating more than one descriptor now fails instead of being
+    selector-resolved, which is test-only and deliberate.
+  - >-
+    5. Scope/ABI: SATISFIED — include/cvforwin/** and src/c_api/** contain no template.match/
+    AlgorithmAsset/prepare/IPreparedAlgorithm/camera_override content and the export set is
+    still the five cvf_* symbols (src/c_api/cvforwin.def:9-13); src/camera/** contains no
+    CVF-106 content; src/algorithms/compiled_algorithms.cpp:12-16 registers exactly
+    example.threshold then template.match; the cvf106_* and template_match_developer_tests
+    targets are inside if(CVFORWIN_BUILD_TESTS) and gated by CVFORWIN_BUILD_TEST_BACKENDS
+    (CMakeLists.txt:1522-1650), and cvforwin_algorithms links the already-approved OpenCV
+    core/imgproc/imgcodecs (CMakeLists.txt:173-192). Mechanical changed-path/hash audit is
+    delegated to the quality gate.
+  - >-
+    6. Test adequacy: SATISFIED — the cvf106 direct-prepared, prepared-state and lifecycle
+    suites assert observable behavior (placement/coordinates, ROI restriction, threshold
+    equality, edge ROI, 1x1/larger-than-ROI/zero-variance/empty/malformed/unknown-key/
+    non-finite negatives, decode-once with the asset file removed, prepared-object
+    immutability across a new prepare, catalog/reload atomicity, end-to-end catalog-bound
+    preparation); no assertion is tautological and no production .cpp is included. The two
+    test-owner amendments did not weaken intent: outcome_measurements() now returns the flat
+    final object required by final_result_payload_v1 while retaining REQUIRE(object) and
+    per-key REQUIREs (cvf106_test.helpers.h:525-550), and B8 now drives a fixed single-frame
+    file camera while keeping byte-identical output_text/output_json across inspects and
+    reload plus added finiteness checks (cvf106_lifecycle_test.cpp:243-303). The amended
+    CVF-003 registry cases pin the exact order-independent key set {example.threshold,
+    template.match}, each key's non-null instance and key() equality, and the duplicate-key
+    retention case still pins the two-key set (cvf003_registry_test.cpp:154-200) — strictly
+    stronger than the old count. Logs corroborate 24/24 CVF-106 and 447/447 full-suite
+    debug+ASan after the amendments (.ai/validation/cvf106-amendment-ctest.log:51;
+    .ai/validation/logs/cvf003-fr029-amendment-summary.txt:62,120).
+  - >-
+    7. Docs/example: SATISFIED — docs/development.md:377-403 documents the preparation/asset
+    seam and bounds; docs/development.md:405-449 carries the cv2/NumPy -> cv::Mat mapping
+    table and the explicit statement that no Python runtime/interpreter/transpiler is
+    packaged and that production Python is hand-ported with representative images and
+    explicit tolerances (lines 407-417). config/examples/recipes/template.match.json declares
+    the asset/ROI/method/threshold and the 12x8 asset is license-cleared as a project-authored
+    file with no third-party pixels or metadata (LICENSES/README.md:45-50); the developer test
+    loads the shipped recipe/asset through RecipeCatalog and matches the decoded template at
+    a known location (test_template_match_developer.cpp:475-528).
+
+blocking_findings: []
+
+non_blocking_findings:
+  - >-
+    1. Frozen-declaration drift (documentation/contract consistency). The approved change
+    contract declares AlgorithmAsset::bytes as std::shared_ptr<const std::vector<std::uint8_t>>
+    and AlgorithmAssetBundle as an alias of std::vector<AlgorithmAsset>
+    (.ai/changes/CVF-106.yaml:51-57), while the as-built header uses a value
+    std::vector<std::uint8_t> bytes and a class with a public assets vector plus find()
+    (src/inspection/algorithm.h:53-57,64-85). The test brief described the seam only as
+    AlgorithmAsset{key, reference, bytes} (.ai/test-briefs/CVF-106.yaml:15) and the
+    independent test engineer recorded the value-form spelling as an author assumption
+    before implementation existed (.ai/reports/CVF-106-test-red.yaml:198-199;
+    cvf106_test.helpers.h:316-337). Tests and implementation therefore agree and no test was
+    edited to fit, but the compile-time immutability / shared-lifetime guarantee implied by
+    the declared shared_ptr form is absent, and the encoded bytes are a load-time local that
+    the catalog snapshot does not retain (src/recipes/recipe_catalog.cpp:167-190). Impact:
+    semantics required by the baseline contract (bounded, immutable-during-inspect, no
+    dangling prepared state) still hold because the shipped prepare() copies what it needs;
+    no acceptance criterion is violated. Required action (controller/architect): record the
+    seam-declaration reconciliation as an amendment note, or open a follow-up change if the
+    shared_ptr form was a binding requirement. No code change is required for CVF-106
+    acceptance.
+  - >-
+    2. ROI-versus-configured-frame is enforced at inspect time, not preparation.
+    src/algorithms/template_match.cpp:132-135 caps ROI dimensions at the compiled 64x64
+    extent and the actual frame is checked in inspect (template_match.cpp:193-198). A recipe
+    whose ROI fits 64x64 but exceeds the configured capture frame loads successfully and then
+    fails every inspect with algorithm_frame_invalid/NOT_EVALUATED (fail-closed) instead of
+    rejecting the catalog candidate, although template_match_algorithm_v1 says bounds are
+    "checked against configured capture dimensions" and algorithm_extension_contract says
+    preparation rejects invalid cross-field combinations before publication. The independent
+    case "ROI larger than the configured capture frame is rejected"
+    (tests/unit/cvf106_prepare_test.cpp:142-150) passes only because width 65 exceeds the
+    compiled 64 extent, so it does not actually pin the configured-dimension rule. Impact:
+    no wrong verdict (technical error), but a bad recipe is accepted at load. Required action:
+    architect decision to either accept inspect-time enforcement (and sharpen the test label)
+    or extend the preparation seam to carry the configured capture dimensions.
+  - >-
+    3. Legacy inspect() path returns a misleading code. TemplateMatchAlgorithm::inspect
+    always fails with algorithm_error/algorithm_not_found "requires the prepared dispatch
+    path" (src/algorithms/template_match.cpp:308-322), so a caller of the retained
+    dispatch(IInspectionAlgorithm&, AlgorithmRequest&) overload would see algorithm_not_found
+    for a registered algorithm. Production has exactly one dispatch call site and it uses the
+    prepared overload (src/runtime/context.cpp:435), so this is unreachable today. Required
+    action (optional): return algorithm_error with a specific message or document the
+    unsupported-overload behavior.
+  - >-
+    4. Stale developer report. .ai/reports/CVF-106-implementation.yaml still records
+    status: NEEDS_CONTEXT with gate blocker CVF106-B1 and the pre-amendment CVF-003 hash
+    d43c2ec1... (lines 7, 290-325), while the recorded CVF-003 FR-029 amendment
+    (sha256 72d058116187731df1aa85f844c7f5254a282ecea2fd39ed1ae9279bd76c4076,
+    .ai/test-ownership.yaml:89-107) and the post-amendment full-suite logs (447/447 debug and
+    ASan, .ai/validation/logs/cvf003-fr029-amendment-summary.txt:62,120) supersede it.
+    Required action: developer/controller to append a post-amendment verification note or
+    update the report status so the quality gate does not act on a stale blocker.
+  - >-
+    5. Structural note for maintainers: the default prepare() forwards through a stored
+    non-const reference obtained by const_cast (src/inspection/algorithm.cpp:51), mirroring
+    the existing dispatch const_cast (registry.cpp:112,152). It is well-defined only because
+    the registry owns non-const algorithm objects and the prepared object cannot outlive the
+    registry (registry_ is initialized before the catalog is published and destroyed after
+    it, context.cpp:296-320). Required action (optional): keep the ownership precondition
+    documented if the seam is reused by out-of-registry algorithms.
+
+independence_notes: >-
+  Test-set integrity PASS on inspected evidence. The three unchanged independent CVF-106
+  files remain at their authored hashes and the two amended files (cvf106_test.helpers.h,
+  cvf106_lifecycle_test.cpp) were corrected by the test owner with rationale and previous
+  hashes recorded (.ai/test-ownership.yaml:882-963; .ai/reports/CVF-106-test-verify.yaml);
+  no assertion was removed, skipped, disabled, or weakened and no case was deleted. The
+  CVF-003 FR-029 amendment is a test-owner correction that replaced pre-FR-029 count
+  assertions with a strictly stronger exact-set pin, and its new hash is recorded in the
+  manifest. The independent tests include only frozen headers and helpers, read no production
+  .cpp, and the developer did not modify any cvf1*_* file (implementation report scope
+  confirmation; no CVF-106 content in include/**, src/c_api/**, or src/camera/**). No
+  implementation-detail leakage into test expectations was observed. Mechanical hash and
+  changed-path verification of tests/unit/cvf1*_*, .ai/test-ownership.yaml, and src/** is
+  delegated to the deterministic quality gate.

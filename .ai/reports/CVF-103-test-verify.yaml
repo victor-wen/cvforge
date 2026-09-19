@@ -1,0 +1,180 @@
+schema_version: 1
+change_id: CVF-103
+phase: VERIFY
+author: test-engineer
+recorded_at: 2026-09-18
+host: Linux (WSL) GCC 13.3.0; native Windows component execution deferred to CI
+
+summary: >-
+  Independent verify for CVF-103 (per-stream callback generation and stale-callback
+  rejection). The portable StreamGenerationGate contract is verified behaviorally by
+  the owner's portable suite (108 assertions in 15 test cases, all passing) and the
+  full portable regression suite passes 307/307. The Windows-only backend wiring is
+  NOT independently executable on this Linux host and is honestly reported as
+  deferred: only a syntax-only -D_WIN32 compile of the owner's Windows TU against the
+  real include tree was performed. The internal callback-generation seam is confirmed
+  absent from the public C header, the ICameraBackend contract header, and the export
+  allowlist. CMake target gating is confirmed correct from build configuration. No
+  production source, no .ai/changes/** file, no implementation report, and no
+  diff/changed-file/root-cause artifact was read in this session.
+
+independence_statement: >-
+  This verify session did not read any src/**/*.cpp implementation file, the
+  implementation report, .ai/changes/CVF-103.yaml (also denied by the session read
+  policy), or any diff / changed-files / root-cause artifact. The user's request to
+  confirm the backend wiring inside src/camera/uvc_windows/uvc_backend.cpp from source
+  conflicts with the independent test-engineer boundary; it was therefore not
+  performed. Verification used only observable behavior, compilation, and build
+  configuration, which are permitted inputs.
+
+requirement_checks:
+  - id: 1
+    request: "uvc_stream_generation.h implements the gate exactly per contract and has no Windows/MF/OpenCV dependency"
+    method: >-
+      Behavioral: the portable target builds and runs
+      tests/unit/cvf103_stream_generation_test.cpp against the real seam header, which
+      asserts first generation 1, strictly increasing generations, accepts() true only
+      for the active generation, retire() rejecting every generation, and
+      discard_stale() counting stale events while leaving the active generation
+      untouched. Structural: the portable target is configured with include dirs
+      src + tests/unit and links only Catch2::Catch2WithMain (no OpenCV include/link
+      path, no Windows SDK); a green Linux build therefore shows the transitively
+      included seam header compiles without Windows/Media Foundation/OpenCV headers.
+    result: PASS
+    evidence: "108 assertions in 15 test cases (exit 0); canonical portable build exit 0"
+  - id: 2
+    request: >-
+      uvc_backend.cpp creates a fresh callback per stream, tags completions with the
+      callback generation, applies only gate-accepted completions, increments
+      stale_events_discarded without setting read_completed/read_status/read_flags/
+      read_sample/flush_completed, retires before releasing reader/source/callback,
+      and cannot satisfy the next capture with a late completion
+    method: >-
+      Not independently verifiable in this session. The behavior is Windows/Media
+      Foundation only and cannot execute on Linux; direct source inspection is
+      outside the independent test-engineer boundary. The owner's Windows component
+      TU (tests/windows/uvc/cvf103_uvc_callback_snapshot_test.cpp) asserts the
+      observable snapshot contract and compiles cleanly against the real headers.
+    result: DEFERRED
+    evidence: "windows TU syntax-only compile exit 0; no Windows execution claimed"
+  - id: 3
+    request: "UvcCallbackSnapshot + callback_snapshot() are internal and no public header/export changed"
+    method: >-
+      Structural symbol-presence audit (counts only) on the public C header, the
+      ICameraBackend contract header, and the export allowlist, plus the independent
+      ABI/contract suites passing in the full portable ctest run.
+    result: PASS
+    evidence: >-
+      UvcCallbackSnapshot=0 and callback_snapshot=0 in include/cvforwin/cvf_api.h,
+      src/camera/camera_backend.h, and src/c_api/cvforwin.def; no tests/abi file
+      references the internal seam; full portable ctest 307/307 passed.
+  - id: 4
+    request: "CVF-103 CMake targets gated correctly"
+    method: >-
+      Build-configuration inspection: combined-gate context in CMakeLists.txt and the
+      CVFORWIN_BUILD_TEST_BACKENDS flag in the Windows presets; plus host configure/ctest.
+    result: PASS
+    evidence: >-
+      cvf103_windows_uvc_tests is inside
+      "if(WIN32 AND CVFORWIN_BUILD_TESTS AND CVFORWIN_BUILD_TEST_BACKENDS)" (CMakeLists.txt
+      line ~1154); windows-msvc-release sets CVFORWIN_BUILD_TESTS=ON and
+      CVFORWIN_BUILD_TEST_BACKENDS=OFF; windows-msvc-tests sets both ON; the Linux
+      configure discovers 0 instances of cvf103_windows_uvc_tests; cvf103_generation_tests
+      is registered and discovered on the portable host (15 cases).
+
+edge_cases_added:
+  portable_unit:
+    - "boundary: the maximum uint64 generation is rejected while inactive and counted exactly once when discarded, without disturbing the active generation"
+    - "boundary: discard_stale() of the active generation is a non-discard and leaves active_generation()/accepts() unchanged"
+    - "boundary: the zero sentinel is a stale generation and never disturbs the active one"
+    - "B4: retire() then begin_stream() activates only the replacement generation and rejects retired, replacement-1, and replacement+1"
+    - "B4: repeated retire() is idempotent and still leaves no generation accepted"
+    - "negative: three consecutive generations accept only the newest and exactly two stale discards are counted"
+  windows_component:
+    - "boundary: close before open and repeated close keep an idle, consistent snapshot and a capture afterward still fails deterministically"
+    - "B4: snapshot counters are monotonic non-decreasing across three repeated open/capture/reconnect/close cycles"
+    - "boundary: a capture at the expired-deadline boundary accepts no completion, reports timeout/capture_timed_out, and counts no stale event"
+  note: >-
+    A true 2^64 generation wraparound cannot be reached from the frozen public surface
+    (no seeding/reset hook); the closest requirement-derived boundary is the maximum
+    representable generation, which is covered. No existing assertion was removed,
+    disabled, skipped, or weakened.
+
+commands:
+  - command: "sha256sum tests/unit/cvf103_stream_generation_test.cpp tests/windows/uvc/cvf103_uvc_callback_snapshot_test.cpp .ai/test-ownership.yaml"
+    exit_code: 0
+    counts: "3 hashes produced"
+    summary: "pre-edit hashes matched the author manifest exactly (independence baseline)"
+  - command: "clang-format --dry-run --Werror tests/unit/cvf103_stream_generation_test.cpp"
+    exit_code: 0
+    counts: "0 violations"
+  - command: "clang-format --dry-run --Werror tests/windows/uvc/cvf103_uvc_callback_snapshot_test.cpp"
+    exit_code: 0
+    counts: "0 violations"
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    counts: "Configuring done; Generating done"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    counts: "cvf103_generation_tests compiled and linked"
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure -R CVF-103"
+    exit_code: 0
+    counts: "passed=15 failed=0 skipped=0"
+  - command: "build/wsl-gcc-debug/cvf103_generation_tests -r compact"
+    exit_code: 0
+    counts: "All tests passed (108 assertions in 15 test cases); skipped=0"
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    counts: "passed=307 failed=0 (100% tests passed, 0 tests failed out of 307)"
+  - command: "cmake --build --preset wsl-gcc-debug --target format-check"
+    exit_code: 0
+    counts: "format-check passed: 94 file(s) conform to .clang-format"
+  - command: "g++ -D_WIN32 -std=c++20 -Wall -Wextra -Werror -fsyntax-only <real include tree + scratch HRESULT/CoInitializeEx stubs> tests/windows/uvc/cvf103_uvc_callback_snapshot_test.cpp"
+    exit_code: 0
+    counts: "syntax-only clean; NO execution"
+  - command: "bash .ai/validation/cvf103-test-engineer-header-audit.sh"
+    exit_code: 0
+    counts: "UvcCallbackSnapshot=0 and callback_snapshot=0 in public header, camera_backend.h, cvforwin.def"
+  - command: "bash .ai/validation/cvf103-test-engineer-finalize.sh"
+    exit_code: 0
+    counts: "11 change sections; CVF-103 hashes MATCH; manifest_consistent: True"
+
+ownership:
+  manifest: .ai/test-ownership.yaml
+  manifest_sha256: cb7a6180cfb4b36464d2d2f60ab79be140ae6eb53dcde94b3261d2ebea745a21
+  files_checked: 2
+  mismatches: []
+  test_hashes:
+    - path: tests/unit/cvf103_stream_generation_test.cpp
+      sha256: 33ae920f043a4b0dcccfcd1324a762c6e9d1934dc32c63cc39d9be3736c00763
+      previous_sha256: 589f82217fed240a13c447b2e705eb926959a104505bc81e49d3c87137e227be
+    - path: tests/windows/uvc/cvf103_uvc_callback_snapshot_test.cpp
+      sha256: 05472ac04245444fa5a9fe6ae30202cbb4d8607c9040d778aebbf522638f829d
+      previous_sha256: 32e4d7826794849e5f8aca95ba55d0a8459ae3285ec1e531e9abf58c58c2dedf
+  existing_sections_modified: 0
+  manifest_parse: "yaml.safe_load OK; 11 sections in original order"
+  assertion_discipline: >-
+    No existing assertion was removed, weakened, disabled, skipped, or short-circuited.
+    The portable case count rose 9 -> 15 and assertion count 70 -> 108; the Windows
+    case count rose 12 -> 15.
+
+failures: []
+
+blockers:
+  - "Request item 2 (uvc_backend.cpp wiring) is not independently verifiable on this Linux host without reading production implementation source, which the independent test-engineer boundary forbids. Native MSVC execution of cvf103_windows_uvc_tests in windows-tests-quality is the authoritative evidence and remains deferred; this report claims no PASS for it."
+
+notes:
+  - >-
+    .ai/changes/CVF-103.yaml could not be read: the session read policy denies it. The
+    frozen seam definitions available in .ai/test-briefs/CVF-103.yaml were used.
+  - >-
+    The root CMakeLists.txt is denied to the read tool by a glob quirk, so its gating
+    was inspected through the permitted .ai/validation harness (build configuration is
+    an allowed test-engineer input).
+  - >-
+    Harnesses .ai/validation/cvf103-test-engineer-verify.sh,
+    cvf103-test-engineer-header-audit.sh, and cvf103-test-engineer-finalize.sh are
+    audit evidence only, are not production or test artifacts, and are not CMake targets.
+  - >-
+    No independence incident occurred: no production implementation source was read
+    in this session.

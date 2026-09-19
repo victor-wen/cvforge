@@ -1,0 +1,27 @@
+change_id: CVF-103
+candidate_sha: a37673551bbb962d6dec4a2ca567325e6109c84a
+run_id: "35326684044"
+run_url: https://github.com/victor-wen/cvforge/actions/runs/35326684044
+conclusion: success
+jobs:
+- name: Release build, tests, abi-check, package
+  conclusion: success
+- name: Test-enabled suite and clean package consumer
+  conclusion: success
+preset: windows-tests-quality
+evidence:
+- "cvf103_generation_tests.vcxproj -> build/windows-msvc-tests/Release/cvf103_generation_tests.exe"
+- "cvf103_windows_uvc_tests.vcxproj -> build/windows-msvc-tests/Release/cvf103_windows_uvc_tests.exe"
+- "100% tests passed, 0 tests failed out of 351"
+- "CVF-103 ctest cases executed natively on Windows and passed (60 matching log lines incl. ctest result lines)"
+test_counts:
+  passed: 351
+  failed: 0
+  skipped: 0
+log_copy: .ai/reports/batch-1-ci-tests.log
+sha256:
+  tests_log: c6bee4deef38a2125a37508f568bbf5d56349ea705978198eb9ee7f937bc83df
+notes: >-
+  Native MSVC/Media Foundation execution of the CVF-103 callback-generation component suite is provided only by
+  this windows-2022 CI run at the frozen candidate SHA; it is not run on the Linux host. The release job
+  (windows-ci) and the test-enabled job (windows-tests-quality) both succeeded at a37673551bbb962d6dec4a2ca567325e6109c84a.

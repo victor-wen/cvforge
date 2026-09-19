@@ -1,0 +1,28 @@
+schema_version: 1
+change_id: CVF-102
+role: quality-engineer
+script_report: /home/administrator/c_cpp_project/cvforwin/.ai/reports/CVF-102-quality.json
+script_verdict: PASS
+script_exit_code: 0
+candidate_sha: 55f595e07e4409f33648b01a8784218955c1516a
+commands_checked: 6
+test_counts:
+  passed: 568
+  failed: 0
+  skipped: 0
+failed_command_ids: []
+plan_sha256: 10fb3f0a2c6c1e367e1800dbbd913369add7642585bd9a3c28dcc9be7b457b6d
+analysis: '>- Deterministic gate PASS: all six portable commands exited 0 (configure, build, ctest, format-check,
+  clang-tidy static analysis, ASan build+ctest). Test counts: {''passed'': 568, ''failed'': 0, ''skipped'': 0} summed
+  across the ctest and ASan test commands. Ownership manifest reports 0 mismatches, so the independent cvf102 Windows
+  component test matches its pinned hash. Worktree fingerprint identical before and after, so no gate command mutated
+  tracked files. The Windows MSVC worker TU cannot compile or execute on this Linux host; cvf102_windows_uvc_tests
+  is registered for windows-tests-quality CI and that platform limit is recorded, not hidden.'
+next_action: '>- Freeze the CVF-102 candidate commit and push it so windows-ci and windows-tests-quality run the
+  independent Windows worker suite at this SHA; then complete batch-1 with the release-reviewer gate.'
+platform_scope:
+  ran:
+  - wsl-portable
+  deferred:
+  - platform: windows-msvc
+    reason: Media Foundation worker TU cannot compile on this Linux host; covered by windows-tests-quality CI.

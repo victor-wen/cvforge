@@ -1,0 +1,153 @@
+change_id: CVF-107
+kind: review-fix amendment
+owner: test-engineer
+recorded_at: 2026-09-19
+review_artifact: .ai/reviews/CVF-107.yaml
+review_sha256: 37d937076a882fe5602048acd82d1771d0ae6cf8b9dcd3aaf5537cf196ffa623
+findings_fixed:
+  - NBF-01
+  - NBF-02
+  - NBF-03
+  - NBF-04
+findings_deferred_to_controller:
+  - NBF-05
+  - NBF-06
+owned_files_changed:
+  - tests/hardware/uvc_smoke.cpp
+  - docs/hardware-uvc.md
+  - .ai/test-ownership.yaml
+production_files_touched: none
+  # src/**, include/**, .github/**, .ai/project-contract.yaml and CMakeLists.txt were not modified.
+
+findings:
+  - id: NBF-01
+    severity: medium
+    file: tests/hardware/uvc_smoke.cpp
+    lines:
+      - "55-68 (operator note: symmetric control is not a substitute)"
+      - "966-1027 (run_orientation_case)"
+      - "972-984 (mandatory gate)"
+      - "1008-1026 (positive checks first, additive negative control)"
+    changed: >-
+      run_orientation_case now reads orientation_test and symmetric_control
+      separately. (a) A required orientation check (stress mode or
+      CVF_HW_REQUIRE_ORIENTATION=1) with CVF_HW_ORIENTATION_TEST unset now calls
+      report.check(false, ...) and returns, regardless of
+      CVF_HW_ORIENTATION_SYMMETRIC_CONTROL; the failure message states the control
+      is not a substitute for the positive target. (b) When both flags are set the
+      positive asymmetric checks (contrast >= min and bright TOP at visual top)
+      run first, and the negative symmetric control is then added in addition with
+      no early return after it. (c) The original non-required skip path is kept
+      only when neither flag is set. A comment block above the gate records that
+      the control is not a substitute. No assertion was removed, weakened,
+      disabled, or skipped; the file gained the mandatory-orientation failure
+      branch and the additive ordering.
+    before: >-
+      With CVF_HW_ORIENTATION_SYMMETRIC_CONTROL set the function ran only the
+      negative control and returned, so with CVF_HW_ORIENTATION_TEST also set the
+      positive asymmetric checks never ran; a required check was satisfiable by a
+      vertically symmetric card.
+    after: >-
+      A required check fails closed when the positive target is not requested;
+      both flags set runs the positive asymmetric checks and then the negative
+      control on the same captured frame, with no silent skip.
+
+  - id: NBF-02
+    severity: medium
+    file: docs/hardware-uvc.md
+    lines:
+      - "32-39 (discover section: enumerated VID/PID are empty on this backend)"
+      - "46-56 (selector table: DEVICE_PATH/NAME work; VID/PID only on a backend that populates them)"
+    changed: >-
+      Documented plainly that on the Windows Media Foundation backend this suite
+      targets, enumerate() leaves vendor_id and product_id empty and populates only
+      device_path and friendly_name, so VID/PID can never match. The selector table
+      now marks CVF_HW_UVC_DEVICE_PATH and CVF_HW_UVC_NAME as working (preferred),
+      and states that CVF_HW_UVC_VID/CVF_HW_UVC_PID only match on a
+      platform/backend that populates those fields, with an explicit note that
+      Windows operators should use DEVICE_PATH or NAME. The code's selector logic
+      was not changed.
+
+  - id: NBF-03
+    severity: low
+    file: docs/hardware-uvc.md
+    lines:
+      - "156-162 (section 8 reconnect wording)"
+    changed: >-
+      Replaced the false "The suite always exercises a bounded reconnect" claim
+      with an accurate statement that the bounded-reconnect / unplug-replug case
+      (H6) runs only when CVF_HW_UNPLUG_TEST=1 and is skipped (reported as a skip,
+      not executed) otherwise; the existing in-section sentence that the case is
+      skipped when the variable is unset was retained.
+
+  - id: NBF-04
+    severity: low
+    file: docs/hardware-uvc.md
+    lines:
+      - "12-24 (build section)"
+      - "246 (operator $exe path)"
+    changed: >-
+      Replaced the ad-hoc "cmake -S . -B build\\hw -G Visual Studio 17 2022 ..."
+      build command with the contract's canonical windows-msvc-tests preset
+      invocation (cmake --preset windows-msvc-tests
+      -DCVFORWIN_BUILD_HARDWARE_TESTS=ON, then cmake --build --preset
+      windows-msvc-tests --config Release --target cvf_hw_uvc_smoke --parallel),
+      noting the preset supplies the MSVC v143 x64 generator, the build directory,
+      the vcpkg toolchain/triplet, and the warning-as-error policy. All binary-path
+      references now use build\\windows-msvc-tests\\Release\\cvf_hw_uvc_smoke.exe,
+      matching the contract.
+
+hashes:
+  tests/hardware/uvc_smoke.cpp: 5737fb74e5e8d61a3d2e47ae714b968a3d3cbd39cfb9fe927e0a42f20e0d413f
+  docs/hardware-uvc.md: fb426c6e5660242278015c64097dc4ad4193a30e347fc9e13ec926192258dd7c
+  .ai/test-ownership.yaml: 3dbfd80925c4d3a8b5ef7a97bb7c726fec534ee6ca5977048fe8b58e6d646e39
+previous_hashes:
+  tests/hardware/uvc_smoke.cpp: d2df883641ceb6d9738a189226bd9373345b3f6718f090a07279355c0a3d2867
+  docs/hardware-uvc.md: 62c4ac2ad3951bd1d9a1f1262dca4a8eb90d27de5715176ccbf4c2d75692c7a8
+
+commands:
+  - command: "bash .ai/validation/cvf107-review-fixes-apply.sh"
+    exit_code: 0
+    notes: >-
+      Anchored surgical edits for NBF-01..NBF-04 (each anchor matched exactly
+      once), guard checks that no H7/H8 assertion or report.check/report.skip
+      count decreased, clang-format -i plus --dry-run --Werror on the test file.
+  - command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+    notes: "canonical configure; executed by cvf107-review-fixes-verify.sh (the interactive bash policy allowlists .ai/validation/* scripts plus ctest/sha256sum, not cmake directly)"
+  - command: "cmake --build --preset wsl-gcc-debug --parallel"
+    exit_code: 0
+    notes: "canonical build; executed by cvf107-review-fixes-verify.sh"
+  - command: "ctest --preset wsl-gcc-debug --output-on-failure"
+    exit_code: 0
+    notes: "canonical portable test run; executed by cvf107-review-fixes-verify.sh"
+  - command: "clang-format --dry-run --Werror tests/hardware/uvc_smoke.cpp"
+    exit_code: 0
+  - command: "sha256sum tests/hardware/uvc_smoke.cpp docs/hardware-uvc.md .ai/test-ownership.yaml"
+    exit_code: 0
+
+ctest:
+  preset: wsl-gcc-debug
+  exit_code: 0
+  passed: 454
+  failed: 0
+  total: 454
+  summary: "100% tests passed, 0 tests failed out of 454"
+  hardware_target_registered: false
+  hardware_target_ctest_matches: 0
+  note: "the hardware suite is Windows-only (empty TU off _WIN32) and is intentionally not registered with CTest on Linux"
+
+manifest_audit:
+  files_checked: 69
+  mismatches: 0
+
+independence:
+  assertion_weakened: false
+  assertion_removed: false
+  test_skipped_or_disabled: false
+  note: >-
+    NBF-01 strengthens the mandatory-check path and the both-flags ordering; no
+    existing check was removed, weakened, disabled, or skipped. The hash claim in
+    .ai/test-ownership.yaml for tests/hardware/uvc_smoke.cpp was updated by the
+    test owner in the same session as the edit, and the doc hash reference in the
+    CVF-107 notes was updated to the new docs/hardware-uvc.md hash.

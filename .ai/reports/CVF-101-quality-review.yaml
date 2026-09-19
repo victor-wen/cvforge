@@ -1,0 +1,31 @@
+schema_version: 1
+change_id: CVF-101
+role: quality-engineer
+script_report: /home/administrator/c_cpp_project/cvforwin/.ai/reports/CVF-101-quality.json
+script_verdict: PASS
+script_exit_code: 0
+candidate_sha: 85e1de0f80a3afbcff2f42049ee23e1e99cf7cec
+commands_checked: 6
+test_counts:
+  passed: 550
+  failed: 0
+  skipped: 0
+failed_command_ids: []
+plan_sha256: 61c19aa491571213e298fc2310c230534ab2a2c6c3d051fa33842a00a06a5dce
+analysis: '>- The deterministic quality gate exited PASS. All six portable commands exited 0: configure, build,
+  ctest (275/275, 0 failed, 0 skipped), format-check, clang-tidy static analysis, and the ASan build+ctest (275/275).
+  Ownership manifest reports 1 file checked and 0 mismatches, so the independent Windows component test still matches
+  its pinned hash. The worktree fingerprint is identical before and after the run, so no gate command mutated tracked
+  files. Windows MSVC compilation and execution of the Media Foundation seam cannot run on this Linux host and remain
+  deferred to the windows-tests-quality CI job; that platform limit is recorded, not hidden. The controller ran
+  the authoritative script because the quality-engineer dispatch was refused for insufficient credits; the JSON
+  above is the script output, not a worker claim.'
+next_action: '>- Proceed to freeze the CVF-101 candidate commit and push it so the windows-2022 jobs (windows-ci
+  and windows-tests-quality, including the independent Windows component suite) run at the same candidate SHA; then
+  complete batch-1 with the release-reviewer gate.'
+platform_scope:
+  ran:
+  - wsl-portable
+  deferred:
+  - platform: windows-msvc
+    reason: Media Foundation seam cannot compile on this Linux host; covered by windows-tests-quality CI.

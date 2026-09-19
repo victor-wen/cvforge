@@ -1,0 +1,113 @@
+change_id: CVF-105
+verdict: PASS_WITH_FINDINGS
+verdict_classification: APPROVE
+blocking_count: 0
+
+review_note: >-
+  Read-only source review. This artifact is written from the completed semantic review; the
+  prior reviewer session verified the cited evidence at file:line, and this session
+  spot-checked canonicalize_hex4 (src/recipes/config.cpp:350-367), the camera selector
+  canonicalization (src/camera/camera_backend.cpp:20-51, stale header comment :33), the atomic
+  warnings backing (src/diagnostics/diagnostics.h:91), and the legacy registry guard
+  (src/inspection/registry.cpp:118-123). No shell was available, so no on-disk digest was
+  recomputed; hash verification of src/**, the independent test files, and
+  .ai/test-ownership.yaml is delegated to the deterministic quality gate.
+
+reviewed_artifacts:
+  - .ai/changes/CVF-105.yaml
+  - .ai/reports/CVF-105-implementation.yaml
+  - .ai/reports/CVF-105-test-red.yaml
+  - .ai/reports/CVF-105-test-verify.yaml
+  - .ai/reports/CVF-105-test-amendment.yaml
+  - .ai/test-ownership.yaml
+  - .ai/workflow-state.yaml
+  - src/recipes/config.cpp
+  - src/recipes/config.h
+  - src/camera/camera_backend.cpp
+  - src/camera/camera_backend.h
+  - src/c_api/cvf_entry_points.cpp
+  - src/diagnostics/diagnostics.h
+  - src/diagnostics/diagnostics.cpp
+  - src/runtime/context.h
+  - src/runtime/context.cpp
+  - src/inspection/registry.cpp
+  - tests/unit/cvf105_abi_validation_test.cpp
+  - tests/abi/cvf006_lifecycle.c
+  - CMakeLists.txt
+
+summary: >-
+  CVF-105 is APPROVED with non-blocking findings only. All four requirements are satisfied on
+  inspected evidence: FR-024 canonical VID/PID handling with case-insensitive selector
+  matching and no first-device fallback; FR-025 C API argument validation with NULL+nonzero
+  returning INVALID_ARGUMENT, a legal zero-capacity error_message, and BUFFER_TOO_SMALL for
+  below-required output_json/image_path; FR-026 race-free atomic warnings backing with a
+  callback mutex held only across host callback delivery; FR-027 the 65535-byte serialized
+  result bound enforced by a single assemble+serialize path with the C API copying the payload
+  verbatim. The public ABI and the 5-symbol .def surface are unchanged, no stray CVF-105
+  symbols were introduced, and CMake target gating is correct. Both test sets are meaningful,
+  the amended CVF-004 expectation matches FR-024, no assertions were weakened or skipped, and
+  the V2-3 codegraph independence incident is assessed as non-contaminating. Six non-blocking
+  findings are recorded; none is acceptance-blocking.
+
+judgments:
+  - >-
+    FR-024: SATISFIED — canonicalize_hex4 at src/recipes/config.cpp:350-367 (declared
+    src/recipes/config.h:31) returns exactly 4 lowercase hex or config_value_invalid; applied at
+    config load (config.cpp:220,227); selector matching canonicalizes both sides
+    (src/camera/camera_backend.cpp:20-37 used at :44,:48) with device_path exact (:41) and
+    friendly_name exact (:51), no first-device fallback.
+  - >-
+    FR-025: SATISFIED — validate_options_struct (src/c_api/cvf_entry_points.cpp:239-260),
+    validate_request_struct (:262-301), result_capacity_problem (:310-354), inspect_impl
+    (:477-553); NULL+nonzero -> INVALID_ARGUMENT; zero-capacity error_message legal;
+    below-required output_json/image_path -> BUFFER_TOO_SMALL; views built only after validation
+    (:402-403).
+  - >-
+    FR-026: SATISFIED — atomic warnings backing src/diagnostics/diagnostics.h:91; relaxed
+    fetch_or/load/store diagnostics.cpp:87,104,122,135,142,147,163; dedicated callback mutex
+    held only across host callback.
+  - >-
+    FR-027: SATISFIED — bound 65535 src/runtime/context.h:42; serialize_result_payload :50;
+    output_text :106; single assemble+serialize context.cpp:426-432 with bound check :258-272; C
+    API copies verbatim (cvf_entry_points.cpp:526-542), no re-dump.
+  - >-
+    ABI/scope: PASS — public header and 5-symbol .def unchanged; no stray CVF-105 symbols;
+    CMake targets correctly gated.
+  - >-
+    Test adequacy: PASS — amended CVF-004 expectation matches FR-024; cvf105 suites meaningful;
+    no weakened/skipped assertions.
+  - >-
+    Independence: PASS — V2-3 codegraph leak (diagnostics.cpp/context.cpp into the verify
+    session) assessed non-contaminating.
+
+blocking_findings: []
+
+non_blocking_findings:
+  - >-
+    1. Legacy fragment-estimate guard at src/inspection/registry.cpp:118-123 (out of CVF-105
+    scope) still pre-rejects some over-bound payloads as algorithm_error rather than
+    buffer_too_small; not the acceptance authority — controller/architect follow-up.
+  - >-
+    2. tests/unit/cvf105_abi_validation_test.cpp:317-335 relaxed the missing-root status to
+    status != CVF_OK with a comment claiming it is unpinned; strict CONFIG_ERROR is independently
+    pinned by tests/abi/cvf006_lifecycle.c:631-632 — test-quality/documentation gap only.
+  - >-
+    3. Duplicated canonicalization logic (src/camera/camera_backend.cpp:20-37 vs
+    src/recipes/config.cpp:350) — divergence risk.
+  - >-
+    4. Stale comment src/camera/camera_backend.h:33 ("matching is exact and case-sensitive") now
+    contradicts canonical matching.
+  - >-
+    5. Independent-suite coverage gaps (enumerated-side canonicalization; callback
+    serialization) — developer suite covers them.
+  - >-
+    6. V2-3 independence incident recorded (non-contaminating).
+
+independence_notes: >-
+  Test-set integrity PASS: no test-engineer file was modified, no recorded hash changed, no
+  assertion weakened, and no test skipped. The only independence incident is V2-3, a codegraph
+  leak of diagnostics.cpp/context.cpp into the verify session, assessed as non-contaminating.
+  Independent-suite coverage gaps (enumerated-side canonicalization; callback serialization)
+  are recorded as non-blocking finding 5 and are covered by the developer suite. Mechanical
+  hash verification of tests/unit/cvf105_* and .ai/test-ownership.yaml remains with the
+  deterministic quality gate.

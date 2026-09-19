@@ -1,0 +1,228 @@
+schema_version: 1
+change_id: CVF-104
+program: cvforwin-hardening-1.1.0
+title: "End-to-end deadline, single finalization path, artifact save worker, background retention"
+risk: R2
+risk_justification: >-
+  Runtime orchestration and artifact-service hardening across two existing modules. Public ABI,
+  status values, and recipe schema semantics are preserved; error precedence is fixed by the
+  approved contract.
+intent: >-
+  Make one absolute deadline the real end-to-end bound, route every post-frame outcome through
+  one finalization path so fail_or_error works on technical errors, move PNG encode/write off
+  the caller thread behind a bounded worker, and move retention to a coalesced background task.
+scope:
+  allowed_files:
+    production:
+      - src/runtime/**
+      - src/artifacts/**
+      - src/diagnostics/**
+    developer_tests:
+      - tests/unit/** (files not matching cvf1*_* independent names)
+    build_files:
+      - CMakeLists.txt (build wiring only: register the CVF-104 targets and link Threads; never source logic)
+    evidence_harness:
+      - .ai/validation/**
+  out_of_scope:
+    - include/cvforwin/**
+    - src/c_api/**
+    - src/camera/**
+    - src/algorithms/**
+    - src/recipes/**
+    - docs/**
+    - .ai/project-contract.yaml
+interface_v1:
+  authority_note: >-
+    InspectionOutcome, runtime Inspect semantics, and the public result fields are unchanged;
+    only ordering, deadline enforcement, and artifact execution change.
+  frozen_test_seam:
+    note: >-
+      Three portable, dependency-injected seams make the contract's fault seams (clock,
+      encoder/writer completion, retention scheduling) testable on the Linux host without
+      exposing them in the public ABI. All three are new files; existing headers keep their
+      declarations, though context.h gains the optional injection point below.
+    finalization_header: src/runtime/finalization.h
+    finalization_declaration: |
+      namespace cvforwin::runtime {
+
+      enum class SaveRequirement { none, optional, required };
+
+      /* Maps a recipe save policy + required flag onto the persistence requirement. */
+      SaveRequirement save_requirement_for(std::string_view save_policy, bool required) noexcept;
+
+      /*
+       * Immutable inputs to the single post-frame finalization step. post_frame_status/
+       * post_frame_error carry the primary technical failure observed after a valid frame
+       * (algorithm, serialization, or later); they are ok/none when execution succeeded.
+       */
+      struct FinalizeRequest {
+          core::Verdict verdict = core::Verdict::not_evaluated;
+          bool execution_ok = true;
+          bool frame_valid = false;
+          core::Status post_frame_status = core::Status::ok;
+          core::ErrorCode post_frame_error = core::ErrorCode::none;
+          SaveRequirement requirement = SaveRequirement::none;
+          bool save_attempted = false;
+          bool save_committed = false;       /* atomic commit finished before the deadline */
+          bool save_failed = false;          /* encode/write/commit failed before the deadline */
+          bool deadline_expired = false;
+      };
+
+      struct FinalizeDecision {
+          core::Status status = core::Status::ok;
+          core::Verdict verdict = core::Verdict::not_evaluated;
+          core::ErrorCode error_code = core::ErrorCode::none;
+          std::uint32_t warning_flags = 0;
+          bool publish_image_path = false;
+      };
+
+      /*
+       * One decision for every post-frame outcome. Precedence:
+       *  1. Required save not committed and the absolute deadline expired -> timeout.
+       *  2. Required save failed (or not committed) before the deadline -> required_artifact_error.
+       *  3. A post-frame technical error -> its status/error with NOT_EVALUATED, publishing a
+       *     committed image_path when the save completed.
+       *  4. Otherwise OK with the given verdict; an optional save that did not commit only sets
+       *     warning_image_save_failed and never changes the verdict.
+       * warn_base is OR-ed in (diagnostics/log-sink warnings).
+       */
+      FinalizeDecision finalize_after_frame(const FinalizeRequest& request,
+                                            std::uint32_t warn_base) noexcept;
+
+      }  // namespace cvforwin::runtime
+    save_worker_header: src/artifacts/save_worker.h
+    save_worker_declaration: |
+      namespace cvforwin::artifacts {
+
+      /* One queued save request; owns the pixels so it can cross a thread boundary. */
+      struct SaveJob {
+          cv::Mat pixels;
+          std::string recipe_id;
+          std::string request_id;
+          std::uint64_t sequence = 0;
+      };
+
+      enum class SaveState { idle, completed, cancelled, failed };
+
+      struct SaveOutcome {
+          SaveState state = SaveState::idle;
+          std::filesystem::path path;                  /* valid only when completed */
+          core::ErrorCode error = core::ErrorCode::none;
+      };
+
+      /*
+       * Injected encoder/writer boundary. The production sink encodes PNG, writes a temporary
+       * file below the managed root, and publishes it by same-root atomic rename. Tests inject a
+       * sink that blocks until released, fails, or records calls, so completion timing is
+       * deterministic without touching the real disk.
+       */
+      class ArtifactSink {
+      public:
+          virtual ~ArtifactSink() = default;
+          virtual core::Result<std::filesystem::path> write_temp(const SaveJob& job) = 0;
+          /* Publishes temp -> final only when not cancelled; returns the final path. */
+          virtual core::Result<std::filesystem::path> commit(const std::filesystem::path& temp) = 0;
+          /* Removes a temporary file that will not be published. */
+          virtual void discard(const std::filesystem::path& temp) noexcept = 0;
+      };
+
+      /*
+       * One save worker. At most one save executes and at most one is queued: try_submit returns
+       * false when both slots are full. The worker never encodes or writes on the caller thread,
+       * never publishes a final file after cancellation, and always removes its temporary file.
+       */
+      class SaveWorker {
+      public:
+          explicit SaveWorker(ArtifactSink& sink);
+          ~SaveWorker();
+
+          /* Enqueues one job; false when one save is executing and one is already queued. */
+          bool try_submit(SaveJob job);
+          /* Blocks until the current job reaches a terminal state or the deadline expires. */
+          SaveOutcome wait_until(const core::Deadline& deadline);
+          /* Cancels the queued job (if any); no final file is published for it. */
+          void cancel_pending() noexcept;
+          /* Shutdown: completes the executing job or cancels it, then drains; never deadlocks. */
+          void drain() noexcept;
+
+          std::size_t executing() const noexcept;
+          std::size_t queued() const noexcept;
+
+          SaveWorker(const SaveWorker&) = delete;
+          SaveWorker& operator=(const SaveWorker&) = delete;
+      };
+
+      }  // namespace cvforwin::artifacts
+    retention_scheduler_header: src/artifacts/retention_scheduler.h
+    retention_scheduler_declaration: |
+      namespace cvforwin::artifacts {
+
+      /*
+       * Coalesced retention trigger: fires after retention_time_trigger_seconds since the prior
+       * run OR retention_committed_capture_trigger committed captures, whichever comes first.
+       * Pure policy over an injected clock; the caller owns the background worker. It never
+       * scans, sorts, or deletes by itself.
+       */
+      constexpr std::chrono::seconds k_retention_time_trigger{60};
+      constexpr std::uint64_t k_retention_capture_trigger = 100;
+
+      class RetentionScheduler {
+      public:
+          explicit RetentionScheduler(std::chrono::seconds time_trigger = k_retention_time_trigger,
+                                      std::uint64_t capture_trigger = k_retention_capture_trigger);
+          /* Records one committed capture; true when the capture trigger fires now. */
+          bool on_capture_committed(std::chrono::steady_clock::time_point now) noexcept;
+          /* True when the time trigger has elapsed since the last completed run. */
+          bool due(std::chrono::steady_clock::time_point now) const noexcept;
+          /* Records that a retention run completed and resets the capture counter. */
+          void on_retention_run(std::chrono::steady_clock::time_point now) noexcept;
+          std::uint64_t committed_captures() const noexcept;
+      };
+
+      }  // namespace cvforwin::artifacts
+    context_injection:
+      header: src/runtime/context.h
+      note: >-
+        RuntimeOptions gains an optional std::shared_ptr<artifacts::ArtifactSink> artifact_sink
+        (defaulted null) so a test can inject deterministic save timing through the same
+        documented RuntimeOptions path as camera_override. It is internal, not part of the C ABI,
+        and default construction is unchanged.
+    wiring_requirements:
+      - "inspect() creates one absolute Deadline once and passes it unchanged to gate wait, capture, settle, algorithm, serialization, and required persistence; no stage calls Deadline::from_timeout_ms."
+      - "Every post-frame outcome (success, algorithm failure, serialization failure, later technical failure) reaches finalize_after_frame exactly once; the public result is built from its decision."
+      - "The latest valid frame is retained until finalization; fail_or_error persistence is attempted only after a frame is valid, and never when capture failed."
+      - "Required save waits only until the absolute deadline; optional save uses the remaining time and, on cancellation or queue saturation, leaves the verdict intact, sets warning_image_save_failed, publishes no image_path, and removes its temporary file."
+      - "Retention is requested through RetentionScheduler and executed on a separate maintenance worker; inspect never scans, sorts, or deletes."
+      - "On shutdown the save worker drains or cancels queued work and the maintenance worker stops without deadlock."
+  behavior:
+    - "One absolute deadline is created once per inspect and passed unchanged to every stage; no stage calls Deadline::from_timeout_ms locally."
+    - "Acquisition is followed by a single finalize step: determine verdict/execution_ok, apply artifact policy, attach diagnostics, attach elapsed time, and return."
+    - "execution_ok=false is passed to the artifact policy for algorithm failure, serialization failure, and any later technical failure after a valid frame exists."
+    - "Latest valid frame is retained for fail_or_error; when no valid frame was ever acquired, no artifact attempt is made."
+    - "Save worker: at most one executing and one queued save; encode+write to a temporary file inside the managed root, publish by atomic rename only if not cancelled and completed before the applicable deadline."
+    - "Optional save may use remaining time; on cancellation/queue saturation it leaves the verdict intact, sets warning_image_save_failed, and removes its temporary file; no late final file is published."
+    - "Required save waits only to the absolute deadline; encode/write/commit failure before deadline -> required_artifact_error; deadline exhaustion -> timeout (takes precedence); required-failure also takes precedence over an earlier technical error unless the absolute deadline expired."
+    - "Retention runs on a separate maintenance worker, coalesced, triggered after 60 seconds or 100 committed captures, never awaited by inspect, skips temporary names, and keeps existing age/size/root-containment rules."
+    - "On shutdown the save worker drains or cancels queued work and the maintenance worker stops without deadlock."
+invariants:
+  - "No PNG encode, disk-write wait, directory iteration, stat/sort, or retention deletion on the inspection caller thread."
+  - "No image_path is reported before atomic commit; no cancelled artifact is published."
+  - "A valid PASS/FAIL is never converted to TIMEOUT by optional artifact work."
+  - "Diagnostics callback invocation is serialized and never holds internal locks across host code."
+verification:
+  portable_wsl:
+    - "cmake --preset wsl-gcc-debug && cmake --build --preset wsl-gcc-debug --parallel"
+    - "ctest --preset wsl-gcc-debug --output-on-failure"
+    - "cmake --build --preset wsl-gcc-debug --target format-check"
+    - "cmake --preset wsl-gcc-asan && cmake --build --preset wsl-gcc-asan --parallel && ctest --preset wsl-gcc-asan --output-on-failure"
+    - "cmake --preset wsl-clang-analysis && cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+acceptance_reference: >-
+  Contract FR-022/FR-023, artifact_finalization_v1, invariant on post-frame finalization and
+  background retention, and artifact acceptance checks.
+rollback: "Revert src/runtime/** and src/artifacts/** to the prior inspection flow."
+reporting:
+  developer_report: .ai/reports/CVF-104-implementation.yaml
+  test_red_report: .ai/reports/CVF-104-test-red.yaml
+  test_verify_report: .ai/reports/CVF-104-test-verify.yaml
+  review_report: .ai/reviews/CVF-104.yaml
+  quality_report: .ai/reports/CVF-104-quality.yaml

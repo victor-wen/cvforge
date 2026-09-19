@@ -1,0 +1,36 @@
+format: 1
+change_id: CVF-108
+script_report: /home/administrator/c_cpp_project/cvforwin/.ai/reports/CVF-108-quality.json
+script_verdict: PASS
+script_exit_code: 0
+candidate_sha: 7d3e3fe6d6c1aef4416418ffb6f89abd7f86dfe6
+plan_sha256: b894dd136b06184838b16d6b15593bb315f561c4697e95b1eb74612c60dfd14f
+commands_checked: 6
+test_counts:
+  passed: 970
+  failed: 0
+  skipped: 0
+failed_command_ids: []
+analysis: >-
+  Deterministic gate PASS at HEAD 7d3e3fe6d6c1aef4416418ffb6f89abd7f86dfe6. That commit is the CVF-108
+  delivery, whose first CI run (35442730937) failed on exactly one test - the independent CVF-108 OB-4 ABI
+  check - because the Windows checkout is CRLF and the test's whole-line std::regex macro extraction could
+  not match a line carrying a trailing carriage return. That was a test-host defect, not a product defect;
+  the test owner normalized every line-based parse in that file through one CRLF helper and added a CRLF
+  control that fails if the normalization is removed. The corrected test and the refreshed ownership
+  manifest are the uncommitted worktree under test here.
+  All six canonical WSL commands passed: configure, build, ctest (485/485), format, clang static analysis,
+  and the sanitizer suite (485/485) - 970 passed / 0 failed / 0 skipped aggregate. The ownership manifest
+  a3a02d64c2e271537948d02d6de5bccb082f1fea32ff48131619d0e75f105af2 reconciles with zero mismatches for the
+  independent CVF-108 file, and the developer-owned release-naming test stays disjoint from it.
+  Separately, abi-check confirms the public ABI is still version 1 with exactly the five approved exports,
+  so the release metadata moved to 1.1.0 without moving the ABI.
+  This gate covers portable evidence only. The installed-package-reported version, the concrete Windows
+  package and archive bytes, the clean package consumer, and native dumpbin export verification remain
+  DEFERRED to Windows package evidence and are not certified here. CVF108-NBF-04 (no version-bearing
+  metadata artifact inside the package) is carried to release review for adjudication.
+next_action: >-
+  Commit only the corrected independent test (tests/unit/cvf108_release_metadata_test.cpp) and its refreshed
+  ownership manifest entry, push to main, and require the windows-2022 CI jobs - including the clean package
+  consumer - to succeed at the new SHA before freezing the batch-4 candidate (CVF-107 + CVF-108). The
+  previous candidate 7d3e3fe must not be treated as delivered.

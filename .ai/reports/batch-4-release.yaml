@@ -1,0 +1,336 @@
+# Batch-4 final release verdict (segment B) - release-reviewer, read-only.
+# The controller requested .ai/reviews/batch-4.yaml, but this role's write policy permits only
+# .ai/reports/*-release.yaml (the same constraint segment A recorded); the verdict therefore lives
+# here and the controller should reference or copy it to the batch descriptor's release_review path.
+schema_version: 1
+batch_id: batch-4-release
+change_id: batch-4-release
+members: [CVF-107, CVF-108]
+candidate_sha: 2461959c1b1d5d27ca4f14d2f4014099349b22fd
+reviewer: release-reviewer (segment B: final release verdict; independent, read-only)
+segment_a_report: .ai/reports/batch-4-source-a-release.yaml
+recorded_at: 2026-09-19
+verdict: RELEASE_READY
+blocking_findings: []
+non_blocking_findings: [B4R-01, B4R-02, B4R-03]
+carried_findings: [B4A-04, B4A-05, B4A-06]
+
+method_note: >-
+  Read-only review; no shell (git show unavailable), so the content of commit 2461959 was verified
+  equivalently from: the working tree at HEAD (.git/refs/heads/main = 2461959...; git reflog line 19
+  confirms it is the single commit after 04b3b3b, subject "test(uvc): fail closed on mandatory
+  colour and make hardware evidence self-evidencing"), the full on-disk source of
+  tests/hardware/uvc_smoke.cpp (1666 lines) and docs/hardware-uvc.md, the fix report's pinned
+  before/after sha256 hashes, the hosted CI checkouts of exactly 2461959, and the new
+  self-evidencing message text present only in the post-fix station logs. No sha256 was recomputed
+  here; recomputation belongs to the deterministic gate, which ran green at this SHA.
+
+prior_gates:
+  reviewer: APPROVE
+  reviewer_detail: >-
+    CVF-107: role_verdict APPROVE (PASS_WITH_FINDINGS, zero blocking) - .ai/reviews/CVF-107.yaml.
+    CVF-108: PASS_WITH_FINDINGS with blocking_findings: [] (approve-equivalent) -
+    .ai/reviews/CVF-108.yaml.
+  quality_script: PASS
+  quality_script_detail: >-
+    .ai/reports/batch-4-quality.json at git_head = git_head_after = 2461959 (verdict PASS,
+    gate_exit_code 0; all six canonical WSL commands exit 0; 485/485 debug and 485/485 ASan;
+    format-check 127 files; ownership mismatches []). Plan .ai/validation/batch-4-quality-plan.yaml
+    pins expected_head 2461959. Per-task deterministic gates also PASS with matching MiMo QE reviews
+    (CVF-107-quality.json + CVF-107-quality-review.yaml; CVF-108-quality.json +
+    CVF-108-quality-review.yaml); those reviews predate the final SHA (74b3b3f / 7d3e3fe) because
+    the gates ran on the uncommitted worktrees before delivery - the batch gate at 2461959 is the
+    authoritative at-SHA mechanical record. No failed script report was converted to PASS by any
+    model summary.
+  required_ci: PASS
+  required_ci_detail: >-
+    .ai/reports/CVF-107-batch4-ci-tests.log (controller-asserted run 35449763555): both jobs fetched
+    and checked out exactly 2461959 (release job lines 83/85/97; test-enabled job lines
+    1459/1461/1472). Release job "Release build, tests, abi-check, package": 100% tests passed
+    363/363 (line 1210), abi-check exactly 5 exports (1230), package-verify all checks passed for
+    cvforwin-1.1.0 (1272-1275). Test-enabled job "Test-enabled suite and clean package consumer":
+    100% tests passed 528/528 (2977), abi-check 5 exports (2998), package-verify (3042-3045), clean
+    package consumer against the installed cvforwin-1.1.0 package: checks=15 failures=0 result=PASS
+    (3063).
+
+candidate_identity_crosscheck:
+  repo_head: 2461959 (.git/refs/heads/main)
+  batch_quality_json: 2461959 (git_head and git_head_after)
+  batch_quality_plan_expected_head: 2461959 (line 3)
+  ci_checkouts_both_jobs: 2461959 (log lines 83/85/97 and 1459/1461/1472)
+  station_binary_source_pin: "tests/hardware/uvc_smoke.cpp sha256 f72263aa... (CVF-107-hardware.yaml:122 and CVF-107-batch4-hardware-fixes.yaml:80 record the same hash independently)"
+  conclusion: >-
+    The final source, the deterministic quality report, and the CI results all refer to the same
+    candidate SHA 2461959. Stale narrative references to 04b3b3b / run 35444804914 remain in plan
+    notes and workflow state (see B4R-02) but do not affect the mechanically enforced identity.
+
+platform_coverage:
+  - platform: portable
+    status: EXECUTED
+    evidence: ".ai/reports/batch-4-quality.json at 2461959 (485/485 debug, 485/485 ASan, format-check 127 files, clang static analysis, ownership 0 mismatches, gate exit 0)"
+  - platform: windows
+    status: EXECUTED
+    evidence: ".ai/reports/CVF-107-batch4-ci-tests.log (run 35449763555 per controller; both jobs checked out 2461959): 363/363 release job with abi-check (exactly 5 exports) and package-verify; 528/528 test-enabled job with package-verify and clean package consumer 15/15 PASS against the installed cvforwin-1.1.0 package"
+  - platform: hardware
+    status: EXECUTED
+    evidence: ".ai/reports/CVF-107-hardware.yaml final_source_confirmation_runs (A-D, source sha256 f72263aa...) plus the earlier YLX-4K-S858 runs; orientation/colour recorded UNVERIFIED (no CVF-ORIENT-1 / CVF-COLOR-1 targets); reconnect not re-run at final source"
+
+segment_b_fix_verification:
+  B4A-01_mandatory_colour_fail_closed:
+    status: FIXED (verified in code, not only documented)
+    code_evidence:
+      - "tests/hardware/uvc_smoke.cpp:1116-1123 - required && !CVF_HW_COLOR_TEST fails closed with the flag state appended, BEFORE any expectation is honoured, so the check fails when CVF_HW_COLOR_TEST is unset regardless of CVF_HW_COLOR_EXPECT."
+      - "tests/hardware/uvc_smoke.cpp:1139-1146 - required && CVF_HW_COLOR_EXPECT=neutral also fails closed even when CVF_HW_COLOR_TEST=1, closing the exact pre-fix substitution hole (segment A B4A-01: old 1073-1081 returned after the spread check)."
+      - "tests/hardware/uvc_smoke.cpp:1167-1178 - the neutral branch remains reachable only as a NON-required control; header note 93-95 states the same."
+      - "docs/hardware-uvc.md:152-157 - the neutral target is documented as the spread control, never the positive target, with failure when CVF_HW_COLOR_TEST is unset regardless of CVF_HW_COLOR_EXPECT (the manual/code wording disagreement from B4A-01 is resolved)."
+    station_evidence: >-
+      cvf107-hw-final-B-color-neutral-bypass.txt: H8 fails as designed ("the neutral spread control
+      is not a substitute for the positive target; flags in effect: ... CVF_HW_REQUIRE_COLOR=yes
+      CVF_HW_COLOR_TEST=no CVF_HW_COLOR_EXPECT=neutral", lines 42/59), summary 34/1/2, RESULT:
+      FAIL, process_exit_code=1, evidence block records color_test=no and color_expect=neutral
+      (81-82, 93).
+    residual_nuance: B4R-01 (run B exercised the unset gate; the set+neutral gate is closed by source inspection only).
+  B4A-02_orientation_positive_and_control_not_on_one_frame:
+    status: FIXED (verified in code, not only documented)
+    code_evidence:
+      - "tests/hardware/uvc_smoke.cpp:1053-1073 - the positive checks capture and evaluate their own frame (|top-bottom| >= min AND signed top-bottom >= min) only when CVF_HW_ORIENTATION_TEST is set."
+      - "tests/hardware/uvc_smoke.cpp:1080-1099 - the symmetric control captures and evaluates a SEPARATE frame only when CVF_HW_ORIENTATION_SYMMETRIC_CONTROL is set, with no early return between the two blocks and independent report.check calls; a failure in one does not prevent the other from being evaluated."
+      - "tests/hardware/uvc_smoke.cpp:1037-1044 - the mandatory gate (required && !CVF_HW_ORIENTATION_TEST) is unchanged and unconditional; the skip path (1046-1049) survives only when neither flag is set and the check is not required."
+      - "docs/hardware-uvc.md:121-126 - documents separate captures, separate runs for the two physically different targets, and that the control is never a substitute; header note 69-72 matches."
+    station_evidence: >-
+      cvf107-hw-final-C-orient-symctrl.txt: with CVF_HW_REQUIRE_ORIENTATION=1 and the symmetric
+      control set, H7 still fails as designed (lines 41/59) and the log alone shows the control flag
+      was set. The both-targets positive path cannot be exercised without the CVF-ORIENT-1 target
+      (inherent to the outstanding release requirement, not a defect).
+  B4A-03_release_evidence_records_requirement_and_control_flags:
+    status: FIXED (verified in code and in all four station logs)
+    code_evidence:
+      - "tests/hardware/uvc_smoke.cpp:424-438 - EvidenceRecord gains orientation_test, orientation_min_contrast, orientation_symmetric_control, color_test, color_expect, color_min_dominance/level/spread/tolerance, color_reference_configured, unplug_test, expect_zero_devices."
+      - "tests/hardware/uvc_smoke.cpp:498-509 - evidence_text() emits the twelve added fields; :712-734 - orientation_flag_state()/color_flag_state() render the flags in effect and are appended to every mandatory-check failure message (1038-1042, 1117-1121, 1140-1144); :1475-1495 - run_suite() populates them from the live environment before any early return."
+      - "docs/hardware-uvc.md:90-92 and 258-264 - documents that the block records the flags in effect and that mandatory-failure messages name them."
+    station_evidence: >-
+      All four final logs contain the complete flag set; cvf107-hw-final-C-orient-symctrl.txt:41 and
+      its evidence block line 80 record orientation_symmetric_control=yes, which is exactly the
+      self-evidencing property B4A-03 demanded; cvf107-hw-final-A-1000cycles.txt:42-43 name every
+      requirement flag in the failure messages.
+
+carried_findings:
+  - id: B4A-04
+    severity: non_blocking
+    owner: build-controller
+    evidence: >-
+      .ai/reports/CVF-107-hardware.yaml:118-185 (final_source_confirmation_runs) and
+      .ai/validation/cvf107-hardware-evidence/cvf107-hw-final-{A,B,C,D}-*.txt; earlier
+      cvf107-hw-1000cycles.txt / cvf107-hw-reconnect-unplug.txt from the pre-fix binary on
+      YLX-4K-S858.
+    segment_a_issue: >-
+      The release-defining 1000-cycle log came from the pre-fix binary; driver/firmware recorded as
+      unknown in every evidence block.
+    disposition: PARTIALLY_ADDRESSED__CARRY
+    judgment: >-
+      The provenance half is closed: a 1000-cycle run at the final source now exists
+      (cvf107-hw-final-A-1000cycles.txt: valid=1000 invalid=0, all violation counters 0, lines
+      47-59), produced by the binary whose source sha256 f72263aa... is pinned in two independent
+      artifacts and whose logs carry the new message text only the fixed source emits. It runs on
+      the integrated ACER sensor rather than the external YLX-4K-S858 used for the pre-fix evidence
+      (different, independently useful device; the fix delta is test-suite-only, so the pre-fix
+      timeout/reconnect evidence on YLX-4K-S858 remains transferable). Not closed: (a) the
+      reconnect/unplug leg (H6) was skipped in all four final-source runs, so it exists only from
+      the pre-fix binary; (b) every final log still records camera_driver/camera_firmware as
+      "unknown (best effort; set CVF_HW_CAMERA_DRIVER)" (final-A lines 103-104) - the ACER driver is
+      recorded in the report narrative (hardware.yaml:126-132) but not in-run, and firmware is
+      unknown everywhere. All of this is subsumed by the outstanding production release run below,
+      which must set both variables and include CVF_HW_UNPLUG_TEST=1 per the canonical command.
+  - id: B4A-05
+    severity: accepted_to_carry
+    owner: architect
+    evidence: "cmake/CvfPackage.cmake.in staged contents; .ai/reviews/CVF-108.yaml:198-212; batch-4 CI log line 3063"
+    disposition: CARRY
+    judgment: >-
+      Adjudicated acceptable for this delivery: version identity is name-derived, single-sourced
+      from PROJECT_VERSION, pinned by both the independent and developer suites, and the installed
+      cvforwin-1.1.0 package was verified end-to-end by the clean consumer at the candidate SHA
+      (checks=15 failures=0 result=PASS). A staged version-bearing metadata file remains a small
+      future enhancement requiring an owner decision; not a defect in this delivery.
+  - id: B4A-06
+    severity: accepted_to_carry
+    owner: developer
+    evidence: "CVF-108-implementation.yaml:151-156; CVF-108-test-verify.yaml:267-274"
+    disposition: CARRY
+    judgment: >-
+      No action required. The developer red-green mutation proof is developer-attested only;
+      recorded so the verdict never mistakes it for independently reproduced mutation evidence. The
+      permanent RED against the real tree and the hosted green at the candidate SHA stand
+      independently.
+
+findings:
+  - pass: testing
+    id: B4R-01
+    owner: test-engineer
+    severity: non_blocking
+    issue: >-
+      Station evidence for the B4A-01 fix does not exercise the exact pre-fix bypass configuration:
+      run B used CVF_HW_REQUIRE_COLOR=1 with CVF_HW_COLOR_TEST UNSET, which fails at the
+      required&&!color_test gate (uvc_smoke.cpp:1116-1123) - a gate that segment A confirmed already
+      existed pre-fix (old 1036-1045). The original B4A-01 hole (CVF_HW_COLOR_TEST=1 +
+      CVF_HW_COLOR_EXPECT=neutral) is closed by the new gate at 1139-1146 but only by source
+      inspection; no station run covers it. Relatedly, CVF-107-hardware.yaml:157-158 states "Before
+      the fix this configuration could satisfy the mandatory colour requirement", which is
+      imprecise: with CVF_HW_COLOR_TEST unset the pre-fix suite also failed (with the older
+      message).
+    evidence: >-
+      cvf107-hw-final-B-color-neutral-bypass.txt:42,59,81-82; tests/hardware/uvc_smoke.cpp:1116-1146;
+      .ai/reports/batch-4-source-a-release.yaml B4A-01; .ai/reports/CVF-107-hardware.yaml:149-160.
+    why_not_blocking: >-
+      The fix direction is fail-closed (it cannot manufacture a false PASS), the code is verified
+      directly at the candidate SHA, the original finding was non-blocking, and any substitution
+      would be visible in an archived log via the recorded flags.
+    required_fix: >-
+      At the next station session, run CVF_HW_REQUIRE_COLOR=1 with CVF_HW_COLOR_TEST=1 and
+      CVF_HW_COLOR_EXPECT=neutral and confirm H8 fails at the substitution gate (1139-1146); correct
+      the run-B sentence in CVF-107-hardware.yaml.
+  - pass: summary
+    id: B4R-02
+    owner: build-controller
+    severity: non_blocking
+    issue: >-
+      Candidate-identity record drift: the batch quality plan's notes and deferred-platform text
+      still describe "the candidate at 04b3b3b ... run 35444804914" (batch-4-quality-plan.yaml lines
+      32-34, 95-96) and .ai/workflow-state.yaml's stage/next_action still describes freezing at
+      04b3b3b, while expected_head and batch-4-quality.json correctly pin 2461959. Additionally, the
+      controller-asserted windows-ci run id 35449763555 is recorded in no artifact in the repository,
+      so the CI run's identity rests on the controller's pointer plus the log's internal checkout
+      proof of 2461959. No dedicated batch-level QE-review artifact references batch-4-quality.json
+      (the per-task QE reviews predate the final SHA).
+    evidence: >-
+      .ai/validation/batch-4-quality-plan.yaml:3 vs 32-34,95-96; .ai/workflow-state.yaml:29-37;
+      .ai/reports/batch-4-quality.json:5-6; .ai/reports/CVF-107-batch4-ci-tests.log:83,97,1459,1472;
+      a repository-wide search for 35449763555 returned no files.
+    why_not_blocking: >-
+      The mechanical gate enforced expected_head=2461959 and the archived CI log internally proves
+      both jobs built exactly 2461959 with all required counts; the drift is narrative text only and
+      no failed report is being misrepresented.
+    required_fix: >-
+      Record the batch-4 CI run id and the 2461959 candidate in a report artifact (or refresh the
+      workflow state) so the release record is self-contained.
+  - pass: summary
+    id: B4R-03
+    owner: build-controller
+    severity: non_blocking
+    issue: >-
+      No batch-3 release-review artifact exists (.ai/reviews has batch-1.yaml and batch-2.yaml but no
+      batch-3.yaml) although the workflow state lists batch-3-algorithms (CVF-106) with gate
+      "release-review after batch". CVF-106 itself has a task review and quality gate, and the
+      integrated candidate is fully re-verified at 2461959 by this release review (485/485 portable,
+      528/528 Windows including the package consumer), but the per-batch gate record is absent.
+    evidence: ".ai/reviews directory listing; .ai/workflow-state.yaml:211-213; .ai/reports/batch-3-quality.json exists with no batch-3 review counterpart."
+    why_not_blocking: >-
+      Record-keeping gap for a prior batch; the integrated final state is what this release
+      certifies and it was re-verified end to end at the candidate SHA.
+    required_fix: >-
+      Controller to record a retrospective batch-3 release-review entry or state explicitly that
+      this batch-4/release review covers the integrated 1.1.0 candidate.
+
+platform_matrix:
+  - platform: portable (WSL)
+    status: EXECUTED
+    evidence: ".ai/reports/batch-4-quality.json at 2461959"
+    proves: >-
+      Portable build/test health of the integrated candidate, the CVF-107 build-wiring regression
+      invariants (tests #451-453: WIN32+opt-in gate, never CTest-registered, never in hosted CI), the
+      CVF-108 metadata suites, and no regression from the fix commit.
+    does_not_prove: "Any Windows-specific behaviour, physical-camera behaviour, or package bytes."
+  - platform: windows-ci (hosted windows-2022)
+    status: EXECUTED
+    evidence: ".ai/reports/CVF-107-batch4-ci-tests.log (run 35449763555 per controller; both jobs at 2461959)"
+    proves: >-
+      MSVC build/test health at the exact candidate SHA, ABI version 1 with exactly the five
+      approved exports, 1.1.0 package/archive naming and contents, runtime-dependency allowlist,
+      and real consumer usability of the installed cvforwin-1.1.0 package (clean consumer 15/15).
+    does_not_prove: "Any physical-camera behaviour; orientation/colour targets; FCT deployment readiness."
+  - platform: hardware (designated Windows 11 station)
+    status: EXECUTED
+    evidence: ".ai/reports/CVF-107-hardware.yaml final_source_confirmation_runs + cvf107-hw-final-{A,B,C,D} + earlier YLX-4K-S858 runs"
+    proves: >-
+      Enumeration and fail-closed selection, H3 open/capture/close and fresh-instance reopen, H5
+      forced timeout, 1000 consecutive valid captures AT THE FINAL SOURCE (valid=1000 invalid=0),
+      negative cases, the mandatory-check fail-closed behaviour with self-evidencing flags, and no
+      regression from the fix (baseline D: 34/0/3 PASS).
+    does_not_prove: >-
+      Orientation (H7) and colour (H8) against the documented CVF-ORIENT-1 / CVF-COLOR-1 physical
+      targets - UNVERIFIED, never counted as passes; reconnect/unplug at final source (H6 skipped in
+      all four final runs; only pre-fix-binary evidence exists); camera driver/firmware in-run
+      records. Consequently the production release requirement below is NOT satisfied.
+
+production_release_requirement:
+  contract_text: >-
+    .ai/project-contract.yaml:975 (hardware_uvc.production_release_requirement): "A recorded PASS
+    with at least 1000 cycles and no skipped timeout, reconnect, orientation, or color checks on
+    representative hardware is required before FCT deployment."
+  satisfied: false
+  statement: >-
+    THE CONTRACT'S PRODUCTION RELEASE REQUIREMENT IS NOT YET SATISFIED at candidate 2461959, and
+    this must not be reported as a pass. No recorded run combines a PASS exit with all four checks
+    executed: the final-source 1000-cycle run correctly exits 1 because orientation and colour are
+    mandatory in a 1000-cycle release run and this station has no CVF-ORIENT-1 or CVF-COLOR-1
+    physical target; orientation and colour are recorded UNVERIFIED and were never counted as
+    passes; the reconnect leg was not re-run at final source. The suite itself now refuses to
+    certify a 1000-cycle release run without both targets, which is the correct fail-closed
+    behaviour.
+  what_remains: >-
+    (1) A station session equipped with the two documented physical targets - the CVF-ORIENT-1
+    vertically asymmetric bright-white/matte-black card and the CVF-COLOR-1 saturated swatch - plus
+    a UVC camera selected by an exact selector. (2) One clean full release run of the contract's
+    canonical windows_hardware_stress command (.ai/project-contract.yaml:1016: CVF_HW_CYCLES=1000,
+    CVF_HW_UNPLUG_TEST=1, CVF_HW_REQUIRE_ORIENTATION=1, CVF_HW_REQUIRE_COLOR=1, with
+    CVF_HW_CAMERA_DRIVER / CVF_HW_CAMERA_FIRMWARE set) recording RESULT: PASS / process_exit_code=0
+    with no skipped timeout, reconnect, orientation, or colour checks, archived with its
+    release-evidence block. FCT deployment must not proceed on the current evidence.
+
+decision:
+  batch_4_code_work_accepted_as_complete: true
+  reasoning: >-
+    Zero blocking findings across architecture, correctness, testing, and security; every gate
+    (reviewer, deterministic quality script, required CI) is green and refers to the same candidate
+    SHA 2461959; segment A findings B4A-01..03 are genuinely fixed in code and confirmed on the
+    station; B4A-04..06 are carried with explicit dispositions. The batch descriptor's own
+    acceptance ("hardware evidence is recorded but explicitly incomplete for orientation and
+    colour") is met honestly.
+  scope_of_this_verdict: >-
+    RELEASE_READY covers the batch-4 change package and the 1.1.0 release candidate as code work and
+    recorded evidence. It does NOT certify FCT deployment: the contract's production release
+    requirement remains open as stated above and must be closed by the missing hardware evidence
+    before any production deployment.
+
+passes:
+  architecture: { result: PASS, findings: [] }
+  correctness: { result: PASS, findings: [] }
+  testing: { result: PASS, findings: [B4R-01] }
+  security: { result: PASS, findings: [] }
+  summary: { result: PASS, note: "B4R-02 record drift; B4R-03 missing batch-3 release-review artifact; all gates green at 2461959; production release requirement explicitly NOT satisfied." }
+
+security_pass_note: >-
+  The fix commit touched only tests/hardware/uvc_smoke.cpp, docs/hardware-uvc.md, and
+  .ai/test-ownership.yaml (CVF-107-batch4-hardware-fixes.yaml: production_files_touched: [];
+  protected paths src/**, include/**, .github/**, project-contract, CMakeLists.txt untouched; the
+  manifest update is pinned by the batch plan source hash and reconciled with 0 mismatches by the
+  gate). The CI log shows only build/test/abi-check/package/package-verify/upload-artifact steps - no
+  publishing or destructive command was introduced; tokens are redacted in the archived log. No
+  secrets appear in any changed file read.
+
+summary: >-
+  Segment B confirms the fix commit 2461959 ("fail closed on mandatory colour and make hardware
+  evidence self-evidencing") genuinely repairs B4A-01/02/03 in tests/hardware/uvc_smoke.cpp and
+  docs/hardware-uvc.md, that the four final-source station runs behave exactly as claimed (A: 1000
+  valid cycles exiting 1 because orientation/colour are mandatory without targets; B: colour neutral
+  bypass fails closed; C: orientation symmetric control fails closed with the flag recorded; D: clean
+  baseline PASS), and that the batch gate and both windows-2022 CI jobs are green at exactly 2461959
+  with 363/363 and 528/528 tests, abi-check at five exports, package-verify and the clean consumer
+  passing against the installed 1.1.0 package. Verdict: RELEASE_READY with zero blocking findings;
+  three new non-blocking findings (B4R-01 station evidence for the colour-bypass gate exercises the
+  unset configuration, B4R-02 stale candidate/run-id record text, B4R-03 missing batch-3
+  release-review artifact) and three carried findings (B4A-04 partially addressed and carried, B4A-05
+  and B4A-06 carried). The contract's production release requirement (recorded PASS, >= 1000 cycles,
+  no skipped timeout/reconnect/orientation/colour checks on representative hardware) is NOT YET
+  SATISFIED: it remains blocked on a station with the CVF-ORIENT-1 and CVF-COLOR-1 targets and one
+  clean full release run; FCT deployment must not proceed until then.

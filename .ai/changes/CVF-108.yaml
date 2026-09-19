@@ -1,0 +1,80 @@
+schema_version: 1
+change_id: CVF-108
+program: cvforwin-hardening-1.1.0
+title: "Release 1.1.0 version, package, CI artifact, and documentation synchronization"
+risk: R2
+risk_justification: >-
+  Delivery metadata and documentation alignment only. Public C ABI version stays 1 and the
+  export set is unchanged. No source behavior change.
+intent: >-
+  Make the deliverable self-consistent at release 1.1.0 across CMake project version, package
+  and artifact names, canonical commands, and documentation, without changing ABI version 1.
+scope:
+  allowed_files:
+    build_and_delivery:
+      - CMakeLists.txt
+      - CMakePresets.json
+      - cmake/**
+      - vcpkg.json
+      - .github/workflows/**
+    docs:
+      - docs/**
+    examples_and_config:
+      - examples/c_host/**
+      - config/examples/**
+    licenses:
+      - LICENSES/**
+    tests:
+      - tests/unit/**
+    evidence_harness:
+      - .ai/validation/**
+  scope_amendment:
+    at: 2026-09-19
+    by: build-controller
+    reason: >-
+      tests/unit/** was added so this release-metadata change can carry a durable consistency check.
+      The only pre-existing verification for packaging is tests/package/package_checks.cmake, which is
+      Windows-only, hash-pinned by the test owner, and therefore cannot produce observable RED on this
+      author host for a version bump. Without a portable check a partial bump - the realistic defect
+      here, where CMakeLists.txt moves to 1.1.0 but a workflow artifact name, vcpkg.json, or a
+      documentation reference is left at 1.0.0 - could ship unnoticed. The added tests read the
+      delivery metadata as data and assert it is internally consistent at 1.1.0 while the C ABI stays
+      version 1 with exactly five exports.
+    not_changed: >-
+      No production module, public header, ABI version, export set, or dependency family is changed by
+      this amendment; risk stays R2.
+  out_of_scope:
+    - include/cvforwin/**
+    - src/**
+    - .ai/project-contract.yaml
+interface_v1:
+  authority_note: >-
+    cvf_get_abi_version still returns 1; only the product/package version and documentation
+    move to 1.1.0.
+  behavior:
+    - "CMake project VERSION becomes 1.1.0; package directory, ZIP, symbols ZIP, and CI artifact names become cvforwin-1.1.0."
+    - "Package verification, clean-consumer path, and documentation references are updated consistently."
+    - "LICENSES/notices remain accurate for all statically linked components including OpenCV imgcodecs where newly used by algorithms."
+    - "docs/usage.md, docs/development.md, docs/build.md, and docs/packaging.md reflect the 1.1.0 version, new assets/template.match example, and background retention/artifact behavior."
+    - "Public header and exported symbol set are unchanged."
+invariants:
+  - "ABI version remains 1; exports remain exactly five."
+  - "One project runtime DLL; no non-system runtime dependency."
+  - "No source or interface change masked as a version bump."
+verification:
+  portable_wsl:
+    - "cmake --preset wsl-gcc-debug && cmake --build --preset wsl-gcc-debug --parallel && ctest --preset wsl-gcc-debug --output-on-failure"
+    - "cmake --build --preset wsl-gcc-debug --target format-check"
+    - "cmake --build --preset wsl-gcc-debug --target abi-check"
+  windows:
+    - "cmake --workflow --preset windows-ci and --preset windows-tests-quality; clean consumer against the 1.1.0 test-enabled package."
+acceptance_reference: >-
+  Contract NFR-009/NFR-011 and the release acceptance checks on package naming, contents,
+  and unchanged ABI version.
+rollback: "Revert version/name/documentation edits."
+reporting:
+  developer_report: .ai/reports/CVF-108-implementation.yaml
+  test_red_report: .ai/reports/CVF-108-test-red.yaml
+  test_verify_report: .ai/reports/CVF-108-test-verify.yaml
+  review_report: .ai/reviews/CVF-108.yaml
+  quality_report: .ai/reports/CVF-108-quality.yaml

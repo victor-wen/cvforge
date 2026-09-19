@@ -1,0 +1,36 @@
+batch: batch-2-runtime-artifacts
+candidate_sha: ab47119c8abc00f9d2d69cb1d61c70b22ddc1813
+segment: A
+verdict: PASS_WITH_FINDINGS
+judgment:
+  compose: true
+  single_serialize: true
+  single_finalize: true
+  warnings_safe: true
+  abi_before_side_effects: true
+  shared_state_race: false
+findings:
+- id: B2-A1
+  severity: blocking_at_review_time
+  status: FIXED_IN_b4256e7
+  file: src/artifacts/save_worker.cpp
+  line: 154
+  issue: >-
+    Cancellation/commit TOCTOU: cancel_target() from a timed-out wait_until() could run after
+    execute() passed its is_cancelled check but before commit(), publishing a final file after
+    cancellation (contract artifact_finalization_v1 forbidden_fields). Fixed by making the
+    cancellation decision, deadline re-check, and commit one critical section, and by returning
+    the completed outcome when a commit won the race.
+- id: B2-A2
+  severity: non_blocking
+  file: src/runtime/context.cpp
+  line: 521
+  issue: >-
+    Required-save queue-saturation path busy-waits in 1 ms sleeps on the caller thread until the
+    absolute deadline; deadline-bounded and only reachable after stacked prior timeouts, but a
+    condition-variable wait would avoid burning the remaining budget while holding the gate.
+notes: >-
+  Segment A source review of the combined CVF-104 + CVF-105 tree. The blocking finding B2-A1 was
+  confirmed by the controller in source and fixed by the implementation owner with a deterministic
+  TOCTOU regression test (RED before the fix). The candidate SHA therefore advances to b4256e7 and
+  every downstream gate (batch quality, CI, release verdict) must be re-run against it.

@@ -1,0 +1,106 @@
+schema_version: 1
+change_id: CVF-004
+phase: AMENDMENT
+owner: test-engineer
+recorded_at: 2026-09-19
+program: cvforwin-hardening-1.1.0
+amendment_of: .ai/reports/CVF-004-test-red.yaml
+amendment_number: 4
+implementing_change: CVF-105
+reason: >-
+  Contract FR-024 (approved 1.1.0) requires configured and enumerated UVC VID/PID values to
+  be canonicalized to four lowercase ASCII hexadecimal digits before identity comparison.
+  The interface global_configuration_v1.normalization states the same rule: camera.vendor_id
+  and camera.product_id accept either hexadecimal case at the JSON boundary and are stored
+  as exactly four lowercase ASCII hexadecimal digits. The hash-pinned CVF-004 test
+  tests/unit/cvf004_config_test.cpp instead asserted uppercase preservation and therefore
+  contradicted FR-024. This is the open finding CVF105-CONFLICT-01 recorded in
+  .ai/workflow-state.yaml and cross_change_conflict in .ai/reports/CVF-105-test-red.yaml.
+artifact:
+  path: tests/unit/cvf004_config_test.cpp
+  previous_sha256: 3cd3f957b5887b7dfbede112384c52e7befa67f25f5c9df5fb43077436750335
+  new_sha256: a4d46eaad3b2414c7f5ad4adf4c2f6fb60fc7c16b9018b493527d07e30cf2b93
+changed_assertions:
+  # The JSON fixture input for these cases is unchanged: valid_config() writes the
+  # camera selector as uppercase "1A2B"/"0C3D". Only the observable expectation changed.
+  - case: "CVF-004 B1: a valid cvforwin.json parses to the documented values and records both roots"
+    location: tests/unit/cvf004_config_test.cpp:28
+    old_assertion: 'check_text(config.camera.vendor_id, "1A2B", "camera.vendor_id");'
+    new_assertion: 'check_text(config.camera.vendor_id, "1a2b", "camera.vendor_id");'
+  - case: "CVF-004 B1: a valid cvforwin.json parses to the documented values and records both roots"
+    location: tests/unit/cvf004_config_test.cpp:29
+    old_assertion: 'check_text(config.camera.product_id, "0C3D", "camera.product_id");'
+    new_assertion: 'check_text(config.camera.product_id, "0c3d", "camera.product_id");'
+  - case: "CVF-004 B2: the camera selector accepts device_path or a VID/PID pair (VID/PID pair alone selects)"
+    location: tests/unit/cvf004_config_test.cpp:93
+    old_assertion: 'check_text(loaded.value().camera.vendor_id, "1A2B", "camera.vendor_id");'
+    new_assertion: 'check_text(loaded.value().camera.vendor_id, "1a2b", "camera.vendor_id");'
+behavior_preserved:
+  case_insensitive_acceptance: >-
+    The three amended cases keep the uppercase JSON input "1A2B"/"0C3D" and now require it
+    to be observable as "1a2b"/"0c3d", so together with the untouched lowercase-acceptance
+    section (tests/unit/cvf004_config_test.cpp:96-105) they prove both cases are accepted
+    and canonicalized to lowercase.
+  no_case_deleted: >-
+    No test case was deleted. The invalid-value rejection case
+    "VID/PID values must be exactly four hexadecimal characters" (~lines 286-297) and all
+    other assertions are untouched.
+assertion_integrity: >-
+  No assertion was removed, skipped, disabled, or weakened. Only the expected case of three
+  uppercase literals was corrected to the FR-024 canonical lowercase form; coverage of
+  case-insensitive acceptance and lowercase canonicalization is retained and strengthened.
+ownership:
+  manifest: .ai/test-ownership.yaml
+  manifest_section: CVF-004
+  new_manifest_sha256: 5fb77845c0b2873d89f5fd8a45f7a8b0f1d707dfa27f457c160ce57c8bb57526
+  other_sections_preserved_byte_for_byte: true
+  other_cvf004_files_rehashed_to_manifest:
+    - tests/unit/cvf004_test_support.h
+    - tests/unit/cvf004_error_codes_test.cpp
+    - tests/unit/cvf004_recipe_test.cpp
+    - tests/unit/cvf004_catalog_test.cpp
+    - tests/unit/cvf004_holder_test.cpp
+  mismatches: []
+evidence:
+  harness: .ai/validation/cvf004-fr024-amendment-check.sh
+  log: .ai/validation/cvf004-fr024-amendment-evidence.txt
+  format_check:
+    command: "clang-format --dry-run --Werror tests/unit/cvf004_config_test.cpp"
+    exit_code: 0
+    result: "no format drift; no reformatting required, so the recorded sha256 is stable"
+  configure:
+    command: "cmake --preset wsl-gcc-debug"
+    exit_code: 0
+  build:
+    command: "cmake --build --preset wsl-gcc-debug --target cvf004_tests --parallel"
+    exit_code: 0
+    result: "cvf004_config_test.cpp.o rebuilt; cvf004_tests relinked"
+  ctest:
+    command: "ctest --preset wsl-gcc-debug -R CVF-004 --output-on-failure"
+    exit_code: 8
+    counts: "total=69, passed=67, failed=2"
+    failing_tests:
+      - "146 - CVF-004 B1: a valid cvforwin.json parses to the documented values and records both roots"
+      - "167 - CVF-004 B2: the camera selector accepts device_path or a VID/PID pair"
+    observed:
+      - 'camera.vendor_id: "1A2B" == "1a2b" (actual uppercase, expected lowercase)'
+      - 'camera.product_id: "0C3D" == "0c3d" (actual uppercase, expected lowercase)'
+  focused_config_run:
+    command: 'build/wsl-gcc-debug/cvf004_tests "[cvf-004][config]"'
+    exit_code: 42
+    counts: "test cases: 18 | 16 passed | 2 failed; assertions: 443 | 440 passed | 3 failed"
+    result: >-
+      Exactly the three amended assertions fail. Every other config case, including the
+      invalid-value rejection case "VID/PID values must be exactly four hexadecimal
+      characters" (~line 289), passes.
+observed_pre_implementation_state: >-
+  RED as expected. The current production implementation has not yet landed FR-024 and
+  still returns uppercase "1A2B"/"0C3D", so the corrected lowercase expectations fail. The
+  three failures are exactly the amended assertions and no other CVF-004 test fails.
+  CVF-105 is the implementing change that makes these three assertions pass.
+notes:
+  - CVF-105 is the change implementing FR-024; this amendment is a test-owner correction of
+    the independent CVF-004 suite and does not modify production code.
+  - This report was written from the contract and test artifacts only; no production source
+    was read.
+blockers: []

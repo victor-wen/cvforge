@@ -1,0 +1,112 @@
+schema_version: 1
+change_id: CVF-105
+program: cvforwin-hardening-1.1.0
+title: "VID/PID normalization, ABI pointer-length pairs, atomic diagnostics warnings, single final JSON payload"
+risk: R2
+risk_justification: >-
+  Four bounded robustness fixes across config, C API validation, diagnostics, and runtime
+  serialization. No public symbol/layout/status change; the 65536-byte result buffer contract
+  is preserved and clarified.
+intent: >-
+  Remove the remaining correctness and concurrency hazards: canonicalize VID/PID before
+  matching, reject NULL+nonzero pointer-length pairs before side effects, make warning bits
+  race-free, and enforce one authoritative final JSON size bound.
+scope:
+  allowed_files:
+    production:
+      - src/recipes/**
+      - src/camera/camera_backend.*
+      - src/c_api/**
+      - src/diagnostics/**
+      - src/runtime/**
+    developer_tests:
+      - tests/unit/** (files not matching cvf1*_* independent names)
+    build_files:
+      - CMakeLists.txt (build wiring only: register the CVF-105 targets and link thread deps; never source logic)
+    evidence_harness:
+      - .ai/validation/**
+  out_of_scope:
+    - include/cvforwin/** (no ABI layout or constant change)
+    - src/camera/uvc_windows/**
+    - src/algorithms/**
+    - src/artifacts/**
+    - docs/**
+    - .ai/project-contract.yaml
+interface_v1:
+  authority_note: >-
+    The public header is unchanged; behavior is tightened to the documented v1 rules.
+  frozen_test_seam:
+    note: >-
+      Additive internal seams only; no public header, layout, or status-value change. Existing
+      declarations keep their signatures; tests exercise the new helpers directly through frozen
+      internal headers and the public C ABI.
+    vid_pid_header: src/recipes/config.h
+    vid_pid_declaration: |
+      namespace cvforwin::recipes {
+
+      /*
+       * Canonical form of a configured or enumerated VID/PID: exactly four lowercase ASCII hex
+       * digits. Returns config_value_invalid for a null/empty value, non-hex characters, or a
+       * length other than four. Identity comparison then runs on canonical values only.
+       */
+      core::Result<std::string> canonicalize_hex4(std::string_view value);
+
+      }  // namespace cvforwin::recipes
+    diagnostics_note: >-
+      Diagnostics::warnings()/clear_warnings() keep their signatures (src/diagnostics/diagnostics.h);
+      only the backing storage becomes std::atomic<std::uint32_t> and warnings_ is no longer read or
+      written non-atomically. No new test-facing declaration is required.
+    payload_header: src/runtime/context.h
+    payload_declaration: |
+      namespace cvforwin::runtime {
+
+      /* Maximum UTF-8 payload bytes, excluding the mandatory trailing NUL. */
+      constexpr std::size_t k_max_result_payload_bytes = 65535;
+
+      /*
+       * Serializes the fully assembled result object exactly once (measurements plus optional
+       * defects) and enforces the payload bound; over-bound fails with buffer_too_small and
+       * error_code runtime_result_too_large before any C API copy.
+       */
+      core::Result<std::string> serialize_result_payload(const nlohmann::json& output);
+
+      struct InspectionOutcome {
+          /* ... existing fields unchanged ... */
+          /* Canonical serialization of output_json, produced once by the runtime. */
+          std::string output_text;
+      };
+
+      }  // namespace cvforwin::runtime
+    c_api_note: >-
+      The C API validates every pointer-length/capacity pair before any side effect and copies
+      outcome.output_text verbatim; it must not re-serialize the object. No declaration changes.
+    behavior:
+    - "Global config: camera.vendor_id/product_id accept either hex case and are stored as exactly four lowercase ASCII hex digits; non-hex or wrong length still fails."
+    - "UVC enumeration already produces lowercase VID/PID; identity comparison remains exact after both sides are canonical."
+    - "C ABI: every pointer-length/capacity pair is validated before constructing string_view or any side effect; NULL+nonzero -> invalid_argument. Zero-length optional input_json is absent regardless of pointer. Required identifiers/roots require non-NULL and positive length."
+    - "Diagnostics: warnings_ becomes std::atomic<std::uint32_t>; log()/create() write via fetch_or(relaxed); warnings() reads via load(relaxed); clear_warnings() stores warning_none. Host callback invocations are serialized without holding the warning/state lock across host code."
+    - "Runtime: build the complete output object once (measurements plus optional defects), serialize once, and store the serialized string; enforce UTF-8 payload <= 65535 bytes so the 65536-byte buffer plus NUL always fits; over-bound failure is deterministic and reported before the C API copy."
+    - "C API copies the already-serialized string and must not re-dump the object."
+    - "The old fragment estimate (measurements.dump().size() + defects.dump().size()) must not be the acceptance authority."
+invariants:
+  - "No ABI layout, export, or status-value change."
+  - "No data race on warning bits; no lost warning update."
+  - "No successful result is truncated; over-bound results fail rather than silently dropping data."
+verification:
+  portable_wsl:
+    - "cmake --preset wsl-gcc-debug && cmake --build --preset wsl-gcc-debug --parallel"
+    - "ctest --preset wsl-gcc-debug --output-on-failure"
+    - "cmake --build --preset wsl-gcc-debug --target format-check"
+    - "cmake --preset wsl-gcc-asan && cmake --build --preset wsl-gcc-asan --parallel && ctest --preset wsl-gcc-asan --output-on-failure"
+    - "cmake --build --preset wsl-gcc-debug --target abi-check"
+    - "cmake --preset wsl-clang-analysis && cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+acceptance_reference: >-
+  Contract FR-024/FR-025/FR-026/FR-027, final_result_payload_v1, and the corresponding
+  acceptance checks.
+rollback: "Revert the four focused fixes in their owning modules."
+reporting:
+  developer_report: .ai/reports/CVF-105-implementation.yaml
+  test_red_report: .ai/reports/CVF-105-test-red.yaml
+  test_verify_report: .ai/reports/CVF-105-test-verify.yaml
+  review_report: .ai/reviews/CVF-105.yaml
+  quality_report: .ai/reports/CVF-105-quality.yaml

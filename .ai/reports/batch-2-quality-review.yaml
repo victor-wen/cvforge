@@ -1,0 +1,27 @@
+format: 1
+change_id: CVF-105
+script_report: /home/administrator/c_cpp_project/cvforwin/.ai/reports/batch-2-quality.json
+script_verdict: PASS
+script_exit_code: 0
+candidate_sha: b4256e7e108e0631fb10622e08c9fe5e0823616c
+plan_sha256: 51a11d4b68054e644a1f1a4d86b45d41f78125bb83593c9f3e7f893ddefb03f5
+commands_checked: 6
+test_counts:
+  passed: 838
+  failed: 0
+  skipped: 0
+failed_command_ids: []
+analysis: >-
+  Batch-2 candidate gate PASS at the frozen SHA b4256e7e108e0631fb10622e08c9fe5e0823616c (= HEAD) for the
+  combined CVF-104 + CVF-105 tree. All six canonical WSL commands passed: configure, build, ctest (419/419),
+  format (115 files), clang static analysis (24 files), sanitizer suite (419/419) - 838 passed / 0 failed /
+  0 skipped aggregate. The ownership manifest
+  26ad8d3c9445cec424532cd0b06a0421d951adc653ea54a3c8baaf621ff8b3c9 reconciles with zero mismatches across the
+  eight independent CVF-105 files, and the batch descriptor, both change contracts, workflow state, and both
+  task reviewer verdicts (CVF-104 PASS_WITH_FINDINGS at 2813f9ab..., CVF-105 PASS_WITH_FINDINGS at 88acb220...)
+  are pinned. Native Windows evidence for each member is recorded separately: batch-2 fix run 35400487206 at b4256e7
+  (463/463 test-enabled, 326/326 release); earlier member runs 35386486871 at de167ba (397/397) and 35396078367 at ab47119 (462/462 / 325/325). Hardware evidence is
+  absent by design and not claimed.
+next_action: >-
+  Dispatch the release-reviewer for batch-2 to inspect the combined final source, challenge the task reviews and
+  the carried non-blocking findings, and confirm the platform matrix, then proceed to batch-3 (CVF-106).

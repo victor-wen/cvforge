@@ -1,0 +1,29 @@
+format: 1
+change_id: CVF-103
+script_report: /home/administrator/c_cpp_project/cvforwin/.ai/reports/CVF-103-quality.json
+script_verdict: PASS
+script_exit_code: 0
+candidate_sha: 4c2c1d29eb3fc4f74d9d88ffb378379045b32f7d
+plan_sha256: ca942338e51ebca203e7e8f8e5e0eb7db52c5df36069b2d5bf03e965103e7b4b
+commands_checked: 6
+test_counts:
+  passed: 614
+  failed: 0
+  skipped: 0
+failed_command_ids: []
+analysis: >-
+  Deterministic gate PASS at HEAD 4c2c1d29eb3fc4f74d9d88ffb378379045b32f7d (CVF-102 delivery; CVF-103 is the
+  uncommitted worktree under test) with a stable worktree fingerprint before and after
+  (ec86b7a4fb2e013ba6498f6100bf53a7a606287d5d6b0db686c1de6016b0ee9b). All six canonical WSL commands passed:
+  configure, build, ctest (307/307), format (94 files), clang static analysis (22 files), and sanitizer suite
+  (307/307) - 614 passed / 0 failed / 0 skipped in aggregate. The ownership manifest pinned
+  cb7a6180cfb4b36464d2d2f60ab79be140ae6eb53dcde94b3261d2ebea745a21 reconciles with zero mismatches across the
+  two independent test files, and there is no developer/independent test overlap. The plan pins the approved
+  1.1.0 contract, the CVF-103 change contract, the ownership manifest, workflow state, and the reviewer verdict
+  595f375b67bbba9901c766d3ed68c8b5ff264cce7d3f2634396de7c3819b1890. Windows MSVC execution of
+  cvf103_windows_uvc_tests remains an explicit deferred platform for windows-tests-quality CI and is not claimed
+  here.
+next_action: >-
+  Commit only the CVF-103 source/test/build files at this scope, push to main, and wait for the windows-2022 CI
+  jobs (windows-ci, windows-tests-quality) to succeed at the new SHA; then freeze the batch-1 candidate and run
+  the batch-level quality gate plus release-reviewer before declaring batch-1 complete.

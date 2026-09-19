@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "change_id": "CVF-101",
+  "verdict": "PASS",
+  "git_head": "85e1de0f80a3afbcff2f42049ee23e1e99cf7cec",
+  "git_head_after": "85e1de0f80a3afbcff2f42049ee23e1e99cf7cec",
+  "worktree_fingerprint": "e3450b33a876134204a0b3f8f0883513e9f6e930055c4208c11692b624287df3",
+  "worktree_fingerprint_after": "e3450b33a876134204a0b3f8f0883513e9f6e930055c4208c11692b624287df3",
+  "plan_sha256": "61c19aa491571213e298fc2310c230534ab2a2c6c3d051fa33842a00a06a5dce",
+  "required_platforms": [
+    "wsl-portable"
+  ],
+  "commands": [
+    {
+      "platform": "wsl-portable",
+      "id": "wsl_configure",
+      "kind": "build",
+      "command": "cmake --preset wsl-gcc-debug",
+      "started": "2026-09-17T23:35:22.233Z",
+      "exit_code": 0,
+      "verdict": "PASS",
+      "counts": null,
+      "summary": "Preset CMake variables:\n\n  CMAKE_BUILD_TYPE=\"Debug\"\n  CMAKE_CXX_COMPILER=\"g++\"\n  CMAKE_C_COMPILER=\"gcc\"\n  CMAKE_EXPORT_COMPILE_COMMANDS=\"ON\"\n  CMAKE_TOOLCHAIN_FILE:FILEPATH=\"/home/administrator/vcpkg/scripts/buildsystems/vcpkg.cmake\"\n  CVFORWIN_BUILD_TESTS=\"ON\"\n  CVFORWIN_WARNINGS_AS_ERRORS=\"ON\"\n  VCPKG_HOST_TRIPLET=\"x64-linux\"\n  VCPKG_MANIFEST_FEATURES=\"test\"\n  VCPKG_TARGET_TRIPLET=\"x64-linux\"\n\nPreset environment variables:\n\n  VCPKG_MAX_CONCURRENCY=\"6\"\n\n-- Running vcpkg install\nwarning: attempting to set builtin-baseline in vcpkg.json while overriding the default-registry in vcpkg-configuration.json.\nthe default-registry from vcpkg-configuration.json will be used.\nDetecting compiler hash for triplet x64-linux...\nCompiler found: /usr/bin/c++\nThe following packages are already installed:\n    catch2:x64-linux@3.16.0\n  * fmt:x64-linux@12.2.0#1\n  * libjpeg-turbo:x64-linux@3.2.0\n  * libpng:x64-linux@1.6.58\n    nlohmann-json:x64-linux@3.12.0#2\n    opencv4[core,thread,png,jpeg,fs]:x64-linux@4.12.0#9\n    spdlog[core,tz-offset,fmt]:x64-linux@1.17.0#1\n  * vcpkg-cmake:x64-linux@2025-08-07\n  * vcpkg-cmake-config:x64-linux@2026-07-21\n  * vcpkg-get-python-packages:x64-linux@2025-04-05\n  * zlib:x64-linux@1.3.2#2\nThe package nlohmann-json provides CMake targets:\r\n\r\n    find_package(nlohmann_json CONFIG REQUIRED)\r\n    target_link_libraries(main PRIVATE nlohmann_json::nlohmann_json)\r\n\r\nThe package nlohmann-json can be configured to not provide implicit conversions via a custom triplet file:\r\n\r\n    set(nlohmann-json_IMPLICIT_CONVERSIONS OFF)\r\n\r\nFor more information, see the docs here:\r\n    \r\n    https://json.nlohmann.me/api/macros/json_use_implicit_conversions/\r\n\nopencv4 is compatible with built-in CMake variables. In case of multiple OpenCV version installed, set OpenCV_ROOT *before* the find_package call:\n\n    set(OpenCV_ROOT \"${VCPKG_INSTALLED_DIR}/x64-linux/share/opencv4\")\n    find_package(OpenCV REQUIRED)\n\nThe package spdlog provides CMake targets:\n\n    find_package(spdlog CONFIG REQUIRED)\n    target_link_libraries(main PRIVATE spdlog::spdlog)\n\n    # Or use the header-only version\n    find_package(spdlog CONFIG REQUIRED)\n    target_link_libraries(main PRIVATE spdlog::spdlog_header_only)\n\ncatch2 provides CMake targets:\n\n  # this is heuristically generated, and may not be correct\n  find_package(Catch2 CONFIG REQUIRED)\n  target_link_libraries(main PRIVATE Catch2::Catch2 Catch2::Catch2WithMain)\n\ncatch2 provides pkg-config modules:\n\n  # A modern, C++-native test framework for C++14 and above (links in default main)\n  catch2-with-main\n\n  # A modern, C++-native, test framework for C++14 and above\n  catch2\n\nAll requested installations completed successfully in: 76.1 us\n-- Running vcpkg install - done\n-- cvforwin: compiler GNU 13.3.0\n-- cvforwin: build type Debug\n-- cvforwin: format-check uses /usr/bin/clang-format\n-- Configuring done (12.6s)\n-- Generating done (0.0s)\n-- Build files have been written to: /home/administrator/c_cpp_project/cvforwin/build/wsl-gcc-debug\n",
+      "log": "/tmp/opencode-quality/ee5763d5f69076a8/CVF-101/wsl_configure.log",
+      "timed_out": false
+    },
+    {
+      "platform": "wsl-portable",
+      "id": "wsl_build",
+      "kind": "build",
+      "command": "cmake --build --preset wsl-gcc-debug --parallel",
+      "started": "2026-09-17T23:35:37.157Z",
+      "exit_code": 0,
+      "verdict": "PASS",
+      "counts": null,
+      "summary": "[0/2] Re-checking globbed directories...\nninja: no work to do.\n",
+      "log": "/tmp/opencode-quality/ee5763d5f69076a8/CVF-101/wsl_build.log",
+      "timed_out": false
+    },
+    {
+      "platform": "wsl-portable",
+      "id": "wsl_test",
+      "kind": "test",
+      "command": "ctest --preset wsl-gcc-debug --output-on-failure",
+      "started": "2026-09-17T23:35:37.191Z",
+      "exit_code": 0,
+      "verdict": "PASS",
+      "counts": {
+        "passed": 275,
+        "failed": 0,
+        "skipped": 0,
+        "total": 275
+      },
+      "summary": "..................................   Passed    0.00 sec\n        Start 263: CVF-101 helper: clamp_to_byte saturates to the 8-bit range\n263/275 Test #263: CVF-101 helper: clamp_to_byte saturates to the 8-bit range .................................................   Passed    0.00 sec\n        Start 264: CVF-101 helper: full-range YUV clamps the chroma extremes without wrapping\n264/275 Test #264: CVF-101 helper: full-range YUV clamps the chroma extremes without wrapping .................................   Passed    0.00 sec\n        Start 265: CVF-101 helper: full-range YUV maps neutral chroma to the exact luma value\n265/275 Test #265: CVF-101 helper: full-range YUV maps neutral chroma to the exact luma value .................................   Passed    0.00 sec\n        Start 266: CVF-101 helper: packed region extent is (height-1)*|pitch| + row_bytes\n266/275 Test #266: CVF-101 helper: packed region extent is (height-1)*|pitch| + row_bytes .....................................   Passed    0.00 sec\n        Start 267: CVF-101 helper: row region offset is measured from the lowest addressed byte\n267/275 Test #267: CVF-101 helper: row region offset is measured from the lowest addressed byte ...............................   Passed    0.00 sec\n        Start 268: CVF-101 helper: the accessible extent is rebased onto the lowest addressed byte\n268/275 Test #268: CVF-101 helper: the accessible extent is rebased onto the lowest addressed byte ............................   Passed    0.00 sec\n        Start 269: CVF-101 helper: the lowest addressed byte follows the pitch sign\n269/275 Test #269: CVF-101 helper: the lowest addressed byte follows the pitch sign ...........................................   Passed    0.00 sec\n        Start 270: CVF-101 helper: the pitch magnitude rejects INT32_MIN and mirrors the sign\n270/275 Test #270: CVF-101 helper: the pitch magnitude rejects INT32_MIN and mirrors the sign .................................   Passed    0.00 sec\n        Start 271: cvf.abi.c11_surface\n271/275 Test #271: cvf.abi.c11_surface ........................................................................................   Passed    0.00 sec\n        Start 272: cvf.abi.runtime\n272/275 Test #272: cvf.abi.runtime ............................................................................................   Passed    0.00 sec\n        Start 273: cvf.abi.cpp20_include\n273/275 Test #273: cvf.abi.cpp20_include ......................................................................................   Passed    0.00 sec\n        Start 274: cvf.abi.header_isolation\n274/275 Test #274: cvf.abi.header_isolation ...................................................................................   Passed    0.00 sec\n        Start 275: cvf006.lifecycle\n275/275 Test #275: cvf006.lifecycle ...........................................................................................   Passed    0.02 sec\n\n100% tests passed, 0 tests failed out of 275\n\nTotal Test time (real) =   3.03 sec\n",
+      "log": "/tmp/opencode-quality/ee5763d5f69076a8/CVF-101/wsl_test.log",
+      "timed_out": false
+    },
+    {
+      "platform": "wsl-portable",
+      "id": "wsl_format",
+      "kind": "format",
+      "command": "cmake --build --preset wsl-gcc-debug --target format-check",
+      "started": "2026-09-17T23:35:40.287Z",
+      "exit_code": 0,
+      "verdict": "PASS",
+      "counts": null,
+      "summary": "[0/2] Re-checking globbed directories...\n[1/1] Checking clang-format conformance (tests/abi and tests/camera excluded: test-owner files)\n-- format-check passed: 87 file(s) conform to .clang-format\n",
+      "log": "/tmp/opencode-quality/ee5763d5f69076a8/CVF-101/wsl_format.log",
+      "timed_out": false
+    },
+    {
+      "platform": "wsl-portable",
+      "id": "wsl_static",
+      "kind": "static",
+      "command": "cmake --preset wsl-clang-analysis && cmake --build --preset wsl-clang-analysis --target static-analysis --parallel",
+      "started": "2026-09-17T23:35:43.570Z",
+      "exit_code": 0,
+      "verdict": "PASS",
+      "counts": null,
+      "summary": "ildsystems/vcpkg.cmake\"\n  CVFORWIN_BUILD_TESTS=\"ON\"\n  CVFORWIN_ENABLE_CLANG_TIDY=\"OFF\"\n  CVFORWIN_WARNINGS_AS_ERRORS=\"ON\"\n  VCPKG_HOST_TRIPLET=\"x64-linux\"\n  VCPKG_MANIFEST_FEATURES=\"test\"\n  VCPKG_TARGET_TRIPLET=\"x64-linux\"\n\nPreset environment variables:\n\n  VCPKG_MAX_CONCURRENCY=\"6\"\n\n-- Running vcpkg install\nwarning: attempting to set builtin-baseline in vcpkg.json while overriding the default-registry in vcpkg-configuration.json.\nthe default-registry from vcpkg-configuration.json will be used.\nDetecting compiler hash for triplet x64-linux...\nCompiler found: /usr/bin/c++\nThe following packages are already installed:\n    catch2:x64-linux@3.16.0\n  * fmt:x64-linux@12.2.0#1\n  * libjpeg-turbo:x64-linux@3.2.0\n  * libpng:x64-linux@1.6.58\n    nlohmann-json:x64-linux@3.12.0#2\n    opencv4[core,thread,png,jpeg,fs]:x64-linux@4.12.0#9\n    spdlog[core,tz-offset,fmt]:x64-linux@1.17.0#1\n  * vcpkg-cmake:x64-linux@2025-08-07\n  * vcpkg-cmake-config:x64-linux@2026-07-21\n  * vcpkg-get-python-packages:x64-linux@2025-04-05\n  * zlib:x64-linux@1.3.2#2\nThe package nlohmann-json provides CMake targets:\r\n\r\n    find_package(nlohmann_json CONFIG REQUIRED)\r\n    target_link_libraries(main PRIVATE nlohmann_json::nlohmann_json)\r\n\r\nThe package nlohmann-json can be configured to not provide implicit conversions via a custom triplet file:\r\n\r\n    set(nlohmann-json_IMPLICIT_CONVERSIONS OFF)\r\n\r\nFor more information, see the docs here:\r\n    \r\n    https://json.nlohmann.me/api/macros/json_use_implicit_conversions/\r\n\nopencv4 is compatible with built-in CMake variables. In case of multiple OpenCV version installed, set OpenCV_ROOT *before* the find_package call:\n\n    set(OpenCV_ROOT \"${VCPKG_INSTALLED_DIR}/x64-linux/share/opencv4\")\n    find_package(OpenCV REQUIRED)\n\nThe package spdlog provides CMake targets:\n\n    find_package(spdlog CONFIG REQUIRED)\n    target_link_libraries(main PRIVATE spdlog::spdlog)\n\n    # Or use the header-only version\n    find_package(spdlog CONFIG REQUIRED)\n    target_link_libraries(main PRIVATE spdlog::spdlog_header_only)\n\ncatch2 provides CMake targets:\n\n  # this is heuristically generated, and may not be correct\n  find_package(Catch2 CONFIG REQUIRED)\n  target_link_libraries(main PRIVATE Catch2::Catch2 Catch2::Catch2WithMain)\n\ncatch2 provides pkg-config modules:\n\n  # A modern, C++-native test framework for C++14 and above (links in default main)\n  catch2-with-main\n\n  # A modern, C++-native, test framework for C++14 and above\n  catch2\n\nAll requested installations completed successfully in: 118 us\n-- Running vcpkg install - done\n-- cvforwin: compiler Clang 18.1.3\n-- cvforwin: build type Debug\n-- cvforwin: format-check uses /usr/bin/clang-format\n-- Configuring done (12.8s)\n-- Generating done (0.0s)\n-- Build files have been written to: /home/administrator/c_cpp_project/cvforwin/build/wsl-clang-analysis\n[0/2] Re-checking globbed directories...\n[1/1] Running clang-tidy over project sources (warnings are errors)\n-- static-analysis passed: 22 file(s) clean under .clang-tidy\n",
+      "log": "/tmp/opencode-quality/ee5763d5f69076a8/CVF-101/wsl_static.log",
+      "timed_out": false
+    },
+    {
+      "platform": "wsl-portable",
+      "id": "wsl_sanitizers",
+      "kind": "test",
+      "command": "cmake --preset wsl-gcc-asan && cmake --build --preset wsl-gcc-asan --parallel && ctest --preset wsl-gcc-asan --output-on-failure",
+      "started": "2026-09-17T23:41:12.323Z",
+      "exit_code": 0,
+      "verdict": "PASS",
+      "counts": {
+        "passed": 275,
+        "failed": 0,
+        "skipped": 0,
+        "total": 275
+      },
+      "summary": "..................................   Passed    0.01 sec\n        Start 263: CVF-101 helper: clamp_to_byte saturates to the 8-bit range\n263/275 Test #263: CVF-101 helper: clamp_to_byte saturates to the 8-bit range .................................................   Passed    0.01 sec\n        Start 264: CVF-101 helper: full-range YUV clamps the chroma extremes without wrapping\n264/275 Test #264: CVF-101 helper: full-range YUV clamps the chroma extremes without wrapping .................................   Passed    0.01 sec\n        Start 265: CVF-101 helper: full-range YUV maps neutral chroma to the exact luma value\n265/275 Test #265: CVF-101 helper: full-range YUV maps neutral chroma to the exact luma value .................................   Passed    0.01 sec\n        Start 266: CVF-101 helper: packed region extent is (height-1)*|pitch| + row_bytes\n266/275 Test #266: CVF-101 helper: packed region extent is (height-1)*|pitch| + row_bytes .....................................   Passed    0.01 sec\n        Start 267: CVF-101 helper: row region offset is measured from the lowest addressed byte\n267/275 Test #267: CVF-101 helper: row region offset is measured from the lowest addressed byte ...............................   Passed    0.01 sec\n        Start 268: CVF-101 helper: the accessible extent is rebased onto the lowest addressed byte\n268/275 Test #268: CVF-101 helper: the accessible extent is rebased onto the lowest addressed byte ............................   Passed    0.01 sec\n        Start 269: CVF-101 helper: the lowest addressed byte follows the pitch sign\n269/275 Test #269: CVF-101 helper: the lowest addressed byte follows the pitch sign ...........................................   Passed    0.01 sec\n        Start 270: CVF-101 helper: the pitch magnitude rejects INT32_MIN and mirrors the sign\n270/275 Test #270: CVF-101 helper: the pitch magnitude rejects INT32_MIN and mirrors the sign .................................   Passed    0.01 sec\n        Start 271: cvf.abi.c11_surface\n271/275 Test #271: cvf.abi.c11_surface ........................................................................................   Passed    0.03 sec\n        Start 272: cvf.abi.runtime\n272/275 Test #272: cvf.abi.runtime ............................................................................................   Passed    0.02 sec\n        Start 273: cvf.abi.cpp20_include\n273/275 Test #273: cvf.abi.cpp20_include ......................................................................................   Passed    0.02 sec\n        Start 274: cvf.abi.header_isolation\n274/275 Test #274: cvf.abi.header_isolation ...................................................................................   Passed    0.01 sec\n        Start 275: cvf006.lifecycle\n275/275 Test #275: cvf006.lifecycle ...........................................................................................   Passed    0.08 sec\n\n100% tests passed, 0 tests failed out of 275\n\nTotal Test time (real) =  13.75 sec\n",
+      "log": "/tmp/opencode-quality/ee5763d5f69076a8/CVF-101/wsl_sanitizers.log",
+      "timed_out": false
+    }
+  ],
+  "ownership": {
+    "files_checked": 1,
+    "mismatches": []
+  },
+  "deferred_platforms": [
+    {
+      "platform": "windows-msvc",
+      "reason": "The Windows-only Media Foundation seam cannot be compiled or executed on this Linux host; the independent Windows component suite is registered for windows-tests-quality and runs in CI, and native MSVC execution is deferred to the windows-2022 jobs. The -D_WIN32 mirror run on Linux is a behavioral proxy, not Windows ABI evidence."
+    }
+  ],
+  "reasons": [],
+  "completed_at": "2026-09-17T23:42:07.326Z",
+  "gate_exit_code": 0
+}

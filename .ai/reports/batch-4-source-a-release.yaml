@@ -1,0 +1,291 @@
+# Segment A source-level review: batch-4-release (CVF-107, CVF-108)
+# Reviewer: release-reviewer, SEGMENT A (per-member semantic audit). NO VERDICT ISSUED HERE.
+# NOTE: the controller requested .ai/reviews/batch-4-source-a.yaml, but this role's write policy
+# only permits .ai/reports/*-release.yaml; the artifact is therefore stored at this permitted path.
+# Read-only review; every claim is grounded in file content or recorded logs cited as file:line.
+# candidate_sha under review: 04b3b3bbed9c9e8ad9b043c5711a3733278609b8
+
+segment: A
+recorded_at: 2026-09-19
+method_note: >-
+  No .codegraph index exists in this workspace; all source reads were direct file reads. No shell was
+  available, so no sha256 was recomputed and no command was executed; runtime claims are taken only
+  from recorded logs and reports that were read line by line.
+
+item_1_cvf107_mandatory_check_machinery:
+  status: PASS_WITH_FINDINGS
+  nbf01_fix_verification: REAL_AND_COMPLETE_FOR_ORIENTATION
+  evidence:
+    - "Mandatory orientation gate is unconditional and precedes all control logic: tests/hardware/uvc_smoke.cpp:977-984 fails with report.check(false) whenever required && !CVF_HW_ORIENTATION_TEST, regardless of CVF_HW_ORIENTATION_SYMMETRIC_CONTROL (the required_fix from CVF107-NBF-01 part (a))."
+    - "Both-flags path runs the positive asymmetric checks first (uvc_smoke.cpp:1010-1016: |top-bottom| >= min AND signed top-bottom >= min), then adds the negative control with no early return (uvc_smoke.cpp:1021-1026) — required_fix part (b)."
+    - "Skip path survives only when neither flag is set and the check is not required (uvc_smoke.cpp:986-989)."
+    - "Colour mandatory gate is fail-closed when the target is not requested (uvc_smoke.cpp:1036-1045), but see finding B4A-01 for the neutral-control analogue."
+    - "Stress mode forces require_orientation/require_color/require_timeout (uvc_smoke.cpp:1348-1350), rejects CVF_HW_EXPECT_ZERO_DEVICES in stress (1374-1377 / 1395-1398), and refuses short stress runs (1127-1131)."
+    - "On-hardware confirmation of the fixed code: cvf107-hw-verifyB-stress-shortcycle-guard.txt:45 (short-stress guard fired, exit 1) and :43 (new H7 message with the 'not a substitute' parenthetical), cvf107-hw-verifyC-symmetric-control-failclosed.txt:42,60 (H7 mandatory failure with require_orientation=yes, RESULT: FAIL, exit 1)."
+    - "1000-cycle stress run honestly failed H7/H8 as mandatory checks (cvf107-hw-1000cycles.txt:43-44,70-73,94)."
+  selector_invariant: PASS
+  evidence_selector:
+    - "The only device selection is cam::resolve_identity(devices, selector) at uvc_smoke.cpp:1434; no devices[0]/first-device indexing exists anywhere in the suite."
+    - "Shared resolver is fail-closed with no fallback: src/camera/camera_backend.cpp:62-87 (empty -> selector_empty/invalid_argument; multiple -> camera_identity_ambiguous; none -> camera_not_found)."
+    - "Suite-level negatives pin the same (uvc_smoke.cpp:759-812); missing selector is a configuration failure (1423-1432)."
+    - "On-hardware fail-closed proof: cvf107-hw-selector-failclosed.txt:3,12-14,16-18,39 — with YLX-4K-S858 absent and ACER present, H2 failed camera_not_found, H3-H8 skipped, exit 1; the suite did not capture from the single attached camera."
+  target_gating: PASS
+  evidence_gating:
+    - "Hardware target: CMakeLists.txt:1795-1822 — add_executable(cvf_hw_uvc_smoke) inside if(CVFORWIN_BUILD_HARDWARE_TESTS) AND nested if(WIN32); no add_test and no catch_discover_tests/gtest_discover_tests in the block; non-Windows branch reports the option is ignored (1818-1820)."
+    - "Option default OFF: cmake/CvfOptions.cmake:55."
+    - "MSVC _CRT_SECURE_NO_WARNINGS is PRIVATE and target-scoped (CMakeLists.txt:1805-1810), matching the cvf006_lifecycle precedent at 770-775; no global add_compile_definitions/add_definitions carries it (pinned by the wiring test)."
+    - "No CMakePresets.json entry sets the option (grep over *.json found no CVFORWIN_BUILD_HARDWARE_TESTS/CVF_HW/hw_uvc reference outside .ai/**)."
+    - ".github/** contains no reference to HARDWARE/hw_uvc/CVF_HW (grep, no matches)."
+    - "Wiring invariants are machine-pinned by tests/unit/test_cvf107_hardware_wiring_developer.cpp:270-437 (gate nesting at 279-335, CTest ban at 338-356, CRT scoping at 358-407, .github ban at 409-436), with mutation evidence that all four defect classes go RED (CVF-107-build-wiring-test.yaml:83-125; four mutations RED, file restored byte-identical)."
+  findings:
+    - id: B4A-01
+      severity: non_blocking
+      owner: test-engineer
+      issue: >-
+        The colour-check analogue of NBF-01 was not hardened. When the colour check is mandatory
+        (stress mode or CVF_HW_REQUIRE_COLOR=1), an operator can set CVF_HW_COLOR_TEST=1 with
+        CVF_HW_COLOR_EXPECT=neutral and pass H8 using only the neutral spread control
+        (uvc_smoke.cpp:1073-1081 returns after the spread check), i.e. without the documented
+        CVF-COLOR-1 saturated swatch and without any dominance/level evidence. Orientation received
+        the explicit "control is not a substitute" gate (uvc_smoke.cpp:977-984); colour did not.
+        docs/hardware-uvc.md:120-124 calls the gray card "the documented neutral target" while the
+        suite header calls the same mode a "neutral control" (uvc_smoke.cpp:81), so the manual and
+        the code disagree on its status.
+      evidence: "tests/hardware/uvc_smoke.cpp:81,1036-1045,1073-1081; docs/hardware-uvc.md:120-124"
+      why_not_blocking: >-
+        The captured stress evidence failed H8 honestly (cvf107-hw-1000cycles.txt:44,72) and
+        orientation/colour are recorded UNVERIFIED for this release, so no false evidence was
+        manufactured; the substitution would be visible in the log (expected=neutral is printed at
+        uvc_smoke.cpp:1065-1067) rather than silent.
+      required_fix: >-
+        Mirror the orientation hardening: when the colour check is required, reject
+        CVF_HW_COLOR_EXPECT=neutral (or at minimum record a distinct 'neutral-control-only' outcome
+        that cannot be counted as CVF-COLOR-1 saturated-target evidence), and align the docs wording
+        so neutral is described as a control, not a target.
+    - id: B4A-02
+      severity: non_blocking
+      owner: test-engineer
+      issue: >-
+        Setting both CVF_HW_ORIENTATION_TEST=1 and CVF_HW_ORIENTATION_SYMMETRIC_CONTROL=1 can never
+        produce a fully passing run: the positive check requires |top-bottom| >= min_contrast
+        (uvc_smoke.cpp:1011-1015) while the control requires |top-bottom| < min_contrast
+        (uvc_smoke.cpp:1022) on the same captured frame, so exactly one of the two must fail.
+        docs/hardware-uvc.md:117-118 describes the combined mode without telling the operator it is
+        inherently un-passable.
+      evidence: "tests/hardware/uvc_smoke.cpp:1010-1026; docs/hardware-uvc.md:110-118"
+      why_not_blocking: >-
+        The failure direction is fail-closed (it can never manufacture a false PASS); this matches
+        the reviewer-prescribed NBF-01 fix verbatim. It is an operator-ergonomics/documentation
+        gap, not a soundness hole.
+      required_fix: >-
+        Document that the symmetric control must be run in a separate non-required run with a
+        symmetric card (the only mode in which it is exercisable), or capture two frames when both
+        flags are set.
+
+item_2_cvf107_hardware_evidence_honesty:
+  status: PASS_WITH_FINDINGS
+  cross_check_summary: >-
+    Every quantitative claim in .ai/reports/CVF-107-hardware.yaml was matched against the raw logs
+    under .ai/validation/cvf107-hardware-evidence/ and found supported; orientation and colour are
+    recorded as UNVERIFIED, never as passes.
+  claim_by_claim:
+    - claim: "smoke-10-cycles: exit 0, 34 passed / 0 failed / 3 skipped"
+      verdict: SUPPORTED
+      evidence: "cvf107-hw-smoke-10cycles.txt:59-60,81-84"
+    - claim: "stress-1000-cycles: 1000 consecutive valid captures, all violation counters zero"
+      verdict: SUPPORTED
+      evidence: "cvf107-hw-1000cycles.txt:48-58 (progress 100..1000 valid=N invalid=0; final valid=1000 invalid=0, dimension/type/continuity/sequence violations all 0)"
+    - claim: "forced timeout H5a/H5b/H5c/H5d passed in the stress run"
+      verdict: SUPPORTED
+      evidence: "cvf107-hw-1000cycles.txt:34-42 (all four probes pass, H5 mandatory check pass)"
+    - claim: "full unplug/replug cycle on YLX-4K-S858, exit 0, 43/0/2"
+      verdict: SUPPORTED
+      evidence: "cvf107-hw-reconnect-unplug.txt:58-73 (manual steps, 0xC00D3EA2 at :65, bounded retry 21 ms at :67, recovery sequence=1 640x480 at :71-73), summary :75-76, exit :97"
+    - claim: "second-device run (builtin ACER) confirms the amended H3 is not device-specific"
+      verdict: SUPPORTED
+      evidence: "cvf107-hw-builtin-acer-10cycles.txt:30-31 (fresh-instance H3 passes on ACER), :58-59, :80 (34/0/3, exit 0)"
+    - claim: "selector-fail-closed run demonstrates no first-device fallback"
+      verdict: SUPPORTED
+      evidence: "cvf107-hw-selector-failclosed.txt:3,12-14,39 (exit 1, FAIL_AS_DESIGNED; no capture from the attached ACER)"
+    - claim: "post-review-fix confirmation runs (verifyA/B/C)"
+      verdict: SUPPORTED
+      evidence: "cvf107-hw-verifyA-baseline-10cycles.txt:59-60 (34/0/3 PASS); verifyB:45,53-57 (guard fired, 29/3/1, exit 1); verifyC:42,59-61 (H7 mandatory fail, 34/1/2, exit 1)"
+    - claim: "orientation and colour recorded as UNVERIFIED, never counted as passes"
+      verdict: SUPPORTED
+      evidence: "CVF-107-hardware.yaml:44-49 (UNVERIFIED classification), :118-123 (contract mapping UNVERIFIED for both), :145-148 (honesty statement); logs show them as [fail] with exit 1 (cvf107-hw-1000cycles.txt:43-44,73,94)"
+  findings:
+    - id: B4A-03
+      severity: non_blocking
+      owner: test-engineer
+      issue: >-
+        The report's verifyC description claims "H7 still fails with the symmetric control set"
+        (CVF-107-hardware.yaml:115), but nothing in the recorded log can confirm that
+        CVF_HW_ORIENTATION_SYMMETRIC_CONTROL was actually set for that run: the H7 failure message
+        is a static string emitted regardless of the control flag (uvc_smoke.cpp:978-982) and the
+        release-evidence block records only the require_* flags, not the CVF_HW_* control values
+        (uvc_smoke.cpp:476-479). The semantic conclusion is nonetheless proven jointly by code (the
+        977 gate is unconditional) plus the log (the gate fired under require_orientation=yes); the
+        unverifiable part is only the operator's flag state.
+      evidence: "CVF-107-hardware.yaml:110-116; cvf107-hw-verifyC-symmetric-control-failclosed.txt:10,42,75-78; tests/hardware/uvc_smoke.cpp:470,978-482"
+      required_fix: >-
+        Add the relevant CVF_HW_* selector/target/control flag values to the release-evidence
+        block (or annotate the report with the exact environment of each run) so future
+        control-flag claims are self-evidencing.
+    - id: B4A-04
+      severity: non_blocking
+      owner: build-controller
+      issue: >-
+        Hardware evidence provenance and completeness gaps: (a) the archived 1000-cycle stress log
+        was produced by the pre-NBF-01-fix binary — its H7 failure text
+        (cvf107-hw-1000cycles.txt:43) is the old message without the 'not a substitute'
+        parenthetical that the current source emits (uvc_smoke.cpp:978-982; new text appears in
+        verifyB:43/verifyC:42) — so the release-defining 1000-cycle run was never repeated at the
+        final source revision (post-fix hardware confirmation is 10-cycle only: verifyA/B and
+        builtin-acer); (b) camera driver and firmware are recorded as 'unknown (best effort)' in
+        every evidence block (e.g. cvf107-hw-1000cycles.txt:92-93), so the contract's
+        driver/firmware record fields (CVF-107.yaml behavior 'Records ... camera
+        firmware/driver') are present but unfilled.
+      evidence: "cvf107-hw-1000cycles.txt:43,92-93; cvf107-hw-verifyB-stress-shortcycle-guard.txt:43; tests/hardware/uvc_smoke.cpp:978-982,1379-1386"
+      why_not_blocking: >-
+        (a) The NBF-01 fix delta is confined to run_orientation_case and comments
+        (CVF-107-review-fixes.yaml:23-53); the H4 stress loop and H5 timeout paths are untouched,
+        so the 1000-cycle/timeout evidence transfers to the final source, and verifyB re-verified
+        the fixed binary's stress guard on the same device; (b) the record structure exists and
+        honestly marks the values unknown; no false data was entered. Also noted: the CVF-107
+        review's artifact list cites 'cvf107-hw-10cycles.txt' (.ai/reviews/CVF-107.yaml:26) while
+        the archived file is cvf107-hw-smoke-10cycles.txt — cosmetic path drift.
+      required_fix: >-
+        At the next station session: repeat the 1000-cycle stress run at the final source with
+        CVF_HW_CAMERA_DRIVER / CVF_HW_CAMERA_FIRMWARE set, and state per-log binary/source
+        provenance in the hardware report.
+  note_pre_amendment_log: >-
+    The pre-amendment station run (32 passed / 1 failed / 3 skipped) still has no archived log —
+    CVF107-NBF-05, already deferred to the controller by CVF-107-review-fixes.yaml:12-14; not
+    re-raised as a new finding here.
+
+item_3_cvf107_h3_amendment:
+  status: PASS
+  conclusion: LEGITIMATE — real coverage was not removed
+  evidence:
+    - "Frozen design: production owns one worker for the backend's whole lifetime — src/camera/uvc_windows/uvc_backend.cpp:832-838 (constructor starts the single worker); open() after close() returns worker_unavailable ('the camera open worker is not running', uvc_backend.cpp:886-888); close() permanently joins the worker (uvc_backend.cpp:996-1000, worker_.stop_and_join()); there is no restart path."
+    - "Contract uvc_worker_lifecycle_v1 pins this: 'One application-created worker thread ... one balanced MFStartup/MFShutdown lifetime' and 'Close ... joins the worker' (.ai/project-contract.yaml:742,747)."
+    - "The pre-amendment H3 asserted that the SAME instance reopens after close() (removed lines in CVF-107-test-amendment.yaml:34-41) — behavior the frozen design forbids, i.e. an unpassable-by-design assertion, not coverage. In-session re-activation is reconnect()'s job (uvc_backend.cpp:946-989)."
+    - "The amended block (uvc_smoke.cpp:891-900) opens the same descriptor with a FRESH instance and captures from it — the meaningful invariant (descriptor stays usable) — and the closed-instance negative is still pinned separately: capture after double close() must fail camera_io (uvc_smoke.cpp:877-884; observed on hardware, e.g. cvf107-hw-1000cycles.txt:29-30 'the camera capture worker is not running')."
+    - "All surrounding H3 checks are preserved (open 831; three validated captures 840-870; frame ownership 872-875; held-pixels validity after close/destruction 1466-1473); no check was weakened or removed (CVF-107-test-amendment.yaml:59-64; reverse-hash scope proof :66-74)."
+    - "Post-amendment hardware evidence on two different devices: cvf107-hw-smoke-10cycles.txt:31-32 and cvf107-hw-builtin-acer-10cycles.txt:30-31."
+    - "The only residual: the open-after-close worker-unavailable failure mode itself is not asserted directly (only capture-after-close is); acceptable, since capture-after-close pins the joined-worker state."
+
+item_4_cvf108_version_agreement:
+  status: PASS_WITH_FINDINGS
+  conclusion: >-
+    1.1.0 genuinely agrees on every observable delivery surface I could find; the public C ABI is
+    version 1 with exactly five exports. No missed current-release reference found.
+  surfaces_verified:
+    - "CMakeLists.txt:4 — project(cvforwin VERSION 1.1.0); no other whole-token 1.0.0 in the file."
+    - "vcpkg.json:3 — version-string 1.1.0."
+    - ".github/workflows/windows.yml:76-77,83-84,125 — all five cvforwin names are 1.1.0 (artifact, ZIP path, symbols artifact, symbols ZIP path, consumer root)."
+    - "cmake/CvfPackage.cmake.in:9-10,77 — cvforwin-@PROJECT_VERSION@ and derived archive; cmake/CvfPackage.cmake:122 — cvforwin-${PROJECT_VERSION}-symbols.zip; cmake/CvfPackageVerify.cmake.in:17-18 — derived roots. No literal cvforwin-x.y.z in any packaging module."
+    - "docs/packaging.md:11,20-21,39,59; docs/development.md:243,611,613,618,625,688 — all 1.1.0; docs/hardware-uvc.md has no product-version claim."
+    - "LICENSES/README.md:3 — 'the cvforwin 1.1.0 release'."
+    - "CMakePresets.json — no product-version token (only the schema 'version': 6)."
+    - "ABI: include/cvforwin/cvf_api.h:77 '#define CVF_ABI_VERSION_V1 1u'; src/c_api/cvf_entry_points.cpp:378-385 returns CVF_ABI_VERSION_V1; src/core/abi_validation.cpp:112-114,138-140 rejects any other value; src/c_api/cvforwin.def lists exactly the five approved exports."
+    - "Windows CI at the candidate SHA (raw log): abi-check 'exactly 5 export(s)' in both jobs (.ai/reports/CVF-108-ci-tests.log:1843,3393); package-verify against cvforwin-1.1.0 (:1887-1890,3435-3438); clean consumer against the installed 1.1.0 package passed 15/15 (:1899-1913)."
+  remaining_1_0_0_classification:
+    - "LEGITIMATE HISTORY: .ai/archive/**, .ai/reports/**, .ai/reviews/**, .ai/test-briefs/**, .ai/changes/** (record-keeping of the 1.0.0 program and prior task states)."
+    - "LEGITIMATE OUT-OF-SCOPE SOURCE COMMENTS: src/algorithms/compiled_algorithms.h:4 and src/inspection/registry.h:13 ('Baseline 1.0.0' design-history comments; src/** is out of CVF-108 scope and they are not delivery metadata)."
+    - "TEST FIXTURES BY DESIGN: the 1.0.0 constants and synthetic stale inputs inside tests/unit/cvf108_release_metadata_test.cpp (e.g. :41,975,984-990,1265-1278) and tests/unit/test_cvf108_release_naming_developer.cpp:275-276 — they are the detection controls themselves."
+    - "GENUINE MISSES FOUND: none."
+  findings:
+    - id: B4A-05
+      severity: accepted_to_carry
+      owner: architect
+      issue: >-
+        CVF108-NBF-04 / brief OB-3 residual, routed here by the batch descriptor: the package
+        carries no version-bearing metadata artifact (no VERSION file, no VERSIONINFO resource), so
+        a consumer infers 1.1.0 only from the staged directory/archive name; OB-3's literal wording
+        ('the installed package reports its own version ... to a consumer that reads the package's
+        metadata') cannot be fully satisfied even on Windows.
+      evidence: "cmake/CvfPackage.cmake.in:56-77 (staged contents: bin/lib/include/docs/LICENSES/config only); .ai/reviews/CVF-108.yaml:198-212; .ai/changes/batch-4-release.yaml:23-24"
+      reason_acceptable_to_carry: >-
+        Name-derived identity is single-sourced from PROJECT_VERSION (CvfPackage.cmake.in:9), pinned
+        by both the independent suite (OB-1/OB-2 cases) and the developer naming test, and the
+        Windows CI consumer kit verified the installed cvforwin-1.1.0 package end to end at the
+        candidate SHA (CVF-108-ci-tests.log:1899-1913). The public API deliberately exposes ABI
+        version 1, not the product version. Adjudication for the final release verdict: carrying is
+        defensible; a staged version metadata file would be a small future enhancement requiring an
+        owner decision (architect/controller), not a defect in this delivery.
+
+item_5_cvf108_tests:
+  status: PASS_WITH_FINDINGS
+  independence_verdict: CLEAN
+  evidence_independence:
+    - "Author: test-engineer, sha256 03f07e57 (CVF-108-test-red.yaml:13-16)."
+    - "Developer never modified it: the implementation report records it under files_unchanged_but_verified with the same sha (CVF-108-implementation.yaml:78-81), and the verify report records developer_untouched=true (sha at verify start == manifest pin == developer-reported; CVF-108-test-verify.yaml:24-33)."
+    - "Every subsequent edit is by the test owner with pre/post hashes and integrity statements: verify-phase edge cases 03f07e57 -> ad62725c (CVF-108-test-verify.yaml:22-39,102-109), review-fix hardening ad62725c -> ea5f286d (CVF-108-test-hardening.yaml:41-50,119-130), CRLF fix ea5f286d -> 97077e20 (CVF-108-crlf-fix.yaml:32-40,129-141)."
+    - "Ownership manifest pins the final sha256 97077e20 (.ai/test-ownership.yaml:1069-1070), matching the CRLF-fix report; the candidate commit 04b3b3b's scope is exactly this corrected file (CVF-108-ci.yaml:22-27)."
+    - "Hash equality itself could not be recomputed (no shell); the chain is internally consistent across all five documents."
+  crlf_correction_strength: PRESERVED
+  evidence_crlf:
+    - "The anchored ABI-macro regex is unchanged (tests/unit/cvf108_release_metadata_test.cpp:561 vs CVF-108-crlf-fix.yaml:64-67); only line normalization was added (strip_line_ending :201-207; split_lines routes every line through it :209-223)."
+    - "OB-4 retains its teeth: REQUIRE(header.exists) :877, REQUIRE_FALSE(macros.empty()) :889, all macros == 1 :890-893, saw_v1 :894, all five entry-point names :896-899. The Windows CI failure at 7d3e3fe was exactly REQUIRE_FALSE(macros.empty()) firing — the assertion worked."
+    - "assertions removed/weakened/skipped: 0 (CVF-108-crlf-fix.yaml:129-141); cases 21 -> 22, assertions 121 -> 137; net additions only."
+  boundary_controls_verdict: REAL_DETECTION_CONTROLS_NOT_TAUTOLOGIES
+  evidence_controls:
+    - "Superset versions: contains_exact_version boundary logic rejects 1.1.0-something-else / 1.1.0.0 / 1.10.0 / 2.0.0 / 1.1 / 11.1.0 / 01.1.0 / 1.0.0 (cvf108_release_metadata_test.cpp:963-976); find_cvforwin_versions captures four-part supersets whole (:287-301,1193-1204). These matchers run against the REAL files in the OB cases (:660,727), so a plain substring matcher would fail."
+    - "Partially applied bump: the same real detectors are fed synthetic one-file-stale sets and must name exactly the unsynchronized file, including 1.1.0-beta and 1.1.0.0 supersets (:1206-1288)."
+    - "Historical mention: hardened unit-scoped heuristic with two-directional controls — genuine changelog entries exempt, adjacent/same-line/table-row stale current mentions reported (:978-1036)."
+    - "Missing file: load(absent).exists == false and missing_required_files reports exactly the absent entry (:1163-1191); every real-file case guards with REQUIRE(file.exists)."
+    - "Export-set mutation: four/six/replaced-symbol synthetic .def texts rejected while the five-name approved set matches (:1038-1058,1290-1331) — the same parser used on the real .def at :905-916."
+    - "CRLF: the control fails if normalization is removed (split_lines(crlf) == split_lines(lf), crlf_macros non-empty and equal to lf, :1125-1139) and reproduces the pre-fix naive symptom (:1119-1122)."
+    - "Developer suite reads the real files via CVF108_REPO_ROOT and pins derivation strings, hardcode absence, CI names, and the five-export set (test_cvf108_release_naming_developer.cpp:204-270); its red-green hardcode mutation is documented in CVF-108-implementation.yaml:151-156."
+    - "Author-phase RED on the real tree is the permanent independence anchor: 8 failed assertions in 6 of 16 cases, exit 42, each naming the real stale values (CVF-108-test-red.yaml:49-89)."
+  findings:
+    - id: B4A-06
+      severity: accepted_to_carry
+      owner: developer
+      issue: >-
+        The developer red-green proof (temporarily hardcoding cvforwin-1.0.0 into
+        cmake/CvfPackage.cmake.in to make the naming test fail) is developer-attested only and was
+        explicitly NOT reproduced by the test owner, who lacks permission to edit a production
+        packaging module (CVF-108-test-verify.yaml:267-274, NOT_REPRODUCED_BY_TEST_OWNER).
+      evidence: "CVF-108-implementation.yaml:151-156; CVF-108-test-verify.yaml:267-274; tests/unit/test_cvf108_release_naming_developer.cpp:221-235"
+      reason_acceptable_to_carry: >-
+        The permanent RED against the real tree is independently recorded (exit 42 with the real
+        stale values), the failure mechanism is directly verifiable from the test source
+        (hardcoded_release_names matches the literal, :107-115), and the final state is green in
+        hosted CI at the candidate SHA. No action required; recorded so the final verdict does not
+        mistake this for independently reproduced mutation evidence.
+  note_developer_test_coverage_gap: >-
+    Minor, covered elsewhere: the developer test's hardcoded_release_names captures only
+    three-part versions (test_cvf108_release_naming_developer.cpp:109), so a hypothetical
+    'cvforwin-1.1.0.0-package' name would satisfy its CI-name equality check; the independent
+    suite's four-part capture covers that case against the same real workflow file
+    (cvf108_release_metadata_test.cpp:291,734-763), and the developer test's own boundary case
+    (:272-283) covers the literal-vs-macro distinction. No action required for this release.
+
+item_6_cross_task_cmakelists:
+  status: PASS
+  conclusion: >-
+    The combined result of both members' CMakeLists.txt edits preserves the hardware gating
+    invariants and correctly registers the new portable test targets; no test target is gated
+    behind the hardware or Windows switches.
+  evidence:
+    - "Hardware block is intact and fully outside the tests block: if(CVFORWIN_BUILD_TESTS) ends at CMakeLists.txt:1782; the hardware block (1795-1822) contains only the gated executable, its includes/links, the MSVC define, and properties — no add_test/discover/install."
+    - "cvf107_hardware_wiring_developer_tests (CMakeLists.txt:1701-1720) is registered inside if(CVFORWIN_BUILD_TESTS) only — no WIN32, no hardware, no test-backend gate — with catch_discover_tests at 1720; it passes on Linux (CVF-107-quality.json ctest output, tests 450-453) and in both Windows CI jobs."
+    - "cvf108_release_metadata_tests (1730-1749) and cvf108_release_naming_developer_tests (1761-1780) are likewise registered unconditionally within if(CVFORWIN_BUILD_TESTS) — Catch2-only links, CVF108_REPO_ROOT definition, catch_discover_tests — with no platform or backend gate."
+    - "Only the pre-existing, deliberately gated targets remain platform-gated (cvf101/102/103_windows_uvc_tests under WIN32 AND CVFORWIN_BUILD_TESTS AND CVFORWIN_BUILD_TEST_BACKENDS, 1057/1095/1273); the three new targets added by this batch carry no such gate."
+    - "Count arithmetic corroborates the combined registry: CVF-107 CI at 0e07e21 ran 336 (release) / 501 (tests) — CVF-107-ci-tests.log:1373,3304; the candidate 04b3b3b ran 363 / 528 — CVF-108-ci-tests.log:3373,1822; the delta of exactly 27 in both jobs equals the CVF-108 registrations (22 independent cases + 5 developer cases), so nothing was dropped or accidentally gated by either member's edits."
+    - "Project version 1.1.0 (CMakeLists.txt:4) and the hardware MSVC define (1805-1810) coexist without interaction; the wiring test's mutation set proves the hardware invariants still fail loudly when violated (CVF-107-build-wiring-test.yaml:83-125)."
+
+claims_not_verifiable_from_recorded_evidence:
+  - "All sha256 pins (independent test chain 03f07e57 -> ad62725c -> ea5f286d -> 97077e20, hardware evidence logs, CI log hashes, manifest entries): no shell available; the chains are internally consistent across every report read, but recomputation belongs to the deterministic quality gate."
+  - "Whether CVF_HW_ORIENTATION_SYMMETRIC_CONTROL was actually set during the verifyC run (see B4A-03): the log neither confirms nor denies it; the failure message is static."
+  - "The exact source revision behind each hardware log beyond what message-text analysis reveals: the 1000-cycle, smoke-10, and reconnect logs demonstrably predate the NBF-01 fix (old H7 message text), verifyA/B/C postdate it, and the builtin-acer/selector-failclosed runs are dated by the report narrative only (see B4A-04)."
+  - "The pre-amendment station run (32/1/3, H3 same-instance failure): no archived log exists (CVF107-NBF-05, already deferred to the controller)."
+  - "The station OS identity behind 'Windows 10.0 build 26200' (the report interprets this as Windows 11 Pro for Workstations): plausible for that build number, but not independently verifiable from the logs."
+  - "Live GitHub Actions conclusions for runs 35444804914 / 35434008928 (the run URLs' success conclusions are report-claimed); the archived raw logs I read do independently show both jobs green with the cited test counts and the 1.1.0 artifact uploads (CVF-108-ci-tests.log:1822,3373,3511-3513; CVF-107-ci-tests.log:1373,3304)."
+
+blocking_findings: 0
+non_blocking_findings: [B4A-01, B4A-02, B4A-03, B4A-04]
+carried_findings: [B4A-05, B4A-06]
+no_verdict_issued: true

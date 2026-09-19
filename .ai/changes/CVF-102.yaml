@@ -1,0 +1,96 @@
+schema_version: 1
+change_id: CVF-102
+program: cvforwin-hardening-1.1.0
+title: "UVC MTA worker thread and COM/Media Foundation lifetime isolation"
+risk: R2
+risk_justification: >-
+  Restructures the internal threading model of one Windows-only module. The public ABI and the
+  synchronous ICameraBackend contract are unchanged; host COM obligations are removed.
+intent: >-
+  Make the UVC backend independent of the host thread apartment: one DLL-owned worker thread
+  initializes COM as MTA and balances MFStartup/MFShutdown, while enumerate/open/capture/
+  reconnect/close remain synchronous from the caller's perspective, bounded by the caller deadline.
+scope:
+  allowed_files:
+    production:
+      - src/camera/uvc_windows/**
+    developer_tests:
+      - tests/unit/** (files not matching cvf1*_* independent names)
+    windows_component_tests:
+      - tests/windows/uvc/**
+    build:
+      - CMakeLists.txt
+    evidence_harness:
+      - .ai/validation/**
+  out_of_scope:
+    - include/cvforwin/**
+    - src/c_api/**
+    - src/camera/camera_backend.*
+    - src/runtime/**
+    - docs/**
+    - .ai/project-contract.yaml
+interface_v1:
+  authority_note: >-
+    ICameraBackend signatures and error mapping stay identical; only the thread that performs
+    Media Foundation work changes.
+  frozen_test_seam:
+    header: src/camera/uvc_windows/uvc_backend.h
+    note: >-
+      UvcCameraBackend gains a Windows-only internal observability accessor. It is not part of
+      ICameraBackend or the public C ABI, and it changes no existing signature.
+    declaration: |
+      namespace cvforwin::camera {
+
+      struct UvcWorkerSnapshot {
+          std::uint64_t com_init_count = 0;      /* CoInitializeEx(MTA) successes */
+          std::uint64_t com_uninit_count = 0;    /* balanced CoUninitialize calls */
+          std::uint64_t mf_startup_count = 0;    /* MFStartup successes */
+          std::uint64_t mf_shutdown_count = 0;   /* balanced MFShutdown calls */
+          std::uint64_t commands_marshalled = 0; /* commands executed on the worker */
+          std::uint32_t worker_thread_id = 0;    /* thread that owns MF objects */
+          std::uint32_t last_caller_thread_id = 0;
+          bool worker_running = false;
+      };
+
+      class UvcCameraBackend final : public ICameraBackend {
+      public:
+          /* ... existing declarations unchanged ... */
+
+          /* Windows-only internal diagnostics; never exposed through the C ABI. */
+          UvcWorkerSnapshot worker_snapshot() const noexcept;
+      };
+
+      }  // namespace cvforwin::camera
+  behavior:
+    - "Worker lifecycle: thread start -> CoInitializeEx(nullptr, COINIT_MULTITHREADED) -> MFStartup(MF_VERSION, MFSTARTUP_LITE) -> command loop -> MFShutdown -> CoUninitialize -> join."
+    - "Commands (enumerate/open/capture/reconnect/close) are marshalled to the worker and completed synchronously; each wait is bounded by the caller's absolute deadline."
+    - "All backend-held IMFActivate/IMFMediaSource/IMFSourceReader and media-buffer access occur on the worker; owned BGR8 frames cross back by value."
+    - "Host COM state is never consulted or required; calling from a thread with no COM init and from an STA thread both work."
+    - "MFStartup/MFShutdown are never called from a Media Foundation work-queue callback thread."
+    - "One balanced startup/shutdown per backend lifetime; if startup fails, the backend reports camera_io and no worker leak remains."
+    - "close() is idempotent, drains the worker, and joins it; destructor never blocks indefinitely."
+invariants:
+  - "No host CoInitializeEx requirement is documented or required."
+  - "No Media Foundation interface pointer escapes the worker."
+  - "Teardown order is reader/source/callback before MFShutdown before CoUninitialize."
+  - "Portable builds are unaffected."
+verification:
+  portable_wsl:
+    - "cmake --preset wsl-gcc-debug && cmake --build --preset wsl-gcc-debug --parallel"
+    - "ctest --preset wsl-gcc-debug --output-on-failure"
+    - "cmake --build --preset wsl-gcc-debug --target format-check"
+    - "cmake --preset wsl-clang-analysis && cmake --build --preset wsl-clang-analysis --target static-analysis --parallel"
+  windows:
+    - "windows_uvc_component suite proves worker ownership and host-apartment independence without hardware."
+    - "The component test target is cvf102_windows_uvc_tests under tests/windows/uvc/, registered with add_test only under WIN32 + CVFORWIN_BUILD_TESTS + CVFORWIN_BUILD_TEST_BACKENDS so windows-tests-quality runs it; never in the release preset or hosted no-camera jobs."
+  deferred:
+    - "Real-device multi-thread host behavior is confirmed on the designated station (CVF-107)."
+acceptance_reference: >-
+  Contract FR-020, NFR-016, uvc_worker_lifecycle_v1, and the host-COM-independence acceptance check.
+rollback: "Revert the worker/COM lifetime restructuring in src/camera/uvc_windows/uvc_backend.cpp."
+reporting:
+  developer_report: .ai/reports/CVF-102-implementation.yaml
+  test_red_report: .ai/reports/CVF-102-test-red.yaml
+  test_verify_report: .ai/reports/CVF-102-test-verify.yaml
+  review_report: .ai/reviews/CVF-102.yaml
+  quality_report: .ai/reports/CVF-102-quality.yaml

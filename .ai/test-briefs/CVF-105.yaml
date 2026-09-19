@@ -1,0 +1,64 @@
+schema_version: 1
+change_id: CVF-105
+program: cvforwin-hardening-1.1.0
+target: "VID/PID canonicalization, ABI pointer-length pairs, atomic warnings, single final JSON bound"
+in_scope:
+  - Configuration VID/PID mixed-case acceptance and lowercase canonicalization.
+  - C ABI NULL/non-NULL with zero/nonzero length and capacity pairs.
+  - Concurrent diagnostics warning accumulation/observation.
+  - Final output JSON size enforcement and NUL fit in the fixed result buffer.
+out_of_scope:
+  - Pixel conversion, COM lifetime, callback generations, template matching, retention/artifact worker internals.
+constraints:
+  - "Deterministic and hardware-free."
+  - "Public header is unchanged; tests compile against the frozen header."
+  - "Tests must not read production .cpp files."
+  - "Frozen seams from the change contract: (a) src/recipes/config.h - core::Result<std::string> canonicalize_hex4(std::string_view), returning four lowercase hex digits or config_value_invalid; (b) src/runtime/context.h - k_max_result_payload_bytes = 65535, core::Result<std::string> serialize_result_payload(const nlohmann::json&), and InspectionOutcome::output_text (the canonical pre-serialized payload); (c) Diagnostics::warnings()/clear_warnings() keep their signatures with atomic backing."
+interface_reference:
+  - "include/cvforwin/cvf_api.h structures and constants (unchanged)"
+  - "cvforwin::runtime::{Context, InspectionOutcome (output_text), serialize_result_payload, k_max_result_payload_bytes, TimeoutMs}"
+  - "cvforwin::recipes::canonicalize_hex4 and the config parsing entry points exposed by frozen headers"
+  - "cvforwin::diagnostics::Diagnostics"
+  - "cvforwin::core::{Status, Verdict, ErrorCode, WarningFlags}"
+observable_behaviors:
+  - id: B1
+    behavior: "vendor_id/product_id accept lower and upper hex and are observable as lowercase canonical four-hex values; invalid hex or wrong length is rejected."
+  - id: B2
+    behavior: "A selector using uppercase config values resolves against lowercase enumeration; device_path/friendly_name remain exact."
+  - id: B3
+    behavior: "input_json NULL+0 -> absent; NULL+nonzero -> INVALID_ARGUMENT before side effects; non-NULL+0 -> absent; non-NULL+positive -> parsed."
+  - id: B4
+    behavior: "The same four combinations hold for recipe_id/request_id/root text buffers and for result output_json/image_path/error_message capacities."
+  - id: B5
+    behavior: "Concurrent log/warning writers and warning readers produce no data race and never lose a warning bit (sanitizer clean)."
+  - id: B6
+    behavior: "A result whose complete serialized object is exactly at the allowed payload bound succeeds and the buffer is NUL-terminated; one unit over fails deterministically with buffer_too_small before the copy."
+  - id: B7
+    behavior: "The C API copies a pre-serialized string; the emitted JSON equals the internal object exactly (no truncation, no reordering surprise)."
+boundary_cases:
+  - "Payload sizes: bound-1, bound, bound+1."
+  - "Empty measurements object; measurements plus defects."
+  - "input_json valid object with whitespace; invalid JSON; non-object JSON."
+negative_cases:
+  - "NULL pointer with positive length must never be treated as a valid empty value for required fields."
+  - "Unknown warning bits are not invented; only documented bits are set."
+acceptance_criteria:
+  - "Portable debug+asan, format, static analysis, and abi-check pass; test evidence recorded."
+allowed_context:
+  - .ai/project-contract.yaml
+  - .ai/changes/CVF-105.yaml
+  - .ai/test-briefs/CVF-105.yaml
+  - tests/unit/**
+  - tests/abi/** (only if an independent ABI case is added; existing pinned files untouched)
+  - "frozen headers (may #include, must not open .cpp files): include/cvforwin/cvf_api.h, src/recipes/**, src/diagnostics/**, src/runtime/context.h, src/core/**"
+forbidden_context:
+  - "any src/** .cpp implementation file"
+  - .ai/changes/** (other than CVF-105.yaml), .ai/reports/**, .ai/reviews/**
+  - "any diff, changed-file list, developer note, or root-cause description"
+allowed_test_paths:
+  - tests/unit/**
+  - tests/abi/**
+ownership_manifest: .ai/test-ownership.yaml
+evidence:
+  red_report: .ai/reports/CVF-105-test-red.yaml
+  verify_report: .ai/reports/CVF-105-test-verify.yaml
